@@ -9,6 +9,7 @@ import { errorHandler } from "./lib/errors";
 import { authRouter } from "./modules/auth/auth.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
+import { ensurePlatformOwner } from "./services/bootstrap";
 
 const app = express();
 
@@ -37,6 +38,8 @@ app.use("/api", staffRouter);
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не найден" }));
 app.use(errorHandler);
+
+ensurePlatformOwner().catch((err) => console.error("Не удалось создать собственника платформы:", err));
 
 const server = app.listen(env.port, () => {
   console.log(`RepairShop API слушает порт ${env.port}`);

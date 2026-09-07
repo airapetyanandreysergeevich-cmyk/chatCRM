@@ -33,7 +33,16 @@ else
   chmod 600 "$ENV_FILE"
 fi
 
+if [ ! -d backend/prisma/migrations ] || [ -z "$(ls -A backend/prisma/migrations 2>/dev/null)" ]; then
+  echo ">>> Миграций ещё нет — создаю"
+  bash deploy/db-init-migrations.sh
+fi
+
 echo ">>> Собираю и поднимаю контейнеры..."
 docker compose --env-file "$ENV_FILE" up -d --build
 
-echo ">>> Готово. Дальше: bash deploy/setup-https.sh ваш-домен.ру"
+echo
+echo ">>> Готово."
+echo "    Проверка:  curl -s http://localhost/api/health"
+echo "    HTTPS:     bash deploy/setup-https.sh ваш-домен.ру"
+echo "    Логи:      docker compose --env-file deploy/.env logs -f backend"
