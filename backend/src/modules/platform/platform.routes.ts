@@ -1,0 +1,312 @@
+import type { Prisma } from "@prisma/client";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { z } from "zod";
+import { clientIp } from "../../lib/audit";
+import { prisma, withPlatform } from "../../lib/db";
+import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
+import { signAccessToken, type PlatformTokenPayload } from "../../lib/jwt";
+import { hashPassword } from "../../lib/password";
+import { authenticate } from "../../middleware/auth";
+import { createTenant } from "../../services/tenant";
+
+export const platformRouter = Router();
+
+function platformAuth(req: Request): PlatformTokenPayload {
+  if (req.auth?.kind !== "platform") throw forbidden("Раздел доступен только платформе");
+  return req.auth;
+}
+
+function requirePlatform(req: Request, _res: Response, next: NextFunction) {
+  try {
+    platformAuth(req);
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Администратор платформы не может заводить других администраторов и менять тарифы. */
+function requireOwner(req: Request, _res: Response, next: NextFunction) {
+  try {
+    if (platformAuth(req).role !== "OWNER") throw forbidden("Действие доступно только собственнику");
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function logPlatform(
+  req: Request,
+  action: string,
+  tenantId: string | null,
+  meta?: Record<string, unknown>
+) {
+  await prisma.platformAuditLog.create({
+    data: {
+      platformUserId: req.auth?.kind === "platform" ? req.auth.platformUserId : null,
+      tenantId,
+      action,
+      meta: meta as Prisma.InputJsonValue | undefined,
+      ip: clientIp(req),
+    },
+  });
+}
+
+platformRouter.use(authenticate, requirePlatform);
+
+// ---------- мастерские ----------
+
+platformRouter.get(
+  "/tenants",
+  ah(async (_req, res) => {
+    const tenants = await prisma.tenant.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+    // Счётчики читаются в режиме платформы — единственное место, где это оправдано.
+    const stats = await withPlatform(async (tx) => {
+      const users = await tx.user.groupBy({ by: ["tenantId"], _count: { _all: true }, where: { deletedAt: null } });
+      const orders = await tx.order.groupBy({ by: ["tenantId"], _count: { _all: true }, where: { deletedAt: null } });
+      return { users, orders };
+    });
+    const userBy = new Map(stats.users.map((s) => [s.tenantId, s._count._all]));
+    const orderBy = new Map(stats.orders.map((s) => [s.tenantId, s._count._all]));
+
+    res.json(
+      tenants.map((t) => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        status: t.status,
+        plan: t.plan,
+        maxUsers: t.maxUsers,
+        timezone: t.timezone,
+        contactName: t.contactName,
+        contactPhone: t.contactPhone,
+        contactEmail: t.contactEmail,
+        createdAt: t.createdAt,
+        userCount: userBy.get(t.id) ?? 0,
+        orderCount: orderBy.get(t.id) ?? 0,
+      }))
+    );
+  })
+);
+
+const slugSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, "Минимум 3 символа")
+  .max(30, "Максимум 30 символов")
+  .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, "Только латиница, цифры и дефис");
+
+const createTenantSchema = z.object({
+  name: z.string().trim().min(2, "Укажите название мастерской"),
+  slug: slugSchema,
+  ownerLogin: z.string().trim().min(3, "Логин от 3 символов"),
+  ownerPassword: z.string().min(8, "Пароль от 8 символов"),
+  ownerFullName: z.string().trim().min(2, "Укажите имя владельца"),
+  ownerEmail: z.string().email("Неверный email").optional().or(z.literal("")),
+  timezone: z.string().optional(),
+  contactPhone: z.string().trim().optional(),
+});
+
+platformRouter.post(
+  "/tenants",
+  ah(async (req, res) => {
+    const body = createTenantSchema.parse(req.body);
+    const existing = await prisma.tenant.findUnique({ where: { slug: body.slug } });
+    if (existing) throw conflict("Мастерская с таким кодом уже есть");
+
+    const tenant = await createTenant({
+      name: body.name,
+      slug: body.slug,
+      ownerLogin: body.ownerLogin,
+      ownerPassword: body.ownerPassword,
+      ownerFullName: body.ownerFullName,
+      ownerEmail: body.ownerEmail || undefined,
+      timezone: body.timezone,
+    });
+
+    if (body.contactPhone) {
+      await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: { contactPhone: body.contactPhone, contactName: body.ownerFullName, contactEmail: body.ownerEmail || null },
+      });
+    }
+
+    await logPlatform(req, "TENANT_CREATE", tenant.id, { name: tenant.name, slug: tenant.slug });
+    res.status(201).json({ id: tenant.id, name: tenant.name, slug: tenant.slug });
+  })
+);
+
+platformRouter.get(
+  "/tenants/:id",
+  ah(async (req, res) => {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant || tenant.deletedAt) throw notFound("Мастерская не найдена");
+    const impersonations = await prisma.impersonation.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: { startedAt: "desc" },
+      take: 20,
+      include: { platformUser: { select: { fullName: true, email: true } } },
+    });
+    res.json({ tenant, impersonations });
+  })
+);
+
+const updateTenantSchema = z.object({
+  name: z.string().trim().min(2).optional(),
+  status: z.enum(["ACTIVE", "READONLY", "SUSPENDED"]).optional(),
+  maxUsers: z.number().int().min(1).max(500).optional(),
+  timezone: z.string().optional(),
+  contactName: z.string().trim().optional(),
+  contactPhone: z.string().trim().optional(),
+  contactEmail: z.string().email().optional().or(z.literal("")),
+  plan: z.string().optional(),
+});
+
+platformRouter.patch(
+  "/tenants/:id",
+  ah(async (req, res) => {
+    const auth = platformAuth(req);
+    const body = updateTenantSchema.parse(req.body);
+    if (body.plan !== undefined && auth.role !== "OWNER") throw forbidden("Тариф меняет только собственник");
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant || tenant.deletedAt) throw notFound("Мастерская не найдена");
+
+    const updated = await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { ...body, contactEmail: body.contactEmail === "" ? null : body.contactEmail },
+    });
+    await logPlatform(req, "TENANT_UPDATE", tenant.id, body);
+    res.json(updated);
+  })
+);
+
+// ---------- вход в мастерскую под ролью владельца ----------
+
+platformRouter.post(
+  "/tenants/:id/impersonate",
+  ah(async (req, res) => {
+    const auth = platformAuth(req);
+    const reason = z.object({ reason: z.string().trim().min(5, "Опишите причину входа") }).parse(req.body).reason;
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant || tenant.deletedAt) throw notFound("Мастерская не найдена");
+
+    const impersonation = await prisma.impersonation.create({
+      data: { platformUserId: auth.platformUserId, tenantId: tenant.id, reason, ip: clientIp(req) },
+    });
+    await logPlatform(req, "IMPERSONATE_START", tenant.id, { reason });
+
+    // Отдельный токен: сессия в мастерской ограничена сроком жизни access-токена,
+    // продлить её можно только новым явным входом.
+    const payload: PlatformTokenPayload = {
+      kind: "platform",
+      platformUserId: auth.platformUserId,
+      role: auth.role,
+      impersonatingTenantId: tenant.id,
+      impersonationId: impersonation.id,
+    };
+    res.json({
+      accessToken: signAccessToken(payload),
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+    });
+  })
+);
+
+platformRouter.post(
+  "/impersonate/stop",
+  ah(async (req, res) => {
+    const auth = platformAuth(req);
+    if (!auth.impersonationId) throw badRequest("Сейчас нет активного входа в мастерскую");
+    await prisma.impersonation.updateMany({
+      where: { id: auth.impersonationId, endedAt: null },
+      data: { endedAt: new Date() },
+    });
+    await logPlatform(req, "IMPERSONATE_STOP", auth.impersonatingTenantId ?? null);
+    const payload: PlatformTokenPayload = {
+      kind: "platform",
+      platformUserId: auth.platformUserId,
+      role: auth.role,
+    };
+    res.json({ accessToken: signAccessToken(payload) });
+  })
+);
+
+// ---------- администраторы платформы ----------
+
+platformRouter.get(
+  "/admins",
+  requireOwner,
+  ah(async (_req, res) => {
+    const admins = await prisma.platformUser.findMany({
+      orderBy: { createdAt: "asc" },
+      select: { id: true, email: true, fullName: true, role: true, isActive: true, lastLoginAt: true },
+    });
+    res.json(admins);
+  })
+);
+
+const createAdminSchema = z.object({
+  email: z.string().email("Неверный email"),
+  fullName: z.string().trim().min(2, "Укажите имя"),
+  password: z.string().min(10, "Пароль от 10 символов"),
+});
+
+platformRouter.post(
+  "/admins",
+  requireOwner,
+  ah(async (req, res) => {
+    const body = createAdminSchema.parse(req.body);
+    const email = body.email.toLowerCase().trim();
+    if (await prisma.platformUser.findUnique({ where: { email } })) throw conflict("Такой email уже занят");
+
+    const admin = await prisma.platformUser.create({
+      data: { email, fullName: body.fullName, passwordHash: await hashPassword(body.password), role: "ADMIN" },
+      select: { id: true, email: true, fullName: true, role: true },
+    });
+    await logPlatform(req, "ADMIN_CREATE", null, { email });
+    res.status(201).json(admin);
+  })
+);
+
+platformRouter.patch(
+  "/admins/:id",
+  requireOwner,
+  ah(async (req, res) => {
+    const auth = platformAuth(req);
+    if (req.params.id === auth.platformUserId) throw badRequest("Нельзя менять собственную учётную запись отсюда");
+    const body = z.object({ isActive: z.boolean().optional(), fullName: z.string().trim().min(2).optional() }).parse(req.body);
+
+    const target = await prisma.platformUser.findUnique({ where: { id: req.params.id } });
+    if (!target) throw notFound("Учётная запись не найдена");
+    if (target.role === "OWNER") throw forbidden("Учётную запись собственника менять нельзя");
+
+    const updated = await prisma.platformUser.update({
+      where: { id: target.id },
+      data: body,
+      select: { id: true, email: true, fullName: true, role: true, isActive: true },
+    });
+    if (body.isActive === false) {
+      await prisma.session.updateMany({ where: { platformUserId: target.id, revokedAt: null }, data: { revokedAt: new Date() } });
+    }
+    await logPlatform(req, "ADMIN_UPDATE", null, body);
+    res.json(updated);
+  })
+);
+
+platformRouter.get(
+  "/audit",
+  ah(async (req, res) => {
+    const take = Math.min(Number(req.query.limit ?? 100), 500);
+    const logs = await prisma.platformAuditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take,
+      include: { platformUser: { select: { fullName: true, email: true } } },
+    });
+    res.json(logs);
+  })
+);

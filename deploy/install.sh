@@ -13,6 +13,7 @@ else
   set_var() { sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"; }
 
   set_var POSTGRES_PASSWORD "$(gen)"
+  set_var APP_DB_PASSWORD "$(gen)"
   set_var JWT_ACCESS_SECRET "$(gen)"
   set_var JWT_REFRESH_SECRET "$(gen)"
   set_var MINIO_ROOT_PASSWORD "$(gen)"

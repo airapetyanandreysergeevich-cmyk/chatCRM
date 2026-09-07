@@ -1,29 +1,47 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
+import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
+import { Card, SectionLabel } from "./components/ui";
+import { useAuth } from "./lib/auth";
+import Login from "./pages/Login";
+import Staff from "./pages/Staff";
+import Tenants from "./pages/platform/Tenants";
 
-function Placeholder({ title }: { title: string }) {
+function Soon({ title }: { title: string }) {
   return (
-    <div className="min-h-full bg-canvas p-6">
-      <div className="mx-auto max-w-3xl rounded-panel bg-surface p-6 shadow-card">
-        <p className="text-xs font-extrabold uppercase tracking-[0.13em] text-ink-label">RepairShop</p>
-        <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{title}</h1>
-        <p className="mt-3 text-ink-muted">Экран ещё не собран — каркас проекта.</p>
-      </div>
-    </div>
+    <Card>
+      <SectionLabel>Скоро</SectionLabel>
+      <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{title}</h1>
+      <p className="mt-2 text-ink-muted">Этот раздел ещё не собран.</p>
+    </Card>
   );
 }
 
+/** Куда попадает пользователь после входа — зависит от того, кто он. */
+function Home() {
+  const { me } = useAuth();
+  if (me?.kind === "platform" && !me.impersonating) return <Navigate to="/platform/tenants" replace />;
+  return <Soon title="Сводка" />;
+}
+
 export default function App() {
+  const { status } = useAuth();
+
   return (
     <Routes>
-      <Route path="/login" element={<Placeholder title="Вход" />} />
-      <Route path="/" element={<Placeholder title="Сводка" />} />
-      <Route path="/orders" element={<Placeholder title="Заказы" />} />
-      <Route path="/orders/new" element={<Placeholder title="Приём техники" />} />
-      <Route path="/orders/:id" element={<Placeholder title="Карточка заказа" />} />
-      <Route path="/master" element={<Placeholder title="Мои ремонты" />} />
-      <Route path="/purchases" element={<Placeholder title="Заявки на закупку" />} />
-      <Route path="/staff" element={<Placeholder title="Сотрудники" />} />
-      <Route path="*" element={<Placeholder title="Страница не найдена" />} />
+      <Route path="/login" element={status === "ready" ? <Navigate to="/" replace /> : <Login />} />
+
+      <Route element={<ProtectedRoute />}>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/orders" element={<Soon title="Заказы" />} />
+          <Route path="/staff" element={<Staff />} />
+          <Route path="/platform/tenants" element={<Tenants />} />
+          <Route path="/platform/admins" element={<Soon title="Администраторы платформы" />} />
+          <Route path="/platform/audit" element={<Soon title="Журнал платформы" />} />
+          <Route path="*" element={<Soon title="Страница не найдена" />} />
+        </Route>
+      </Route>
     </Routes>
   );
 }

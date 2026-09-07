@@ -23,4 +23,4 @@ COPY --from=build /app/prisma ./prisma
 COPY package.json ./
 EXPOSE 4000
 # Версионные миграции, без db push и без --accept-data-loss.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "DATABASE_URL=\"${MIGRATE_DATABASE_URL:-$DATABASE_URL}\" npx prisma migrate deploy && node dist/index.js"]

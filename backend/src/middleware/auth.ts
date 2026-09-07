@@ -48,3 +48,8 @@ export function requireTenant(req: Request, res: Response, next: NextFunction) {
   if (!currentTenantId(req)) return res.status(403).json({ error: "Нет привязки к мастерской" });
   next();
 }
+
+/** id сотрудника-инициатора для аудита. У платформы в режиме «войти как» его нет — пишем null. */
+export function actorUserId(req: Request): string | null {
+  return req.auth?.kind === "tenant" ? req.auth.userId : null;
+}

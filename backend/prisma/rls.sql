@@ -4,14 +4,16 @@
 --   SELECT set_config('app.tenant_id', '<uuid>', true);
 -- и политики ниже отсекают чужие строки на уровне PostgreSQL.
 
--- Роль приложения НЕ должна быть владельцем таблиц и не должна иметь BYPASSRLS.
--- Создайте отдельную роль для бэкенда:
---   CREATE ROLE repairshop_app LOGIN PASSWORD '...';
---   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO repairshop_app;
---   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO repairshop_app;
+-- ВАЖНО. Роль приложения не должна быть суперпользователем и не должна владеть таблицами:
+-- суперпользователь игнорирует RLS всегда, даже при FORCE, и изоляция перестаёт работать.
+-- Роль создаёт deploy/postgres/01-app-role.sh при первом запуске базы.
 
 CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS uuid AS $$
   SELECT NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION platform_mode() RETURNS boolean AS $$
+  SELECT coalesce(current_setting('app.platform', true), '') = 'on';
 $$ LANGUAGE sql STABLE;
 
 DO $$
@@ -30,8 +32,12 @@ BEGIN
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
+    -- Вторая ветка — режим платформы: нужен собственнику для сводных цифр по всем мастерским.
+    -- Включается только внутри withPlatform(), где set_config действует в пределах транзакции.
     EXECUTE format(
-      'CREATE POLICY tenant_isolation ON %I USING ("tenantId" = current_tenant_id()) WITH CHECK ("tenantId" = current_tenant_id())',
+      'CREATE POLICY tenant_isolation ON %I '
+      'USING ("tenantId" = current_tenant_id() OR platform_mode()) '
+      'WITH CHECK ("tenantId" = current_tenant_id() OR platform_mode())',
       t
     );
   END LOOP;

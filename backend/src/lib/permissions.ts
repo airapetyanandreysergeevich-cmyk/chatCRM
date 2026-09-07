@@ -118,3 +118,73 @@ export const ALL_PERMISSIONS: Permission[] = Object.values(P);
 export const MASTER_HIDDEN_ORDER_FIELDS = [
   "totalWork", "totalParts", "discount", "total", "prepayment", "estimatedCost",
 ] as const;
+
+/** Группировка прав для экрана настройки ролей. */
+export const PERMISSION_GROUPS: Array<{ group: string; items: Array<{ code: Permission; label: string; hint?: string }> }> = [
+  {
+    group: "Заказы",
+    items: [
+      { code: P.ORDERS_VIEW_ALL, label: "Видит все заказы мастерской" },
+      { code: P.ORDERS_VIEW_ASSIGNED, label: "Видит только назначенные ему заказы", hint: "Урезанная карточка: без контактов клиента и без цен" },
+      { code: P.ORDERS_VIEW_DELIVERY, label: "Видит заказы на доставку" },
+      { code: P.ORDERS_CREATE, label: "Принимает технику, создаёт заказы" },
+      { code: P.ORDERS_EDIT, label: "Редактирует заказы" },
+      { code: P.ORDERS_STATUS, label: "Меняет статус любого заказа" },
+      { code: P.ORDERS_STATUS_OWN, label: "Меняет статус своих заказов" },
+      { code: P.ORDERS_ISSUE, label: "Выдаёт технику клиенту" },
+      { code: P.ORDERS_DELETE, label: "Отменяет заказы" },
+      { code: P.ORDERS_CUSTOMER_CONTACTS, label: "Видит контакты клиента" },
+      { code: P.ORDERS_COST, label: "Видит себестоимость и маржу" },
+    ],
+  },
+  {
+    group: "Клиенты",
+    items: [
+      { code: P.CUSTOMERS_VIEW, label: "Видит карточки клиентов" },
+      { code: P.CUSTOMERS_EDIT, label: "Заводит и правит клиентов" },
+    ],
+  },
+  {
+    group: "Склад",
+    items: [
+      { code: P.STOCK_VIEW, label: "Видит остатки" },
+      { code: P.STOCK_MOVE, label: "Приход, перемещение, списание" },
+      { code: P.STOCK_WRITE_OFF_OWN, label: "Списывает запчасти в свой заказ" },
+      { code: P.STOCK_INVENTORY, label: "Проводит инвентаризацию" },
+    ],
+  },
+  {
+    group: "Закупки",
+    items: [
+      { code: P.PURCHASES_VIEW, label: "Видит заявки на закупку" },
+      { code: P.PURCHASES_CREATE, label: "Создаёт заявки на закупку" },
+      { code: P.PURCHASES_APPROVE, label: "Согласовывает заявки" },
+    ],
+  },
+  {
+    group: "Финансы",
+    items: [
+      { code: P.FINANCE_VIEW, label: "Видит кассы и движение денег" },
+      { code: P.FINANCE_PAYMENT, label: "Принимает оплату" },
+      { code: P.FINANCE_MANAGE, label: "Управляет кассами и транзакциями" },
+    ],
+  },
+  {
+    group: "Зарплата",
+    items: [
+      { code: P.SALARY_VIEW_ALL, label: "Видит зарплату всех" },
+      { code: P.SALARY_VIEW_OWN, label: "Видит свою зарплату" },
+      { code: P.SALARY_MANAGE, label: "Начисляет и выплачивает" },
+    ],
+  },
+  {
+    group: "Отчёты и настройки",
+    items: [
+      { code: P.REPORTS_VIEW, label: "Отчёты по работе" },
+      { code: P.REPORTS_FINANCE, label: "Финансовые отчёты" },
+      { code: P.STAFF_MANAGE, label: "Заводит сотрудников" },
+      { code: P.ROLES_MANAGE, label: "Настраивает роли и права" },
+      { code: P.SETTINGS_MANAGE, label: "Настройки мастерской" },
+    ],
+  },
+];
