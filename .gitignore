@@ -1,0 +1,27 @@
+# секреты — никогда в репозиторий
+.env
+.env.*
+!.env.example
+deploy/.env
+*.pem
+*.key
+
+# зависимости и сборка
+node_modules/
+dist/
+build/
+.vite/
+
+# данные и загрузки
+uploads/
+data/
+postgres-data/
+minio-data/
+certbot/
+
+# служебное
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
