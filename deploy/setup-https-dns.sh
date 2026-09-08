@@ -26,9 +26,11 @@ if [ -z "${TIMEWEB_API_TOKEN:-}" ]; then
 Не задан TIMEWEB_API_TOKEN.
 
   1. Панель Timeweb Cloud → API и токены → создать токен с доступом к DNS.
-  2. Дописать в deploy/.env строку:
-       TIMEWEB_API_TOKEN=ваш_токен
-  3. Повторить запуск.
+  2. Если строки TIMEWEB_API_TOKEN в deploy/.env нет вовсе:
+       bash deploy/env-sync.sh
+     Он допишет все переменные, появившиеся после установки.
+  3. Вписать токен: nano deploy/.env
+  4. Повторить запуск.
 
 Токен нужен только для того, чтобы скрипт сам ставил и убирал TXT-запись
 при выпуске и каждом продлении. В git он не попадает — deploy/.env в .gitignore.
