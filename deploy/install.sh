@@ -10,7 +10,14 @@ else
   echo ">>> Создаю $ENV_FILE и генерирую секреты..."
   cp deploy/.env.example "$ENV_FILE"
   gen() { openssl rand -base64 36 | tr -d '\n=+/' | cut -c1-40; }
-  set_var() { sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"; }
+  # В строке замены sed символы & | \ имеют особый смысл: & означает «подставь найденное».
+  # Без экранирования пароль с такими символами записывался бы искажённым,
+  # и войти с ним было бы уже нельзя.
+  set_var() {
+    local escaped
+    escaped=$(printf '%s' "$2" | sed -e 's/[\\&|]/\\&/g')
+    sed -i "s|^$1=.*|$1=$escaped|" "$ENV_FILE"
+  }
 
   set_var POSTGRES_PASSWORD "$(gen)"
   set_var APP_DB_PASSWORD "$(gen)"
