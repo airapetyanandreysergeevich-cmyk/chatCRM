@@ -71,7 +71,7 @@ export function withTenant<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe("SELECT set_config('app.tenant_id', $1, true)", tenantId);
+    await tx.$queryRawUnsafe("SELECT set_config('app.tenant_id', $1, true)", tenantId);
     return fn(scopeToTenant(tx, tenantId));
   });
 }
@@ -83,7 +83,7 @@ export function withTenant<T>(
  */
 export function withPlatform<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe("SELECT set_config('app.platform', 'on', true)");
+    await tx.$queryRawUnsafe("SELECT set_config('app.platform', 'on', true)");
     return fn(tx);
   });
 }

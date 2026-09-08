@@ -8,8 +8,11 @@
 -- суперпользователь игнорирует RLS всегда, даже при FORCE, и изоляция перестаёт работать.
 -- Роль создаёт deploy/postgres/01-app-role.sh при первом запуске базы.
 
-CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS uuid AS $$
-  SELECT NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+-- Возвращает text, а не uuid: Prisma мапит String в колонку text,
+-- и сравнение "tenantId" = current_tenant_id() должно быть text = text.
+-- Пустое значение даёт NULL, сравнение с NULL ложно — строки не видны. Отказ в закрытую.
+CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS text AS $$
+  SELECT NULLIF(current_setting('app.tenant_id', true), '');
 $$ LANGUAGE sql STABLE;
 
 CREATE OR REPLACE FUNCTION platform_mode() RETURNS boolean AS $$
