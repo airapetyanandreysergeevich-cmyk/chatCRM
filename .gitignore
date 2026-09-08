@@ -18,6 +18,8 @@ data/
 postgres-data/
 minio-data/
 certbot/
+acme/
+deploy/acme/
 
 # служебное
 .DS_Store
