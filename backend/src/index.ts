@@ -8,6 +8,7 @@ import { env } from "./lib/env";
 import { errorHandler } from "./lib/errors";
 import { authRouter } from "./modules/auth/auth.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
+import { publicRouter } from "./modules/public/public.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
 import { ensurePlatformOwner } from "./services/bootstrap";
 
@@ -32,6 +33,9 @@ app.get("/api/health", async (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
+// Публичные маршруты подключаются до staffRouter: тот требует авторизацию для всего,
+// что до него доходит, и заявка на регистрацию упиралась бы в 401.
+app.use("/api/public", publicRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/platform", platformRouter);
 app.use("/api", staffRouter);

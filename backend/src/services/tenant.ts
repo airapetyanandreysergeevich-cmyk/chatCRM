@@ -18,9 +18,13 @@ interface CreateTenantInput {
   name: string;
   slug: string;
   ownerEmail: string;
-  ownerPassword: string;
   ownerFullName: string;
+  ownerPhone?: string;
   timezone?: string;
+  /** Либо пароль в открытом виде, либо уже готовый хеш — при одобрении заявки
+   *  пароль задал сам заявитель, и в открытом виде его у нас нет. */
+  ownerPassword?: string;
+  ownerPasswordHash?: string;
 }
 
 /**
@@ -32,7 +36,13 @@ export async function createTenant(input: CreateTenantInput) {
     data: { name: input.name, slug: input.slug, timezone: input.timezone ?? "Europe/Moscow" },
   });
 
-  const passwordHash = await hashPassword(input.ownerPassword);
+  const passwordHash =
+    input.ownerPasswordHash ??
+    (input.ownerPassword
+      ? await hashPassword(input.ownerPassword)
+      : (() => {
+          throw new Error("Нужен ownerPassword или ownerPasswordHash");
+        })());
 
   await withTenant(tenant.id, async (tx) => {
     const branch = await tx.branch.create({
@@ -67,6 +77,7 @@ export async function createTenant(input: CreateTenantInput) {
         email: input.ownerEmail.toLowerCase().trim(),
         passwordHash,
         fullName: input.ownerFullName,
+        phone: input.ownerPhone ?? null,
         branchId: branch.id,
         isOwner: true,
       },

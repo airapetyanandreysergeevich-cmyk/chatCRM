@@ -6,6 +6,7 @@ import { prisma, withPlatform } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { signAccessToken, type PlatformTokenPayload } from "../../lib/jwt";
 import { hashPassword } from "../../lib/password";
+import { uniqueSlug } from "../../lib/slug";
 import { authenticate } from "../../middleware/auth";
 import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
@@ -309,5 +310,125 @@ platformRouter.get(
       include: { platformUser: { select: { fullName: true, email: true } } },
     });
     res.json(logs);
+  })
+);
+
+// ---------- заявки на подключение ----------
+
+/** Счётчики для панели: по ним рисуется значок «есть новые заявки». */
+platformRouter.get(
+  "/summary",
+  ah(async (_req, res) => {
+    const [pendingApplications, tenants] = await Promise.all([
+      prisma.tenantApplication.count({ where: { status: "PENDING" } }),
+      prisma.tenant.count({ where: { deletedAt: null } }),
+    ]);
+    res.json({ pendingApplications, tenants });
+  })
+);
+
+platformRouter.get(
+  "/applications",
+  ah(async (req, res) => {
+    const status = z
+      .enum(["PENDING", "APPROVED", "REJECTED", "ALL"])
+      .catch("PENDING")
+      .parse(req.query.status);
+
+    const rows = await prisma.tenantApplication.findMany({
+      where: status === "ALL" ? {} : { status },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        reviewedBy: { select: { fullName: true, email: true } },
+        tenant: { select: { id: true, name: true, slug: true } },
+      },
+    });
+
+    // Хеш пароля наружу не отдаём даже собственнику платформы.
+    res.json(
+      rows.map(({ passwordHash: _hash, ...row }) => row)
+    );
+  })
+);
+
+platformRouter.post(
+  "/applications/:id/approve",
+  ah(async (req, res) => {
+    const auth = platformAuth(req);
+    const body = z
+      .object({ slug: slugSchema.optional(), timezone: z.string().optional() })
+      .parse(req.body ?? {});
+
+    const application = await prisma.tenantApplication.findUnique({ where: { id: req.params.id } });
+    if (!application) throw notFound("Заявка не найдена");
+    if (application.status !== "PENDING") throw badRequest("Заявка уже рассмотрена");
+    if (await isEmailTaken(application.ownerEmail))
+      throw conflict("Этот email уже занят другой учётной записью");
+
+    const taken = async (candidate: string) => !!(await prisma.tenant.findUnique({ where: { slug: candidate } }));
+    if (body.slug && (await taken(body.slug))) throw conflict("Мастерская с таким кодом уже есть");
+    const slug = body.slug ?? (await uniqueSlug(application.workshopName, taken));
+
+    // Пароль заявитель задал сам при регистрации — в открытом виде его у нас нет,
+    // поэтому переносим готовый хеш: человек войдёт тем же паролем, что придумал.
+    const tenant = await createTenant({
+      name: application.workshopName,
+      slug,
+      ownerEmail: application.ownerEmail,
+      ownerFullName: application.ownerFullName,
+      ownerPhone: application.ownerPhone,
+      ownerPasswordHash: application.passwordHash,
+      timezone: body.timezone,
+    });
+
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: {
+        contactName: application.ownerFullName,
+        contactPhone: application.ownerPhone,
+        contactEmail: application.ownerEmail,
+      },
+    });
+
+    await prisma.tenantApplication.update({
+      where: { id: application.id },
+      data: {
+        status: "APPROVED",
+        reviewedById: auth.platformUserId,
+        reviewedAt: new Date(),
+        tenantId: tenant.id,
+      },
+    });
+
+    await logPlatform(req, "APPLICATION_APPROVE", tenant.id, { applicationId: application.id, slug });
+    res.json({ tenantId: tenant.id, slug, name: tenant.name });
+  })
+);
+
+platformRouter.post(
+  "/applications/:id/reject",
+  ah(async (req, res) => {
+    const auth = platformAuth(req);
+    const { reason } = z
+      .object({ reason: z.string().trim().min(5, "Опишите причину — её увидит заявитель") })
+      .parse(req.body);
+
+    const application = await prisma.tenantApplication.findUnique({ where: { id: req.params.id } });
+    if (!application) throw notFound("Заявка не найдена");
+    if (application.status !== "PENDING") throw badRequest("Заявка уже рассмотрена");
+
+    await prisma.tenantApplication.update({
+      where: { id: application.id },
+      data: {
+        status: "REJECTED",
+        rejectionReason: reason,
+        reviewedById: auth.platformUserId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    await logPlatform(req, "APPLICATION_REJECT", null, { applicationId: application.id, reason });
+    res.json({ ok: true });
   })
 );

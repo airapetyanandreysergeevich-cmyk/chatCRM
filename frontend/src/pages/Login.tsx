@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Banner, Button, Field, Input, SectionLabel } from "../components/ui";
@@ -90,7 +91,13 @@ export default function Login() {
             {busy ? "Проверяем…" : "Войти"}
           </Button>
 
-          <p className="mt-5 text-[13px] text-ink-muted">
+          <p className="mt-6 text-sm text-ink-muted">
+            Ещё не подключены?{" "}
+            <Link to="/register" className="font-bold text-primary">
+              Оставить заявку
+            </Link>
+          </p>
+          <p className="mt-3 text-[13px] text-ink-muted">
             Забыли пароль — его меняет владелец мастерской в разделе «Сотрудники».
           </p>
         </form>

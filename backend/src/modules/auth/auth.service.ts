@@ -123,7 +123,22 @@ export async function login(input: { email: string; password: string; req: Reque
 
   const located = await locateTenantUser(email);
   if (!located) {
-    await spendSameTime(input.password);
+    // Учётки нет — возможно, заявка ещё не одобрена. Стадию раскрываем только тому,
+    // кто знает пароль от этой заявки: иначе форма выдавала бы, кто к нам обращался.
+    const application = await prisma.tenantApplication.findFirst({
+      where: { ownerEmail: email, status: { in: ["PENDING", "REJECTED"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (application && (await verifyPassword(input.password, application.passwordHash))) {
+      if (application.status === "PENDING")
+        throw forbidden("Заявка на подключение ещё на рассмотрении. Мы свяжемся с вами.");
+      throw forbidden(
+        application.rejectionReason
+          ? `Заявка отклонена: ${application.rejectionReason}`
+          : "Заявка отклонена."
+      );
+    }
+    if (!application) await spendSameTime(input.password);
     throw unauthorized(WRONG);
   }
 

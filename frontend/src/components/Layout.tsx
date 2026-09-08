@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -6,10 +7,40 @@ import { Button } from "./ui";
 interface NavItem {
   to: string;
   label: string;
+  badge?: number;
+}
+
+/** Красный счётчик непросмотренного — тот самый «уведомление внутри системы». */
+function Badge({ count }: { count: number }) {
+  return (
+    <span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-[#E35555] px-1.5 text-[12px] font-extrabold text-white">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
 }
 
 export default function Layout() {
   const { me, logout, applyToken } = useAuth();
+  const [pending, setPending] = useState(0);
+
+  const isPlatformPanel = me?.kind === "platform" && !me.impersonating;
+  useEffect(() => {
+    if (!isPlatformPanel) return;
+    let alive = true;
+    const load = () =>
+      api
+        .get<{ pendingApplications: number }>("/platform/summary")
+        .then((s) => alive && setPending(s.pendingApplications))
+        .catch(() => undefined);
+    void load();
+    // Уведомление пока живёт внутри системы, поэтому счётчик подтягиваем сам.
+    const timer = setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [isPlatformPanel]);
+
   if (!me) return null;
 
   const impersonating = me.kind === "platform" ? me.impersonating : null;
@@ -23,6 +54,7 @@ export default function Layout() {
       ]
     : [
         { to: "/platform/tenants", label: "Мастерские" },
+        { to: "/platform/applications", label: "Заявки", badge: pending },
         { to: "/platform/admins", label: "Администраторы" },
         { to: "/platform/audit", label: "Журнал" },
       ];
@@ -60,7 +92,8 @@ export default function Layout() {
           <nav className="space-y-1">
             {items.map((i) => (
               <NavLink key={i.to} to={i.to} end={i.to === "/"} className={linkClass}>
-                {i.label}
+                <span className="flex-1">{i.label}</span>
+                {!!i.badge && <Badge count={i.badge} />}
               </NavLink>
             ))}
           </nav>
@@ -88,7 +121,10 @@ export default function Layout() {
             <Outlet />
           </main>
 
-          <nav className="fixed inset-x-0 bottom-0 grid grid-cols-3 border-t border-line bg-surface px-2 pb-4 pt-2 lg:hidden">
+          <nav
+            className="fixed inset-x-0 bottom-0 grid border-t border-line bg-surface px-2 pb-4 pt-2 lg:hidden"
+            style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+          >
             {items.map((i) => (
               <NavLink
                 key={i.to}
@@ -101,7 +137,14 @@ export default function Layout() {
               >
                 {({ isActive }) => (
                   <>
-                    <span className={"h-6 w-6 rounded-lg " + (isActive ? "bg-primary" : "bg-[#DCD3C5]")} />
+                    <span className="relative">
+                      <span className={"block h-6 w-6 rounded-lg " + (isActive ? "bg-primary" : "bg-[#DCD3C5]")} />
+                      {!!i.badge && (
+                        <span className="absolute -right-2.5 -top-1.5">
+                          <Badge count={i.badge} />
+                        </span>
+                      )}
+                    </span>
                     {i.label}
                   </>
                 )}

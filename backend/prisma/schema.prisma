@@ -41,6 +41,7 @@ model PlatformUser {
   impersonations Impersonation[]
   auditLogs      PlatformAuditLog[]
   sessions       Session[]
+  reviewedApplications TenantApplication[]
 }
 
 model Tenant {
@@ -92,6 +93,7 @@ model Tenant {
   pushSubscriptions   PushSubscription[]
   impersonations      Impersonation[]
   sessions            Session[]
+  application         TenantApplication[]
 }
 
 /// Вход собственника или администратора платформы в базу арендатора.
@@ -144,6 +146,46 @@ model Session {
 
   @@index([userId])
   @@index([platformUserId])
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Заявка на подключение мастерской.
+/// Пока она не одобрена, мастерской не существует: ни базы, ни ролей, ни статусов.
+/// Отклонённая заявка не оставляет за собой ничего, кроме этой строки.
+model TenantApplication {
+  id            String            @id @default(uuid())
+  workshopName  String
+  ownerFullName String
+  ownerEmail    String
+  ownerPhone    String
+  /// Пароль задаёт сам заявитель ещё до одобрения — храним только хеш.
+  passwordHash  String
+  city          String?
+  comment       String?
+  status        ApplicationStatus @default(PENDING)
+
+  ip        String?
+  userAgent String?
+
+  reviewedById    String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  /// Мастерская, созданная по этой заявке.
+  tenantId        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reviewedBy PlatformUser? @relation(fields: [reviewedById], references: [id])
+  tenant     Tenant?       @relation(fields: [tenantId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([ownerEmail])
 }
 
 // ============================================================

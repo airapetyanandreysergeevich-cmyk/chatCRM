@@ -4,6 +4,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import { Card, SectionLabel } from "./components/ui";
 import { useAuth } from "./lib/auth";
 import Login from "./pages/Login";
+import Register from "./pages/Register";
+import Applications from "./pages/platform/Applications";
 import Staff from "./pages/Staff";
 import Tenants from "./pages/platform/Tenants";
 
@@ -30,6 +32,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={status === "ready" ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/register" element={status === "ready" ? <Navigate to="/" replace /> : <Register />} />
 
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
@@ -37,6 +40,7 @@ export default function App() {
           <Route path="/orders" element={<Soon title="Заказы" />} />
           <Route path="/staff" element={<Staff />} />
           <Route path="/platform/tenants" element={<Tenants />} />
+          <Route path="/platform/applications" element={<Applications />} />
           <Route path="/platform/admins" element={<Soon title="Администраторы платформы" />} />
           <Route path="/platform/audit" element={<Soon title="Журнал платформы" />} />
           <Route path="*" element={<Soon title="Страница не найдена" />} />
