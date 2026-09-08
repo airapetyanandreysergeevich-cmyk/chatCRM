@@ -4,10 +4,12 @@ RUN apk add --no-cache openssl
 
 FROM base AS deps
 COPY package.json ./
-RUN npm config set fetch-retries 5 \
- && npm config set fetch-retry-mintimeout 20000 \
- && npm config set fetch-retry-maxtimeout 180000 \
- && npm config set fetch-timeout 600000 \
+# Таймауты держим короткими намеренно: при сломанной сети внутри контейнера
+# длинные значения превращают падение сборки в час ожидания вместо понятной ошибки.
+RUN npm config set fetch-retries 3 \
+ && npm config set fetch-retry-mintimeout 5000 \
+ && npm config set fetch-retry-maxtimeout 30000 \
+ && npm config set fetch-timeout 120000 \
  && npm install --no-audit --no-fund
 
 FROM deps AS build

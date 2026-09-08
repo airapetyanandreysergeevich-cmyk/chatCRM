@@ -35,7 +35,8 @@ docker run --rm --network "$NET" \
   -e DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public" \
   node:20-alpine sh -c '
     set -e
-    apk add --no-cache openssl >/dev/null
+    # openssl в node:20-alpine уже есть; если apk недоступен — не беда, просто идём дальше
+    apk add --no-cache openssl >/dev/null 2>&1 || echo "apk недоступен, продолжаю с системным openssl"
     npm install --no-audit --no-fund
     npx prisma migrate dev --name init --skip-seed
     npx prisma migrate dev --create-only --name rls --skip-seed
