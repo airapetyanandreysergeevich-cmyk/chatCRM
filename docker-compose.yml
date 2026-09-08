@@ -83,8 +83,10 @@ services:
       - ./deploy/certbot/conf:/etc/letsencrypt:ro
       - ./deploy/certbot/www:/var/www/certbot:ro
       - nginx-conf:/etc/nginx/conf.d
+    # Скрипт запускаем через sh, а не напрямую: проект редактируется в том числе
+    # на Windows, где признак «исполняемый» не сохраняется, и файл приезжает с правами 644.
     command: >
-      sh -c "/etc/nginx/templates-src/render-config.sh && nginx -g 'daemon off;'"
+      sh -c "sh /etc/nginx/templates-src/render-config.sh && nginx -g 'daemon off;'"
     environment:
       DOMAIN: ${DOMAIN}
       DOMAIN_ALIASES: ${DOMAIN_ALIASES}
