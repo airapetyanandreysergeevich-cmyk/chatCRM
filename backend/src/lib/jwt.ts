@@ -1,4 +1,4 @@
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { env } from "./env";
 
 /** Токен сотрудника мастерской. tenantId внутри токена — основа изоляции. */
@@ -23,8 +23,11 @@ export interface PlatformTokenPayload {
 
 export type TokenPayload = TenantTokenPayload | PlatformTokenPayload;
 
+// Типы jsonwebtoken ждут литерал вида "15m", а из переменной окружения приходит обычный string.
+const accessOptions: SignOptions = { expiresIn: env.accessTokenTtl as SignOptions["expiresIn"] };
+
 export function signAccessToken(payload: TokenPayload): string {
-  return jwt.sign(payload, env.jwtAccessSecret, { expiresIn: env.accessTokenTtl });
+  return jwt.sign(payload, env.jwtAccessSecret, accessOptions);
 }
 
 export function verifyAccessToken(token: string): TokenPayload {

@@ -108,6 +108,7 @@ staffRouter.post(
 
       const user = await tx.user.create({
         data: {
+          tenantId,
           login: body.login,
           passwordHash: await hashPassword(body.password),
           fullName: body.fullName,
@@ -119,6 +120,7 @@ staffRouter.post(
         },
       });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "User",
         entityId: user.id,
@@ -166,6 +168,7 @@ staffRouter.patch(
         data: { ...body, email: body.email === "" ? null : body.email },
       });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "User",
         entityId: user.id,
@@ -193,6 +196,7 @@ staffRouter.post(
       if (!user) throw notFound("Сотрудник не найден");
       await tx.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "User",
         entityId: user.id,
@@ -219,6 +223,7 @@ staffRouter.delete(
       // Мягкое удаление: заказы и записи в логе продолжают ссылаться на сотрудника.
       await tx.user.update({ where: { id: user.id }, data: { deletedAt: new Date(), isActive: false } });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "User",
         entityId: user.id,
@@ -256,10 +261,14 @@ staffRouter.post(
     const body = roleSchema.parse(req.body);
     assertCanGrant(req, body.permissions);
 
-    const role = await withTenant(tenantOf(req), async (tx) => {
+    const tenantId = tenantOf(req);
+    const role = await withTenant(tenantId, async (tx) => {
       if (await tx.role.findFirst({ where: { name: body.name } })) throw conflict("Роль с таким названием уже есть");
-      const created = await tx.role.create({ data: { name: body.name, permissions: body.permissions, isSystem: false } });
+      const created = await tx.role.create({
+        data: { tenantId, name: body.name, permissions: body.permissions, isSystem: false },
+      });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "Role",
         entityId: created.id,
@@ -280,11 +289,13 @@ staffRouter.patch(
     const body = roleSchema.partial().parse(req.body);
     if (body.permissions) assertCanGrant(req, body.permissions);
 
-    const role = await withTenant(tenantOf(req), async (tx) => {
+    const tenantId = tenantOf(req);
+    const role = await withTenant(tenantId, async (tx) => {
       const existing = await tx.role.findFirst({ where: { id: req.params.id } });
       if (!existing) throw notFound("Роль не найдена");
       const updated = await tx.role.update({ where: { id: existing.id }, data: body });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "Role",
         entityId: existing.id,
@@ -302,7 +313,8 @@ staffRouter.delete(
   "/roles/:id",
   requirePermission(PERMISSIONS.ROLES_MANAGE),
   ah(async (req, res) => {
-    await withTenant(tenantOf(req), async (tx) => {
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
       const role = await tx.role.findFirst({ where: { id: req.params.id } });
       if (!role) throw notFound("Роль не найдена");
       if (role.isSystem) throw forbidden("Системную роль удалить нельзя — можно склонировать и править копию");
@@ -310,6 +322,7 @@ staffRouter.delete(
       if (inUse) throw conflict(`Роль назначена ${inUse} сотрудникам — сначала переведите их на другую`);
       await tx.role.delete({ where: { id: role.id } });
       await writeAudit(tx, {
+        tenantId,
         userId: actorUserId(req),
         entity: "Role",
         entityId: role.id,

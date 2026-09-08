@@ -46,7 +46,7 @@ async function issueRefresh(params: {
 }
 
 async function tenantPayload(tenantId: string, userId: string): Promise<TenantTokenPayload> {
-  return withTenant(tenantId, async (tx) => {
+  return withTenant<TenantTokenPayload>(tenantId, async (tx) => {
     const user = await tx.user.findFirst({ where: { id: userId }, include: { role: true } });
     if (!user || !user.isActive || user.deletedAt) throw unauthorized("Учётная запись отключена");
     return {
