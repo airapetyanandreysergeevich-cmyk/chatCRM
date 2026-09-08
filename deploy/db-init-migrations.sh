@@ -28,20 +28,40 @@ PG_ID="$(docker compose --env-file "$ENV_FILE" ps -q postgres)"
 NET="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$PG_ID")"
 [ -n "$NET" ] || { echo "Не удалось определить сеть compose"; exit 1; }
 
-# Миграции создаются под владельцем схемы — роль приложения на это прав не имеет и не должна.
-echo ">>> Создаю миграции"
+STAMP="$(date -u +%Y%m%d%H%M%S)"
+
+# Миграции накатываются под владельцем схемы — у роли приложения таких прав нет и быть не должно.
 docker run --rm --network "$NET" \
   -v "$(pwd)/backend:/app" -w /app \
   -e DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public" \
+  -e STAMP="$STAMP" \
   node:20-alpine sh -c '
     set -e
-    # openssl в node:20-alpine уже есть; если apk недоступен — не беда, просто идём дальше
-    apk add --no-cache openssl >/dev/null 2>&1 || echo "apk недоступен, продолжаю с системным openssl"
+    echo ""
+    echo ">>> [1/4] Устанавливаю зависимости"
+    echo "    npm ничего не печатает, пока не закончит — это нормально."
+    echo "    Пакетов около трёхсот (тянет @aws-sdk), первый раз занимает 2-5 минут."
     npm install --no-audit --no-fund
-    npx prisma migrate dev --name init --skip-seed
-    npx prisma migrate dev --create-only --name rls --skip-seed
-    RLS_DIR="$(ls -d prisma/migrations/*_rls)"
-    cat prisma/rls.sql >> "$RLS_DIR/migration.sql"
+
+    echo ""
+    echo ">>> [2/4] Генерирую SQL для таблиц"
+    # migrate diff вместо migrate dev: не задаёт вопросов и не требует TTY,
+    # поэтому одинаково работает и в скрипте, и в CI.
+    mkdir -p "prisma/migrations/${STAMP}_init"
+    npx prisma migrate diff \
+      --from-empty \
+      --to-schema-datamodel prisma/schema.prisma \
+      --script > "prisma/migrations/${STAMP}_init/migration.sql"
+    echo "    строк SQL: $(wc -l < "prisma/migrations/${STAMP}_init/migration.sql")"
+
+    echo ""
+    echo ">>> [3/4] Добавляю миграцию с политиками RLS"
+    RLS_STAMP="$(date -u +%Y%m%d%H%M%S)"
+    mkdir -p "prisma/migrations/${RLS_STAMP}_rls"
+    cp prisma/rls.sql "prisma/migrations/${RLS_STAMP}_rls/migration.sql"
+
+    echo ""
+    echo ">>> [4/4] Применяю миграции к базе"
     npx prisma migrate deploy
   '
 
