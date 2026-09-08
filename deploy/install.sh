@@ -33,8 +33,26 @@ else
     fi
   fi
 
-  read -rp "Email собственника платформы: " OWNER_EMAIL
-  read -rsp "Пароль собственника платформы: " OWNER_PASS; echo
+  # При вставке блока команд терминал добавляет служебные символы, и read забирает их
+  # вместе с текстом. Незаметно получается адрес вида ESC[201~mail@example.com,
+  # с которым потом невозможно войти. Чистим управляющие символы и проверяем формат.
+  strip_control() { printf '%s' "$1" | tr -d '\000-\037\177'; }
+
+  while :; do
+    read -rp "Email собственника платформы: " OWNER_EMAIL
+    OWNER_EMAIL=$(strip_control "$OWNER_EMAIL" | tr -d '[:space:]')
+    case "$OWNER_EMAIL" in
+      ?*@?*.?*) break ;;
+      *) echo "    Не похоже на email — введите ещё раз." ;;
+    esac
+  done
+
+  while :; do
+    read -rsp "Пароль собственника платформы (от 8 символов): " OWNER_PASS; echo
+    OWNER_PASS=$(strip_control "$OWNER_PASS")
+    [ ${#OWNER_PASS} -ge 8 ] && break
+    echo "    Слишком короткий — введите ещё раз."
+  done
   set_var PLATFORM_OWNER_EMAIL "$OWNER_EMAIL"
   set_var PLATFORM_OWNER_PASSWORD "$OWNER_PASS"
   chmod 600 "$ENV_FILE"
