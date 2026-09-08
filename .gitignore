@@ -1,6 +1,7 @@
 # секреты — никогда в репозиторий
 .env
 .env.*
+.env.bak.*
 !.env.example
 deploy/.env
 *.pem
