@@ -4,14 +4,7 @@ import { z } from "zod";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, unauthorized } from "../../lib/errors";
 import { authenticate, currentTenantId, permissionsOf } from "../../middleware/auth";
-import {
-  loginPlatformUser,
-  loginTenantUser,
-  refreshCookieOptions,
-  REFRESH_COOKIE,
-  revokeRefresh,
-  rotateRefresh,
-} from "./auth.service";
+import { login, refreshCookieOptions, REFRESH_COOKIE, revokeRefresh, rotateRefresh } from "./auth.service";
 
 export const authRouter = Router();
 
@@ -24,41 +17,24 @@ const loginLimiter = rateLimit({
   message: { error: "Слишком много попыток входа. Попробуйте через 15 минут." },
 });
 
-const tenantLoginSchema = z.object({
-  workshop: z.string().min(1, "Укажите мастерскую"),
-  login: z.string().min(1, "Укажите логин"),
+const loginSchema = z.object({
+  email: z.string().min(1, "Укажите email").email("Похоже, это не email"),
   password: z.string().min(1, "Укажите пароль"),
 });
 
+/**
+ * Вход один на всех: и для сотрудников мастерских, и для команды платформы.
+ * Кто именно пришёл, решает сервер по адресу — выбирать ничего не нужно.
+ * Куда вести дальше, фронтенд узнаёт из ответа и из /auth/me.
+ */
 authRouter.post(
   "/login",
   loginLimiter,
   ah(async (req, res) => {
-    const body = tenantLoginSchema.parse(req.body);
-    const { accessToken, refresh, payload, tenant } = await loginTenantUser({ ...body, req });
+    const body = loginSchema.parse(req.body);
+    const { accessToken, refresh, kind } = await login({ ...body, req });
     res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions());
-    res.json({
-      accessToken,
-      user: { id: payload.userId, isOwner: payload.isOwner, roleCode: payload.roleCode },
-      permissions: payload.permissions,
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, status: tenant.status },
-    });
-  })
-);
-
-const platformLoginSchema = z.object({
-  email: z.string().email("Неверный email"),
-  password: z.string().min(1, "Укажите пароль"),
-});
-
-authRouter.post(
-  "/platform/login",
-  loginLimiter,
-  ah(async (req, res) => {
-    const body = platformLoginSchema.parse(req.body);
-    const { accessToken, refresh, payload } = await loginPlatformUser({ ...body, req });
-    res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions());
-    res.json({ accessToken, platformUser: { id: payload.platformUserId, role: payload.role } });
+    res.json({ accessToken, kind });
   })
 );
 
@@ -111,7 +87,7 @@ authRouter.get(
       kind: "tenant",
       user: {
         id: data.id,
-        login: data.login,
+        email: data.email,
         fullName: data.fullName,
         phone: data.phone,
         isOwner: data.isOwner,

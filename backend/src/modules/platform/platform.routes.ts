@@ -7,6 +7,7 @@ import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors"
 import { signAccessToken, type PlatformTokenPayload } from "../../lib/jwt";
 import { hashPassword } from "../../lib/password";
 import { authenticate } from "../../middleware/auth";
+import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
 
 export const platformRouter = Router();
@@ -103,10 +104,10 @@ const slugSchema = z
 const createTenantSchema = z.object({
   name: z.string().trim().min(2, "Укажите название мастерской"),
   slug: slugSchema,
-  ownerLogin: z.string().trim().min(3, "Логин от 3 символов"),
+  // Владелец входит по этому адресу — он же его рабочая учётная запись.
+  ownerEmail: z.string().trim().toLowerCase().email("Похоже, это не email"),
   ownerPassword: z.string().min(8, "Пароль от 8 символов"),
   ownerFullName: z.string().trim().min(2, "Укажите имя владельца"),
-  ownerEmail: z.string().email("Неверный email").optional().or(z.literal("")),
   timezone: z.string().optional(),
   contactPhone: z.string().trim().optional(),
 });
@@ -117,21 +118,21 @@ platformRouter.post(
     const body = createTenantSchema.parse(req.body);
     const existing = await prisma.tenant.findUnique({ where: { slug: body.slug } });
     if (existing) throw conflict("Мастерская с таким кодом уже есть");
+    if (await isEmailTaken(body.ownerEmail)) throw conflict("Этот email уже используется");
 
     const tenant = await createTenant({
       name: body.name,
       slug: body.slug,
-      ownerLogin: body.ownerLogin,
+      ownerEmail: body.ownerEmail,
       ownerPassword: body.ownerPassword,
       ownerFullName: body.ownerFullName,
-      ownerEmail: body.ownerEmail || undefined,
       timezone: body.timezone,
     });
 
     if (body.contactPhone) {
       await prisma.tenant.update({
         where: { id: tenant.id },
-        data: { contactPhone: body.contactPhone, contactName: body.ownerFullName, contactEmail: body.ownerEmail || null },
+        data: { contactPhone: body.contactPhone, contactName: body.ownerFullName, contactEmail: body.ownerEmail },
       });
     }
 
@@ -262,7 +263,7 @@ platformRouter.post(
   ah(async (req, res) => {
     const body = createAdminSchema.parse(req.body);
     const email = body.email.toLowerCase().trim();
-    if (await prisma.platformUser.findUnique({ where: { email } })) throw conflict("Такой email уже занят");
+    if (await isEmailTaken(email)) throw conflict("Этот email уже используется");
 
     const admin = await prisma.platformUser.create({
       data: { email, fullName: body.fullName, passwordHash: await hashPassword(body.password), role: "ADMIN" },

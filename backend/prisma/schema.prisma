@@ -188,10 +188,13 @@ model Role {
 }
 
 model User {
-  id           String  @id @default(uuid())
-  tenantId     String
-  login        String // уникален внутри мастерской
-  email        String?
+  id       String @id @default(uuid())
+  tenantId String
+
+  /// Вход единый для всех, поэтому email уникален по всей платформе, а не внутри мастерской.
+  /// Если у сотрудника нет почты, владелец заводит адрес вида master1@proba.local —
+  /// он служит только идентификатором для входа.
+  email        String @unique
   passwordHash String
   fullName     String
   phone        String?
@@ -230,7 +233,6 @@ model User {
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
 
-  @@unique([tenantId, login])
   @@index([tenantId])
 }
 

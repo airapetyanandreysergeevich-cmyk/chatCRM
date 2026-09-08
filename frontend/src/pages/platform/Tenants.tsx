@@ -147,9 +147,8 @@ function CreateTenantModal({ onClose, onDone }: { onClose: () => void; onDone: (
     name: "",
     slug: "",
     ownerFullName: "",
-    ownerLogin: "",
-    ownerPassword: "",
     ownerEmail: "",
+    ownerPassword: "",
     contactPhone: "",
     timezone: "Europe/Moscow",
   });
@@ -183,7 +182,7 @@ function CreateTenantModal({ onClose, onDone }: { onClose: () => void; onDone: (
         <Field
           label="Код мастерской"
           error={error?.field("slug")}
-          hint="Сотрудники будут вводить его при входе. Латиница, цифры и дефис."
+          hint="Короткий код для служебных нужд: адреса, имена файлов. Латиница, цифры и дефис."
         >
           <Input value={form.slug} onChange={set("slug")} placeholder="lenina" autoCapitalize="none" invalid={!!error?.field("slug")} />
         </Field>
@@ -195,14 +194,17 @@ function CreateTenantModal({ onClose, onDone }: { onClose: () => void; onDone: (
         <Field label="Имя владельца" error={error?.field("ownerFullName")}>
           <Input value={form.ownerFullName} onChange={set("ownerFullName")} invalid={!!error?.field("ownerFullName")} />
         </Field>
-        <Field label="Логин" error={error?.field("ownerLogin")}>
-          <Input value={form.ownerLogin} onChange={set("ownerLogin")} autoCapitalize="none" invalid={!!error?.field("ownerLogin")} />
+        <Field label="Email" error={error?.field("ownerEmail")} hint="По нему владелец входит в систему">
+          <Input
+            type="email"
+            value={form.ownerEmail}
+            onChange={set("ownerEmail")}
+            autoCapitalize="none"
+            invalid={!!error?.field("ownerEmail")}
+          />
         </Field>
         <Field label="Пароль" error={error?.field("ownerPassword")} hint="Передайте владельцу — он сменит его сам">
           <Input value={form.ownerPassword} onChange={set("ownerPassword")} invalid={!!error?.field("ownerPassword")} />
-        </Field>
-        <Field label="Email владельца" error={error?.field("ownerEmail")}>
-          <Input type="email" value={form.ownerEmail} onChange={set("ownerEmail")} invalid={!!error?.field("ownerEmail")} />
         </Field>
         <Field label="Телефон для связи">
           <Input value={form.contactPhone} onChange={set("contactPhone")} />

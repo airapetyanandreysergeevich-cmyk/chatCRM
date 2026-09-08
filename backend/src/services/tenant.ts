@@ -17,10 +17,9 @@ const DEFAULT_STATUSES = [
 interface CreateTenantInput {
   name: string;
   slug: string;
-  ownerLogin: string;
+  ownerEmail: string;
   ownerPassword: string;
   ownerFullName: string;
-  ownerEmail?: string;
   timezone?: string;
 }
 
@@ -65,8 +64,7 @@ export async function createTenant(input: CreateTenantInput) {
     await tx.user.create({
       data: {
         tenantId: tenant.id,
-        login: input.ownerLogin,
-        email: input.ownerEmail,
+        email: input.ownerEmail.toLowerCase().trim(),
         passwordHash,
         fullName: input.ownerFullName,
         branchId: branch.id,

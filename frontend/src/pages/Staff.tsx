@@ -14,10 +14,9 @@ interface Role {
 
 interface StaffRow {
   id: string;
-  login: string;
   fullName: string;
   phone: string | null;
-  email: string | null;
+  email: string;
   isOwner: boolean;
   isActive: boolean;
   lastLoginAt: string | null;
@@ -76,7 +75,7 @@ export default function Staff() {
                   {u.isOwner && <span className="ml-2 text-[13px] font-bold text-primary">владелец</span>}
                 </h2>
                 <p className="mt-1 text-sm text-ink-muted">
-                  {u.role?.name ?? "без роли"} · <span className="font-mono">{u.login}</span>
+                  {u.role?.name ?? "без роли"} · <span className="font-mono">{u.email}</span>
                 </p>
               </div>
               {!u.isActive && <span className="rounded-pill bg-[#F2EDE4] px-3 py-1 text-[13px] font-bold text-ink-ghost">отключён</span>}
@@ -128,10 +127,9 @@ export default function Staff() {
 function StaffModal({ roles, onClose, onDone }: { roles: Role[]; onClose: () => void; onDone: () => void }) {
   const [form, setForm] = useState({
     fullName: "",
-    login: "",
+    email: "",
     password: "",
     phone: "",
-    email: "",
     roleId: roles[0]?.id ?? "",
   });
   const [error, setError] = useState<ApiError | null>(null);
@@ -169,17 +167,24 @@ function StaffModal({ roles, onClose, onDone }: { roles: Role[]; onClose: () => 
             ))}
           </Select>
         </Field>
-        <Field label="Логин" error={error?.field("login")} hint="Латиница и цифры, без пробелов">
-          <Input value={form.login} onChange={set("login")} autoCapitalize="none" invalid={!!error?.field("login")} />
+        <Field
+          label="Email"
+          error={error?.field("email")}
+          hint="По нему сотрудник входит в систему. Нет почты — подойдёт адрес вида master1@masterskaya.local"
+        >
+          <Input
+            type="email"
+            value={form.email}
+            onChange={set("email")}
+            autoCapitalize="none"
+            invalid={!!error?.field("email")}
+          />
         </Field>
         <Field label="Пароль" error={error?.field("password")} hint="От 8 символов. Сотрудник сменит его сам.">
           <Input value={form.password} onChange={set("password")} invalid={!!error?.field("password")} />
         </Field>
         <Field label="Телефон" error={error?.field("phone")}>
           <Input value={form.phone} onChange={set("phone")} />
-        </Field>
-        <Field label="Email" error={error?.field("email")}>
-          <Input type="email" value={form.email} onChange={set("email")} invalid={!!error?.field("email")} />
         </Field>
         <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
           <Button type="submit" disabled={busy} className="sm:flex-1">

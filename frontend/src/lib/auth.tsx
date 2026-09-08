@@ -5,7 +5,7 @@ export interface TenantMe {
   kind: "tenant";
   user: {
     id: string;
-    login: string;
+    email: string;
     fullName: string;
     phone: string | null;
     isOwner: boolean;
@@ -29,8 +29,7 @@ interface AuthState {
   status: "loading" | "anon" | "ready";
   me: Me | null;
   can: (...codes: string[]) => boolean;
-  loginTenant: (v: { workshop: string; login: string; password: string }) => Promise<void>;
-  loginPlatform: (v: { email: string; password: string }) => Promise<void>;
+  login: (v: { email: string; password: string }) => Promise<void>;
   applyToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
@@ -64,18 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setLogoutHandler(null);
   }, [loadMe, reset]);
 
-  const loginTenant = useCallback(
-    async (v: { workshop: string; login: string; password: string }) => {
-      const data = await api.post<{ accessToken: string }>("/auth/login", v);
-      setAccessToken(data.accessToken);
-      await loadMe();
-    },
-    [loadMe]
-  );
-
-  const loginPlatform = useCallback(
+  const login = useCallback(
     async (v: { email: string; password: string }) => {
-      const data = await api.post<{ accessToken: string }>("/auth/platform/login", v);
+      const data = await api.post<{ accessToken: string }>("/auth/login", v);
       setAccessToken(data.accessToken);
       await loadMe();
     },
@@ -106,13 +96,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const granted = me?.permissions ?? [];
         return codes.some((c) => granted.includes(c));
       },
-      loginTenant,
-      loginPlatform,
+      login,
       applyToken,
       logout,
       reload: loadMe,
     }),
-    [status, me, loginTenant, loginPlatform, applyToken, logout, loadMe]
+    [status, me, login, applyToken, logout, loadMe]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

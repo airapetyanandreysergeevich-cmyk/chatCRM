@@ -7,7 +7,7 @@ import { hashPassword } from "../../lib/password";
 import { ALL_PERMISSIONS, PERMISSION_GROUPS, PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
-import { revokeAllForUser } from "../auth/auth.service";
+import { isEmailTaken, revokeAllForUser } from "../auth/auth.service";
 
 export const staffRouter = Router();
 staffRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -43,7 +43,6 @@ staffRouter.get(
     res.json(
       users.map((u) => ({
         id: u.id,
-        login: u.login,
         fullName: u.fullName,
         phone: u.phone,
         email: u.email,
@@ -75,11 +74,12 @@ staffRouter.get(
 );
 
 const createStaffSchema = z.object({
-  login: z.string().trim().min(3, "Логин от 3 символов").regex(/^[a-zA-Z0-9._-]+$/, "Латиница, цифры, точка, дефис"),
+  // Вход в систему по email, поэтому он обязателен и уникален по всей платформе.
+  // Нет почты — подойдёт адрес вида master1@<код мастерской>.local.
+  email: z.string().trim().toLowerCase().email("Похоже, это не email"),
   password: z.string().min(8, "Пароль от 8 символов"),
   fullName: z.string().trim().min(2, "Укажите имя"),
   phone: z.string().trim().optional(),
-  email: z.string().email("Неверный email").optional().or(z.literal("")),
   roleId: z.string().uuid("Выберите роль"),
   workPercent: z.number().min(0).max(100).optional(),
   partPercent: z.number().min(0).max(100).optional(),
@@ -95,12 +95,13 @@ staffRouter.post(
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) throw notFound("Мастерская не найдена");
 
+    // Проверка общая по всей платформе: вход единый, и один адрес не может вести в две учётки.
+    if (await isEmailTaken(body.email)) throw conflict("Этот email уже используется");
+
     const created = await withTenant(tenantId, async (tx) => {
       const count = await tx.user.count({ where: { deletedAt: null } });
       if (count >= tenant.maxUsers)
         throw conflict(`Тариф позволяет не больше ${tenant.maxUsers} сотрудников. Обратитесь к нам, чтобы расширить.`);
-
-      if (await tx.user.findFirst({ where: { login: body.login } })) throw conflict("Такой логин уже занят");
 
       const role = await tx.role.findFirst({ where: { id: body.roleId } });
       if (!role) throw badRequest("Роль не найдена");
@@ -109,11 +110,10 @@ staffRouter.post(
       const user = await tx.user.create({
         data: {
           tenantId,
-          login: body.login,
+          email: body.email,
           passwordHash: await hashPassword(body.password),
           fullName: body.fullName,
           phone: body.phone || null,
-          email: body.email || null,
           roleId: role.id,
           workPercent: body.workPercent ?? null,
           partPercent: body.partPercent ?? null,
@@ -131,14 +131,14 @@ staffRouter.post(
       return user;
     });
 
-    res.status(201).json({ id: created.id, login: created.login, fullName: created.fullName });
+    res.status(201).json({ id: created.id, email: created.email, fullName: created.fullName });
   })
 );
 
 const updateStaffSchema = z.object({
   fullName: z.string().trim().min(2).optional(),
   phone: z.string().trim().optional(),
-  email: z.string().email().optional().or(z.literal("")),
+  email: z.string().trim().toLowerCase().email("Похоже, это не email").optional(),
   roleId: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
   workPercent: z.number().min(0).max(100).nullable().optional(),
@@ -152,6 +152,9 @@ staffRouter.patch(
     const body = updateStaffSchema.parse(req.body);
     const tenantId = tenantOf(req);
 
+    if (body.email && (await isEmailTaken(body.email, req.params.id)))
+      throw conflict("Этот email уже используется");
+
     const updated = await withTenant(tenantId, async (tx) => {
       const user = await tx.user.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!user) throw notFound("Сотрудник не найден");
@@ -163,10 +166,7 @@ staffRouter.patch(
         assertCanGrant(req, role.permissions);
       }
 
-      const next = await tx.user.update({
-        where: { id: user.id },
-        data: { ...body, email: body.email === "" ? null : body.email },
-      });
+      const next = await tx.user.update({ where: { id: user.id }, data: body });
       await writeAudit(tx, {
         tenantId,
         userId: actorUserId(req),
