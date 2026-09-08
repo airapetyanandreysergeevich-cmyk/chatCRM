@@ -21,17 +21,17 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(31,36,48,.45)] sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(6,8,13,.72)] p-0 backdrop-blur-[2px] sm:items-center sm:p-5"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] bg-surface p-5 shadow-modal sm:max-w-[520px] sm:rounded-panel sm:p-7"
+        className="max-h-[92vh] w-full overflow-y-auto rounded-t-[20px] border border-line bg-surface p-5 shadow-modal sm:max-w-[520px] sm:rounded-panel sm:p-7"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mx-auto mb-4 h-[5px] w-11 rounded-full bg-line-strong sm:hidden" />
+        <div className="mx-auto mb-4 h-[4px] w-10 rounded-full bg-line-strong sm:hidden" />
         <h2 className="mb-4 text-xl font-extrabold tracking-tight">{title}</h2>
         {children}
       </div>

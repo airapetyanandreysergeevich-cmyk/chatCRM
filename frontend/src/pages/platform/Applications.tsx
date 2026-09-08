@@ -71,7 +71,7 @@ export default function Applications() {
             onClick={() => setFilter(value)}
             className={
               "rounded-pill px-4 py-2 text-sm font-bold transition " +
-              (filter === value ? "bg-primary text-white" : "bg-surface border border-line text-ink-soft")
+              (filter === value ? "bg-brand text-white" : "bg-surface-raised border border-line text-ink-soft")
             }
           >
             {label}
@@ -104,11 +104,11 @@ export default function Applications() {
                   <StatusChip tone={STATUS[a.status].tone}>{STATUS[a.status].text}</StatusChip>
                 </div>
 
-                <dl className="mt-4 space-y-1.5 border-t border-line-row pt-4 text-sm">
+                <dl className="mt-4 space-y-1.5 border-t border-line pt-4 text-sm">
                   <div className="flex gap-2">
                     <dt className="w-24 shrink-0 text-ink-muted">Телефон</dt>
                     <dd className="font-bold">
-                      <a href={`tel:${a.ownerPhone}`} className="text-primary">
+                      <a href={`tel:${a.ownerPhone}`} className="text-brand">
                         {a.ownerPhone}
                       </a>
                     </dd>

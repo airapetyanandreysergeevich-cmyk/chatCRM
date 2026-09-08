@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { BrandLogo, BrandRow } from "../components/Brand";
+import { Banner, Button, Field, Input, SectionLabel } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { Banner, Button, Field, Input, SectionLabel } from "../components/ui";
 
 /**
  * Вход один на всех. Кто пришёл — сотрудник мастерской или команда платформы —
@@ -29,33 +30,36 @@ export default function Login() {
   }
 
   return (
-    <div className="grid min-h-full lg:grid-cols-2">
-      <div className="hidden flex-col justify-between bg-surface-muted p-14 lg:flex">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-xl bg-primary" />
-          <span className="text-lg font-extrabold tracking-tight">RepairShop</span>
-        </div>
-        <div>
-          <h1 className="max-w-md text-4xl font-extrabold leading-tight tracking-tight">
+    <div className="grid min-h-full bg-bg lg:grid-cols-2">
+      <div className="relative hidden flex-col justify-between overflow-hidden border-r border-line bg-surface p-14 lg:flex">
+        <div
+          className="pointer-events-none absolute -right-24 -top-24 h-[420px] w-[420px] rounded-full opacity-[0.14] blur-3xl"
+          style={{ background: "radial-gradient(circle, #2F8FE0 0%, transparent 70%)" }}
+        />
+        <BrandRow />
+        <div className="relative">
+          <BrandLogo width={210} />
+          <h1 className="mt-9 max-w-md text-[34px] font-extrabold leading-[1.15] tracking-tight">
             Мастерская целиком — от приёма техники до выдачи
           </h1>
-          <p className="mt-4 max-w-md text-ink-muted">
-            Заказы, склад, закупки и зарплата в одном месте. У каждого сотрудника — ровно то, что нужно
+          <p className="mt-4 max-w-md leading-relaxed text-ink-muted">
+            Заказы, склад, закупки и зарплата в одном месте. У каждого сотрудника ровно то, что нужно
             для работы, и ничего лишнего.
           </p>
         </div>
-        <p className="text-[13px] text-ink-muted">Данные каждой мастерской изолированы на уровне базы данных.</p>
+        <p className="relative text-[13px] text-ink-dim">
+          Данные каждой мастерской изолированы на уровне базы данных.
+        </p>
       </div>
 
       <div className="flex items-center justify-center p-5 sm:p-10">
-        <form onSubmit={submit} className="w-full max-w-[400px]">
-          <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <div className="h-11 w-11 rounded-xl bg-primary" />
-            <span className="text-lg font-extrabold tracking-tight">RepairShop</span>
+        <form onSubmit={submit} className="w-full max-w-[380px]">
+          <div className="mb-9 lg:hidden">
+            <BrandRow />
           </div>
 
           <SectionLabel>Вход</SectionLabel>
-          <h2 className="mb-6 mt-2 text-2xl font-extrabold tracking-tight">Здравствуйте</h2>
+          <h2 className="mb-7 mt-2 text-[26px] font-extrabold tracking-tight">Здравствуйте</h2>
 
           {error && (
             <div className="mb-4">
@@ -75,7 +79,6 @@ export default function Login() {
                 invalid={!!error?.field("email")}
               />
             </Field>
-
             <Field label="Пароль" error={error?.field("password")}>
               <Input
                 type="password"
@@ -91,13 +94,13 @@ export default function Login() {
             {busy ? "Проверяем…" : "Войти"}
           </Button>
 
-          <p className="mt-6 text-sm text-ink-muted">
+          <p className="mt-7 text-[13.5px] text-ink-muted">
             Ещё не подключены?{" "}
-            <Link to="/register" className="font-bold text-primary">
+            <Link to="/register" className="font-semibold text-brand hover:text-brand-ink">
               Оставить заявку
             </Link>
           </p>
-          <p className="mt-3 text-[13px] text-ink-muted">
+          <p className="mt-2.5 text-[12.5px] text-ink-dim">
             Забыли пароль — его меняет владелец мастерской в разделе «Сотрудники».
           </p>
         </form>

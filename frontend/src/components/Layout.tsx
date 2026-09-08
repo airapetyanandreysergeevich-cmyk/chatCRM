@@ -1,26 +1,40 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { Button } from "./ui";
+import { BrandRow } from "./Brand";
+import {
+  IconAdmins,
+  IconApplications,
+  IconClients,
+  IconDashboard,
+  IconJournal,
+  IconLogout,
+  IconOrders,
+  IconPurchases,
+  IconStaff,
+  IconStock,
+  IconWorkshops,
+} from "./icons";
 
 interface NavItem {
   to: string;
   label: string;
+  icon: ReactNode;
   badge?: number;
 }
 
-/** Красный счётчик непросмотренного — тот самый «уведомление внутри системы». */
+/** Красный счётчик непрочитанного. */
 function Badge({ count }: { count: number }) {
   return (
-    <span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-[#E35555] px-1.5 text-[12px] font-extrabold text-white">
+    <span className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded-full bg-state-off px-1.5 text-[11px] font-bold text-white">
       {count > 99 ? "99+" : count}
     </span>
   );
 }
 
 export default function Layout() {
-  const { me, logout, applyToken } = useAuth();
+  const { me, can, logout, applyToken } = useAuth();
   const [pending, setPending] = useState(0);
 
   const isPlatformPanel = me?.kind === "platform" && !me.impersonating;
@@ -33,7 +47,7 @@ export default function Layout() {
         .then((s) => alive && setPending(s.pendingApplications))
         .catch(() => undefined);
     void load();
-    // Уведомление пока живёт внутри системы, поэтому счётчик подтягиваем сам.
+    // Уведомление пока живёт внутри системы, поэтому счётчик обновляем сами.
     const timer = setInterval(load, 60_000);
     return () => {
       alive = false;
@@ -44,110 +58,145 @@ export default function Layout() {
   if (!me) return null;
 
   const impersonating = me.kind === "platform" ? me.impersonating : null;
-  const inTenant = me.kind === "tenant" || !!impersonating;
+  const inWorkshop = me.kind === "tenant" || !!impersonating;
 
-  const items: NavItem[] = inTenant
-    ? [
-        { to: "/", label: "Сводка" },
-        { to: "/orders", label: "Заказы" },
-        { to: "/staff", label: "Сотрудники" },
-      ]
-    : [
-        { to: "/platform/tenants", label: "Мастерские" },
-        { to: "/platform/applications", label: "Заявки", badge: pending },
-        { to: "/platform/admins", label: "Администраторы" },
-        { to: "/platform/audit", label: "Журнал" },
-      ];
+  const workshopNav: NavItem[] = [
+    { to: "/", label: "Сводка", icon: <IconDashboard /> },
+    { to: "/orders", label: "Заказы", icon: <IconOrders /> },
+    { to: "/clients", label: "Клиенты", icon: <IconClients /> },
+    { to: "/stock", label: "Склад", icon: <IconStock /> },
+    { to: "/purchases", label: "Закупки", icon: <IconPurchases /> },
+    { to: "/staff", label: "Сотрудники", icon: <IconStaff /> },
+  ].filter((i) => {
+    if (i.to === "/clients") return can("customers.view", "customers.edit");
+    if (i.to === "/stock") return can("stock.view");
+    if (i.to === "/purchases") return can("purchases.view", "purchases.create");
+    if (i.to === "/staff") return can("staff.manage");
+    if (i.to === "/orders")
+      return can("orders.view.all", "orders.view.assigned", "orders.view.delivery");
+    return true;
+  });
 
+  const platformNav: NavItem[] = [
+    { to: "/platform/tenants", label: "Мастерские", icon: <IconWorkshops /> },
+    { to: "/platform/applications", label: "Заявки", icon: <IconApplications />, badge: pending },
+    { to: "/platform/admins", label: "Администраторы", icon: <IconAdmins /> },
+    { to: "/platform/audit", label: "Журнал", icon: <IconJournal /> },
+  ];
+
+  const items = inWorkshop ? workshopNav : platformNav;
   const title = me.kind === "tenant" ? (me.tenant?.name ?? "Мастерская") : (impersonating?.name ?? "Платформа");
   const subtitle =
-    me.kind === "tenant" ? (me.user.role?.name ?? (me.user.isOwner ? "владелец" : "сотрудник")) : me.platformUser.fullName;
+    me.kind === "tenant"
+      ? (me.user.role?.name ?? (me.user.isOwner ? "владелец" : "сотрудник"))
+      : me.platformUser.fullName;
 
   async function stopImpersonation() {
     const data = await api.post<{ accessToken: string }>("/platform/impersonate/stop");
     await applyToken(data.accessToken);
   }
 
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    "flex h-11 items-center rounded-[10px] px-3 text-[15px] font-semibold transition " +
-    (isActive ? "bg-primary-tint text-primary-ink font-bold" : "text-ink-soft hover:bg-surface-muted");
+  const sideLink = ({ isActive }: { isActive: boolean }) =>
+    "group relative flex h-11 items-center gap-3 rounded-field px-3 text-[14.5px] font-medium " +
+    "transition-all duration-150 " +
+    (isActive
+      ? "bg-brand-tint text-brand-ink font-semibold"
+      : "text-ink-muted hover:bg-surface-raised hover:text-ink");
 
   return (
-    <div className="min-h-full bg-canvas">
+    <div className="min-h-full bg-bg">
       {impersonating && (
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-sun px-5 py-2.5 text-sm font-bold text-sun-ink">
-          <span>Вы работаете в мастерской «{impersonating.name}» от лица платформы. Действия записываются в журнал.</span>
-          <button onClick={() => void stopImpersonation()} className="underline underline-offset-2">
-            Вернуться в панель платформы
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#3A3320] bg-[#221E12] px-5 py-2.5 text-[13px] font-medium text-[#E4BE7C]">
+          <span>
+            Вы в мастерской «{impersonating.name}» от лица платформы. Действия записываются в журнал.
+          </span>
+          <button onClick={() => void stopImpersonation()} className="font-bold underline underline-offset-2">
+            Вернуться в панель
           </button>
         </div>
       )}
 
       <div className="lg:flex">
-        <aside className="hidden w-[220px] shrink-0 border-r border-line bg-surface p-4 lg:flex lg:min-h-screen lg:flex-col">
-          <div className="mb-6 flex items-center gap-2.5 px-1">
-            <div className="h-9 w-9 rounded-[10px] bg-primary" />
-            <span className="font-extrabold tracking-tight">RepairShop</span>
+        <aside className="hidden w-[240px] shrink-0 border-r border-line bg-surface p-3.5 lg:flex lg:min-h-screen lg:flex-col">
+          <div className="mb-6 px-1.5 pt-1.5">
+            <BrandRow />
           </div>
+
           <nav className="space-y-1">
             {items.map((i) => (
-              <NavLink key={i.to} to={i.to} end={i.to === "/"} className={linkClass}>
-                <span className="flex-1">{i.label}</span>
-                {!!i.badge && <Badge count={i.badge} />}
+              <NavLink key={i.to} to={i.to} end={i.to === "/"} className={sideLink}>
+                {({ isActive }) => (
+                  <>
+                    <span
+                      className={
+                        "absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-brand transition-opacity duration-150 " +
+                        (isActive ? "opacity-100" : "opacity-0")
+                      }
+                    />
+                    <span className="[&>svg]:h-[19px] [&>svg]:w-[19px] [&>svg]:transition-transform [&>svg]:duration-150 group-hover:[&>svg]:scale-110">
+                      {i.icon}
+                    </span>
+                    <span className="flex-1">{i.label}</span>
+                    {!!i.badge && <Badge count={i.badge} />}
+                  </>
+                )}
               </NavLink>
             ))}
           </nav>
-          <div className="mt-auto border-t border-line pt-4">
-            <p className="truncate px-1 text-sm font-bold">{title}</p>
-            <p className="truncate px-1 text-xs text-ink-muted">{subtitle}</p>
-            <Button variant="ghost" className="mt-2 w-full px-3 text-sm" onClick={() => void logout()}>
+
+          <div className="mt-auto border-t border-line pt-3">
+            <div className="px-2 pb-2">
+              <p className="truncate text-[13.5px] font-semibold">{title}</p>
+              <p className="truncate text-[12px] text-ink-dim">{subtitle}</p>
+            </div>
+            <button
+              onClick={() => void logout()}
+              className="flex h-10 w-full items-center gap-3 rounded-field px-3 text-[14px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink"
+            >
+              <IconLogout className="h-[18px] w-[18px]" />
               Выйти
-            </Button>
+            </button>
           </div>
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col">
-          <header className="flex items-center justify-between border-b border-line bg-surface px-5 py-3 lg:hidden">
-            <div className="min-w-0">
-              <p className="truncate font-bold">{title}</p>
-              <p className="truncate text-xs text-ink-muted">{subtitle}</p>
-            </div>
-            <Button variant="ghost" className="px-3 text-sm" onClick={() => void logout()}>
+          <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5 lg:hidden">
+            <BrandRow />
+            <button
+              onClick={() => void logout()}
+              className="flex h-9 items-center gap-2 rounded-field px-3 text-[13px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-raised"
+            >
+              <IconLogout className="h-[17px] w-[17px]" />
               Выйти
-            </Button>
+            </button>
           </header>
 
-          <main className="flex-1 p-5 pb-24 sm:p-7 lg:pb-7">
-            <Outlet />
+          <main className="flex-1 p-4 pb-28 sm:p-6 lg:p-8 lg:pb-8">
+            <div className="mx-auto max-w-[1240px]">
+              <Outlet />
+            </div>
           </main>
 
-          <nav
-            className="fixed inset-x-0 bottom-0 grid border-t border-line bg-surface px-2 pb-4 pt-2 lg:hidden"
-            style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
-          >
+          <nav className="fixed inset-x-0 bottom-0 z-40 grid auto-cols-[minmax(60px,1fr)] grid-flow-col overflow-x-auto border-t border-line bg-surface px-1 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
             {items.map((i) => (
               <NavLink
                 key={i.to}
                 to={i.to}
                 end={i.to === "/"}
                 className={({ isActive }) =>
-                  "flex flex-col items-center gap-1 rounded-xl py-1.5 text-[11px] font-semibold " +
-                  (isActive ? "text-primary" : "text-ink-muted")
+                  "flex flex-col items-center gap-1 rounded-field py-1.5 text-[10.5px] font-medium transition-colors duration-150 " +
+                  (isActive ? "text-brand" : "text-ink-dim")
                 }
               >
-                {({ isActive }) => (
-                  <>
-                    <span className="relative">
-                      <span className={"block h-6 w-6 rounded-lg " + (isActive ? "bg-primary" : "bg-[#DCD3C5]")} />
-                      {!!i.badge && (
-                        <span className="absolute -right-2.5 -top-1.5">
-                          <Badge count={i.badge} />
-                        </span>
-                      )}
+                <span className="relative [&>svg]:h-[21px] [&>svg]:w-[21px]">
+                  {i.icon}
+                  {!!i.badge && (
+                    <span className="absolute -right-2.5 -top-1.5">
+                      <Badge count={i.badge} />
                     </span>
-                    {i.label}
-                  </>
-                )}
+                  )}
+                </span>
+                {i.label}
               </NavLink>
             ))}
           </nav>

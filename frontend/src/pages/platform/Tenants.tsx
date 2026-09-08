@@ -82,7 +82,7 @@ export default function Tenants() {
                 <StatusChip tone={STATUS_LABEL[t.status].tone}>{STATUS_LABEL[t.status].text}</StatusChip>
               </div>
 
-              <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line-row pt-4 text-sm">
+              <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4 text-sm">
                 <div>
                   <dt className="text-ink-muted">Сотрудники</dt>
                   <dd className="font-bold">
@@ -187,7 +187,7 @@ function CreateTenantModal({ onClose, onDone }: { onClose: () => void; onDone: (
           <Input value={form.slug} onChange={set("slug")} placeholder="lenina" autoCapitalize="none" invalid={!!error?.field("slug")} />
         </Field>
 
-        <div className="border-t border-line-row pt-4">
+        <div className="border-t border-line pt-4">
           <SectionLabel>Учётная запись владельца</SectionLabel>
         </div>
 

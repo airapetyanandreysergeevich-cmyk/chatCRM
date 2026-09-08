@@ -1,28 +1,82 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { IconSearch } from "./icons";
 
-const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
+const cx = (...p: Array<string | false | null | undefined>) => p.filter(Boolean).join(" ");
 
 export function Button({
   variant = "primary",
+  icon,
   className,
+  children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; icon?: ReactNode }) {
   const base =
-    "inline-flex items-center justify-center rounded-field px-5 font-bold transition min-h-[52px] sm:min-h-[46px] disabled:cursor-not-allowed";
+    "inline-flex items-center justify-center gap-2 rounded-field px-4 text-sm font-semibold " +
+    "min-h-[44px] transition-all duration-150 active:scale-[.985] " +
+    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand " +
+    "disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100";
   const variants = {
-    primary: "bg-primary text-white hover:bg-primary-press disabled:bg-[#EDE7DD] disabled:text-ink-ghost",
-    secondary: "bg-surface border-[1.5px] border-line-strong text-ink hover:bg-primary-tint",
-    ghost: "text-primary hover:bg-primary-tint",
-    danger: "bg-surface border-[1.5px] border-status-cancelled text-[#93302F] hover:bg-[#FBE1E1]",
+    primary: "bg-brand text-white hover:bg-brand-press",
+    secondary: "bg-surface-raised text-ink border border-line hover:border-line-strong hover:bg-[#242936]",
+    ghost: "text-ink-muted hover:bg-surface-raised hover:text-ink",
+    danger: "bg-surface-raised text-state-off border border-[#40252B] hover:bg-[#2A1B20] hover:border-state-off",
   } as const;
-  return <button className={cx(base, variants[variant], className)} {...props} />;
+  return (
+    <button className={cx(base, variants[variant], className)} {...props}>
+      {icon && <span className="[&>svg]:h-[18px] [&>svg]:w-[18px]">{icon}</span>}
+      {children}
+    </button>
+  );
 }
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className,
+  interactive,
+}: {
+  children: ReactNode;
+  className?: string;
+  interactive?: boolean;
+}) {
   return (
-    <div className={cx("rounded-card border border-line bg-surface p-4 shadow-card sm:rounded-panel sm:p-6", className)}>
+    <div
+      className={cx(
+        "rounded-panel border border-line bg-surface p-5 shadow-card transition-all duration-150",
+        interactive && "hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised",
+        className
+      )}
+    >
       {children}
     </div>
+  );
+}
+
+export function PageHeader({
+  eyebrow,
+  title,
+  subtitle,
+  actions,
+}: {
+  eyebrow?: string;
+  title: string;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        {eyebrow && <SectionLabel>{eyebrow}</SectionLabel>}
+        <h1 className="mt-1.5 text-[26px] font-extrabold leading-none tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-2 text-sm text-ink-muted">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+export function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-ink-dim">{children}</p>
   );
 }
 
@@ -39,74 +93,97 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-bold text-ink-soft">{label}</span>
+      <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">{label}</span>
       {children}
-      {hint && !error && <span className="mt-1 block text-[13px] text-ink-muted">{hint}</span>}
-      {error && <span className="mt-1 block text-[13px] text-[#B5403F]">{error}</span>}
+      {hint && !error && <span className="mt-1.5 block text-[12.5px] text-ink-dim">{hint}</span>}
+      {error && <span className="mt-1.5 block text-[12.5px] text-state-off">{error}</span>}
     </label>
   );
 }
 
-const controlClass =
-  "w-full rounded-field border-[1.5px] bg-surface px-4 text-base text-ink outline-none transition min-h-[56px] sm:min-h-[52px] focus:border-primary";
+const control =
+  "w-full rounded-field border bg-surface-input px-3.5 text-[15px] text-ink placeholder:text-ink-dim " +
+  "min-h-[46px] outline-none transition-colors duration-150 focus:border-brand";
 
 export function Input({ invalid, className, ...props }: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
-  return (
-    <input
-      className={cx(controlClass, invalid ? "border-status-cancelled bg-[#FFF7F7]" : "border-line-strong", className)}
-      {...props}
-    />
-  );
+  return <input className={cx(control, invalid ? "border-state-off" : "border-line", className)} {...props} />;
 }
 
 export function Select({ invalid, className, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }) {
+  return <select className={cx(control, invalid ? "border-state-off" : "border-line", className)} {...props} />;
+}
+
+export function SearchInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <select
-      className={cx(controlClass, invalid ? "border-status-cancelled bg-[#FFF7F7]" : "border-line-strong", className)}
-      {...props}
-    />
+    <span className={cx("relative inline-flex w-full items-center", className)}>
+      <IconSearch className="pointer-events-none absolute left-3.5 h-[18px] w-[18px] text-ink-dim" />
+      <input className={cx(control, "border-line pl-11")} {...props} />
+    </span>
   );
 }
 
-/** Статус всегда обозначен и цветом, и текстом — цвет не единственный носитель смысла. */
-export function StatusChip({ tone, children }: { tone: "new" | "waiting" | "progress" | "done" | "cancelled"; children: ReactNode }) {
-  const tones = {
-    new: "bg-[#E4E9FF] text-[#2B44A8]",
-    waiting: "bg-[#FFF0D6] text-[#8A5E11]",
-    progress: "bg-[#D9F2F6] text-[#12656F]",
-    done: "bg-[#DDF3E6] text-[#186B41]",
-    cancelled: "bg-[#FBE1E1] text-[#93302F]",
+/** Статус обозначен и цветом, и словом — цвет никогда не единственный носитель смысла. */
+export function StatusChip({
+  tone,
+  children,
+}: {
+  tone: "new" | "waiting" | "progress" | "done" | "cancelled";
+  children: ReactNode;
+}) {
+  const map = {
+    new: ["bg-[#152239]", "text-[#7FB0FF]", "bg-state-new"],
+    waiting: ["bg-[#2B2416]", "text-[#EFC079]", "bg-state-waiting"],
+    progress: ["bg-[#13272C]", "text-[#79D2E2]", "bg-state-progress"],
+    done: ["bg-[#152A22]", "text-[#72D6A6]", "bg-state-done"],
+    cancelled: ["bg-[#2D1A1D]", "text-[#EE9494]", "bg-state-off"],
   } as const;
-  const dots = {
-    new: "bg-status-new",
-    waiting: "bg-status-waiting",
-    progress: "bg-status-progress",
-    done: "bg-status-done",
-    cancelled: "bg-status-cancelled",
-  } as const;
+  const [bg, fg, dot] = map[tone];
   return (
-    <span className={cx("inline-flex items-center gap-2 rounded-pill px-3 py-1.5 text-[13px] font-bold", tones[tone])}>
-      <span className={cx("h-2 w-2 rounded-full", dots[tone])} />
+    <span className={cx("inline-flex items-center gap-2 rounded-pill px-2.5 py-1 text-[12.5px] font-semibold", bg, fg)}>
+      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />
       {children}
     </span>
   );
 }
 
-export function SectionLabel({ children }: { children: ReactNode }) {
-  return <p className="text-xs font-extrabold uppercase tracking-[0.13em] text-ink-label">{children}</p>;
+export function Banner({ tone = "info", children }: { tone?: "info" | "warning" | "error"; children: ReactNode }) {
+  const map = {
+    info: "border-[#1E3550] bg-[#111E2C] text-[#9CC9F0]",
+    warning: "border-[#3A3320] bg-[#221E12] text-[#E4BE7C]",
+    error: "border-[#3E2529] bg-[#241619] text-[#EE9494]",
+  } as const;
+  return <div className={cx("rounded-card border px-4 py-3 text-[13.5px] leading-relaxed", map[tone])}>{children}</div>;
 }
 
-export function Banner({ tone = "warning", children }: { tone?: "warning" | "error"; children: ReactNode }) {
-  const tones = {
-    warning: "border-[#F5E2B8] bg-[#FFF8E8] text-[#8A5E11]",
-    error: "border-[#F3C6C6] bg-[#FFF7F7] text-[#B5403F]",
-  } as const;
-  return <div className={cx("rounded-xl border px-4 py-3 text-sm", tones[tone])}>{children}</div>;
+export function EmptyState({
+  icon,
+  title,
+  children,
+  action,
+}: {
+  icon?: ReactNode;
+  title: string;
+  children?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <Card className="flex flex-col items-center px-6 py-14 text-center">
+      {icon && (
+        <span className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-card bg-surface-raised text-ink-dim [&>svg]:h-6 [&>svg]:w-6">
+          {icon}
+        </span>
+      )}
+      <h2 className="text-lg font-bold">{title}</h2>
+      {children && <p className="mt-2 max-w-md text-sm leading-relaxed text-ink-muted">{children}</p>}
+      {action && <div className="mt-5">{action}</div>}
+    </Card>
+  );
 }
 
 export function Spinner({ label = "Загрузка" }: { label?: string }) {
   return (
-    <div className="flex min-h-[200px] items-center justify-center text-ink-muted" role="status">
+    <div className="flex min-h-[220px] items-center justify-center gap-3 text-ink-muted" role="status">
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-line-strong border-t-brand" />
       {label}…
     </div>
   );

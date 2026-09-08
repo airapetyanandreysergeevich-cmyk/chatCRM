@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../lib/api";
+import { BrandRow } from "../components/Brand";
 import { Banner, Button, Card, Field, Input, SectionLabel } from "../components/ui";
 
 /**
@@ -38,15 +39,15 @@ export default function Register() {
 
   if (sent) {
     return (
-      <div className="flex min-h-full items-center justify-center bg-canvas p-5">
+      <div className="flex min-h-full items-center justify-center bg-bg p-5">
         <Card className="max-w-[460px]">
           <SectionLabel>Заявка отправлена</SectionLabel>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight">Спасибо, {form.ownerFullName}</h1>
-          <p className="mt-3 text-ink-muted">
+          <p className="mt-3 leading-relaxed text-ink-muted">
             Мы посмотрим заявку и свяжемся с вами по телефону {form.ownerPhone}. После подключения вход будет
             по адресу {form.ownerEmail} и паролю, который вы задали, — придумывать заново ничего не придётся.
           </p>
-          <Link to="/login" className="mt-5 inline-block font-bold text-primary">
+          <Link to="/login" className="mt-5 inline-block font-semibold text-brand hover:text-brand-ink">
             Вернуться ко входу
           </Link>
         </Card>
@@ -55,11 +56,10 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-full bg-canvas px-5 py-10">
+    <div className="min-h-full bg-bg px-5 py-10">
       <div className="mx-auto max-w-[460px]">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="h-11 w-11 rounded-xl bg-primary" />
-          <span className="text-lg font-extrabold tracking-tight">RepairShop</span>
+        <div className="mb-8">
+          <BrandRow />
         </div>
 
         <SectionLabel>Подключение</SectionLabel>
@@ -118,9 +118,9 @@ export default function Register() {
           </Button>
         </form>
 
-        <p className="mt-5 text-[13px] text-ink-muted">
+        <p className="mt-6 text-[13.5px] text-ink-muted">
           Уже подключены?{" "}
-          <Link to="/login" className="font-bold text-primary">
+          <Link to="/login" className="font-semibold text-brand hover:text-brand-ink">
             Войти
           </Link>
         </p>

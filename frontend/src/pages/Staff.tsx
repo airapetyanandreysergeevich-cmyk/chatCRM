@@ -72,16 +72,16 @@ export default function Staff() {
               <div>
                 <h2 className="text-[17px] font-bold leading-tight">
                   {u.fullName}
-                  {u.isOwner && <span className="ml-2 text-[13px] font-bold text-primary">владелец</span>}
+                  {u.isOwner && <span className="ml-2 text-[13px] font-bold text-brand">владелец</span>}
                 </h2>
                 <p className="mt-1 text-sm text-ink-muted">
                   {u.role?.name ?? "без роли"} · <span className="font-mono">{u.email}</span>
                 </p>
               </div>
-              {!u.isActive && <span className="rounded-pill bg-[#F2EDE4] px-3 py-1 text-[13px] font-bold text-ink-ghost">отключён</span>}
+              {!u.isActive && <span className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12.5px] font-semibold text-ink-dim">отключён</span>}
             </div>
 
-            <p className="mt-3 border-t border-line-row pt-3 text-[13px] text-ink-muted">
+            <p className="mt-3 border-t border-line pt-3 text-[13px] text-ink-muted">
               Последний вход: {formatDateTime(u.lastLoginAt)}
             </p>
 

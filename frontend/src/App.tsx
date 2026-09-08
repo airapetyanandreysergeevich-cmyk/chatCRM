@@ -6,7 +6,12 @@ import { useAuth } from "./lib/auth";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
+import Clients from "./pages/Clients";
+import Dashboard from "./pages/Dashboard";
+import Orders from "./pages/Orders";
+import Purchases from "./pages/Purchases";
 import Staff from "./pages/Staff";
+import Stock from "./pages/Stock";
 import Tenants from "./pages/platform/Tenants";
 
 function Soon({ title }: { title: string }) {
@@ -23,7 +28,7 @@ function Soon({ title }: { title: string }) {
 function Home() {
   const { me } = useAuth();
   if (me?.kind === "platform" && !me.impersonating) return <Navigate to="/platform/tenants" replace />;
-  return <Soon title="Сводка" />;
+  return <Dashboard />;
 }
 
 export default function App() {
@@ -37,7 +42,10 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
-          <Route path="/orders" element={<Soon title="Заказы" />} />
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/clients" element={<Clients />} />
+          <Route path="/stock" element={<Stock />} />
+          <Route path="/purchases" element={<Purchases />} />
           <Route path="/staff" element={<Staff />} />
           <Route path="/platform/tenants" element={<Tenants />} />
           <Route path="/platform/applications" element={<Applications />} />

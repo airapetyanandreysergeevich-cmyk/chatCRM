@@ -11,4 +11,21 @@
   body {
     -webkit-tap-highlight-color: transparent;
   }
+  /* Полосы прокрутки в тон теме — светлые выглядят заплаткой на тёмном. */
+  * {
+    scrollbar-color: #333a4a #0f1117;
+    scrollbar-width: thin;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #2b3140;
+    border: 2px solid #0f1117;
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3a4152;
+  }
 }
