@@ -6,7 +6,8 @@
 #   1. проверяет, что сайт отдаётся по https;
 #   2. создаёт ключ подписи, если его ещё нет, и запоминает пароль в deploy/.env;
 #   3. кладёт .well-known/assetlinks.json с отпечатком ключа во фронтенд;
-#   4. собирает образ с Android SDK и подписанный APK.
+#   4. собирает образ с Android SDK и подписанный APK;
+#   5. пересобирает фронтенд и проверяет, что файл действительно скачивается.
 #
 # На сервере ничего ставить не надо: Java, Android SDK и bubblewrap живут
 # внутри контейнеров. Нужен только докер.
@@ -24,7 +25,7 @@ IMAGE="finecrm-android-build"
 # Тот же образ, что и в deploy/android/Dockerfile — слой скачается один раз на двоих.
 JDK_IMAGE="eclipse-temurin:17-jdk"
 
-step() { printf '\n\033[1m[%s/6] %s\033[0m\n' "$1" "$2"; }
+step() { printf '\n\033[1m[%s/7] %s\033[0m\n' "$1" "$2"; }
 die() { printf '\n\033[31mОшибка: %s\033[0m\n' "$1" >&2; exit 1; }
 
 # keytool идёт вместе с JDK, которого на сервере нет и не должно быть:
@@ -141,15 +142,43 @@ PUBLIC_APK="$ROOT/frontend/public/app/finecrm.apk"
 mkdir -p "$(dirname "$PUBLIC_APK")"
 cp "$APK" "$PUBLIC_APK"
 
+echo "  собран: $APK ($(du -h "$PUBLIC_APK" | cut -f1))"
+
+# ------------------------------------------------------------------ 7. на сайт
+# Пересборка здесь, а не отдельным шагом в инструкции: без неё на сайт не
+# попадут ни файл, ни assetlinks.json, а телефон вместо приложения скачает
+# страницу сайта под именем finecrm.apk. Забыть этот шаг слишком легко.
+step 7 "Выкладываем на сайт"
+docker compose --env-file "$ENV_FILE" up -d --build frontend
+
+echo "  ждём, пока поднимется…"
+sleep 5
+
+URL="https://$DOMAIN/app/finecrm.apk"
+TYPE="$(curl -fsSI --max-time 20 "$URL" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print $2}')"
+SIZE="$(curl -fsSI --max-time 20 "$URL" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{print $2}')"
+
+if [ "$TYPE" = "application/vnd.android.package-archive" ] && [ "${SIZE:-0}" -gt 100000 ]; then
+  echo "  проверено: $URL отдаётся правильно ($((SIZE / 1024)) КБ)"
+else
+  die "по адресу $URL лежит не то.
+     Тип: ${TYPE:-нет}, размер: ${SIZE:-нет}.
+     Ожидался application/vnd.android.package-archive и файл в несколько мегабайт.
+     Если тип text/html — сайт отдаёт свою страницу вместо файла: проверьте,
+     что frontend/nginx.conf содержит блок для .apk, и пересоберите фронтенд."
+fi
+
+ASSET_URL="https://$DOMAIN/.well-known/assetlinks.json"
+if curl -fsS --max-time 20 "$ASSET_URL" | grep -q "$FINGERPRINT"; then
+  echo "  проверено: отпечаток в assetlinks.json совпадает с ключом"
+else
+  die "на $ASSET_URL нет нужного отпечатка.
+     Без этого Android покажет адресную строку поверх приложения."
+fi
+
 echo
-echo "Готово: $APK"
-echo "Для скачивания с сайта: frontend/public/app/finecrm.apk ($(du -h "$PUBLIC_APK" | cut -f1))"
+echo "Готово. Сотрудники с Android увидят предложение установить приложение"
+echo "прямо в системе, файл — на $URL"
 echo
-echo "Дальше — обязательно пересоберите фронтенд, иначе на сайт не попадут"
-echo "ни сам файл, ни assetlinks.json, без которого Android покажет"
-echo "адресную строку поверх приложения:"
-echo
-echo "  docker compose --env-file deploy/.env up -d --build frontend"
-echo
-echo "После этого сотрудники с Android увидят предложение установить"
-echo "приложение прямо в системе — файл будет на https://$DOMAIN/app/finecrm.apk"
+echo "Себе можно забрать так:"
+echo "  scp root@$(hostname -I | awk '{print $1}'):$APK ."
