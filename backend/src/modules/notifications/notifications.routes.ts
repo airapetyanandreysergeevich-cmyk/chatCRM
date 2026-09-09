@@ -100,6 +100,34 @@ pushRouter.post(
   })
 );
 
+/**
+ * Браузер сообщает, стоит ли на этом телефоне наше андроид-приложение.
+ *
+ * Сам сервер узнать этого не может: сайту не положено видеть список
+ * установленных программ. Отвечает только Chrome и только про наш пакет —
+ * связь домена и приложения подтверждена с двух сторон.
+ *
+ * Значение справочное: владелец видит в списке сотрудников, кто ещё без
+ * приложения, потому что мастер без него не получает оповещений о заказах.
+ */
+pushRouter.post(
+  "/android",
+  ah(async (req, res) => {
+    const { installed } = z.object({ installed: z.boolean() }).parse(req.body);
+    const auth = req.auth!;
+    if (auth.kind !== "tenant") return res.json({ ok: true });
+
+    await withTenant(auth.tenantId, (tx) =>
+      tx.user.updateMany({
+        where: { id: auth.userId },
+        data: { androidAppAt: installed ? new Date() : null },
+      })
+    );
+
+    res.json({ ok: true });
+  })
+);
+
 /** Проверка канала: приходит ровно тому, кто нажал кнопку. */
 pushRouter.post(
   "/test",

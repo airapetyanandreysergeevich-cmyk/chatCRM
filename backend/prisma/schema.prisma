@@ -252,6 +252,10 @@ model User {
   salaryBase  Decimal? @db.Decimal(12, 2)
 
   lastLoginAt DateTime?
+  /// Когда браузер сотрудника последний раз подтвердил, что андроид-приложение
+  /// установлено. Пусто — значит его нет или человек работает не с Android.
+  /// Нужно владельцу: мастер без приложения не получает оповещений о заказах.
+  androidAppAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?

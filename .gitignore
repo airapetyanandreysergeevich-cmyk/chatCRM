@@ -28,3 +28,18 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# сборка андроид-приложения
+# Ключ подписи в репозитории — это возможность подписать поддельное
+# обновление. Держим его только на сервере и в отдельной копии.
+deploy/android/android.keystore
+deploy/android/*.apk
+deploy/android/app/
+deploy/android/.gradle/
+deploy/android/build/
+deploy/android/gradle*
+deploy/android/*.gradle
+deploy/android/store_icon.png
+deploy/android/manifest-checksum.txt
+# APK для скачивания собирается на сервере, в git ему делать нечего
+frontend/public/app/

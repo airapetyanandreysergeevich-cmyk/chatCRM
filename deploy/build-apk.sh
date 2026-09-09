@@ -135,13 +135,21 @@ docker run --rm \
 APK="$ANDROID_DIR/app-release-signed.apk"
 [ -f "$APK" ] || die "APK не появился — смотрите вывод выше"
 
+# Кладём файл туда, откуда его отдаёт сайт: сотруднику показывается кнопка
+# «Скачать», рассылать файл руками не нужно.
+PUBLIC_APK="$ROOT/frontend/public/app/finecrm.apk"
+mkdir -p "$(dirname "$PUBLIC_APK")"
+cp "$APK" "$PUBLIC_APK"
+
 echo
 echo "Готово: $APK"
+echo "Для скачивания с сайта: frontend/public/app/finecrm.apk ($(du -h "$PUBLIC_APK" | cut -f1))"
 echo
-echo "Дальше:"
-echo "  1. Пересоберите фронтенд, чтобы assetlinks.json попал на сайт:"
-echo "     docker compose --env-file deploy/.env up -d --build frontend"
-echo "  2. Заберите файл к себе:"
-echo "     scp root@$(hostname -I | awk '{print $1}'):$APK ."
-echo "  3. Отправьте сотрудникам. При установке Android один раз спросит"
-echo "     разрешение на установку из неизвестного источника."
+echo "Дальше — обязательно пересоберите фронтенд, иначе на сайт не попадут"
+echo "ни сам файл, ни assetlinks.json, без которого Android покажет"
+echo "адресную строку поверх приложения:"
+echo
+echo "  docker compose --env-file deploy/.env up -d --build frontend"
+echo
+echo "После этого сотрудники с Android увидят предложение установить"
+echo "приложение прямо в системе — файл будет на https://$DOMAIN/app/finecrm.apk"

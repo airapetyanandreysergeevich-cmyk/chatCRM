@@ -20,6 +20,7 @@ interface StaffRow {
   isOwner: boolean;
   isActive: boolean;
   lastLoginAt: string | null;
+  androidAppAt: string | null;
   role: { id: string; name: string; code: string | null } | null;
 }
 
@@ -81,9 +82,16 @@ export default function Staff() {
               {!u.isActive && <span className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12.5px] font-semibold text-ink-dim">отключён</span>}
             </div>
 
-            <p className="mt-3 border-t border-line pt-3 text-[13px] text-ink-muted">
-              Последний вход: {formatDateTime(u.lastLoginAt)}
-            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-[13px] text-ink-muted">
+              <span>Последний вход: {formatDateTime(u.lastLoginAt)}</span>
+              {/* Мастер без приложения не получает оповещений о заказах —
+                  владельцу стоит видеть это, не спрашивая каждого. */}
+              {u.androidAppAt ? (
+                <span className="text-ink-dim">приложение установлено</span>
+              ) : (
+                <span className="text-ink-dim">приложение не установлено</span>
+              )}
+            </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
               <Button variant="secondary" className="px-4 text-sm" onClick={() => setResetting(u)}>

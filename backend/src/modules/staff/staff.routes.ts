@@ -49,6 +49,9 @@ staffRouter.get(
         isOwner: u.isOwner,
         isActive: u.isActive,
         lastLoginAt: u.lastLoginAt,
+        // Владельцу важно видеть, у кого нет приложения: без него мастер
+        // не получает оповещений о назначенных заказах.
+        androidAppAt: u.androidAppAt,
         role: u.role,
         workPercent: u.workPercent,
         partPercent: u.partPercent,

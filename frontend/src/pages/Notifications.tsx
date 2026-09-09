@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { IconBell, IconShare } from "../components/icons";
 import { Banner, Button, Card, PageHeader, SectionLabel, Spinner } from "../components/ui";
 import { ApiError, api } from "../lib/api";
+import { InstallAppCard } from "../components/InstallApp";
 import { useAuth } from "../lib/auth";
 import { formatDateTime } from "../lib/format";
 import {
@@ -295,6 +296,7 @@ export default function Notifications() {
       />
 
       <DeviceCard />
+      <InstallAppCard />
       {inWorkshop && <Feed />}
 
       {canManage && (
