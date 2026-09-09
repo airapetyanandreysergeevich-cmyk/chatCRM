@@ -1,23 +1,40 @@
 #!/usr/bin/env bash
 # Проверка типов без полной сборки образов: секунды вместо минут.
-# Использует node_modules и сгенерированный клиент Prisma, оставшиеся после db-init-migrations.sh.
+#
+# node_modules переиспользуется между запусками, но переустанавливается,
+# как только менялся package.json. Раньше условием было «папки нет» — и
+# после добавления новой зависимости проверка месяцами показывала бы
+# ошибку из устаревших пакетов, хотя настоящая сборка проходит. Проверка,
+# которой нельзя верить, хуже отсутствующей.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo ">>> Бэкенд"
-docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c '
+# Сравниваем содержимое package.json, а не даты: git checkout переписывает
+# даты у всех файлов, и по ним переустановка шла бы после каждого pull.
+INSTALL='
   set -e
-  [ -d node_modules ] || npm install --no-audit --no-fund
+  HASH_FILE=node_modules/.package-md5
+  WANT=$(md5sum package.json | cut -d" " -f1)
+  HAVE=$(cat "$HASH_FILE" 2>/dev/null || echo нет)
+  if [ ! -d node_modules ] || [ "$WANT" != "$HAVE" ]; then
+    echo "    зависимости изменились, ставлю…"
+    npm install --no-audit --no-fund
+    printf %s "$WANT" > "$HASH_FILE"
+  fi
+'
+
+echo ">>> Бэкенд"
+docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
   npx prisma generate >/dev/null
   npx tsc -p tsconfig.json --noEmit
-' && echo "    типы сходятся"
+" && echo "    типы сходятся"
 
 echo ">>> Фронтенд"
-docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c '
-  set -e
-  [ -d node_modules ] || npm install --no-audit --no-fund
+docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
   npx tsc --noEmit
-' && echo "    типы сходятся"
+" && echo "    типы сходятся"
 
 echo
-echo ">>> Всё сходится, можно собирать: bash deploy/install.sh"
+echo ">>> Всё сходится. Обновить сервер: bash deploy/update.sh"
