@@ -156,7 +156,7 @@ async function applyStock(
   const wanted = val(v["Склад"]);
   const warehouse =
     (wanted ? await tx.warehouse.findFirst({ where: { name: wanted } }) : null) ??
-    (await tx.warehouse.findFirst({ orderBy: { createdAt: "asc" } })) ??
+    (await tx.warehouse.findFirst({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] })) ??
     (await tx.warehouse.create({ data: { tenantId, name: "Основной склад" } }));
 
   const balance = await tx.stockBalance.findFirst({
@@ -255,6 +255,19 @@ async function applyOrder(
 
   const kindLabel = (v["Тип обращения"] ?? "").trim().toLowerCase();
 
+  // acceptedById в схеме обязателен: заказ не может быть ничей. Если файл
+  // грузит собственник платформы через «войти как», своей учётки внутри
+  // мастерской у него нет — записываем приём на владельца.
+  const acceptedById =
+    userId ??
+    (
+      await tx.user.findFirst({
+        where: { isOwner: true, deletedAt: null },
+        select: { id: true },
+      })
+    )?.id;
+  if (!acceptedById) throw new Error("в мастерской нет владельца, некому записать приём заказа");
+
   await tx.order.create({
     data: {
       ...common,
@@ -265,7 +278,7 @@ async function applyOrder(
       customerId: customer.id,
       deviceId: device?.id ?? null,
       statusId: status.id,
-      acceptedById: userId,
+      acceptedById,
       acceptedAt: parseDate(v["Принят"]) ?? new Date(),
       completeness: [],
       appearance: [],

@@ -20,6 +20,7 @@ export type AuditAction =
 export async function writeAudit(
   tx: Prisma.TransactionClient,
   params: {
+    tenantId: string;
     userId?: string | null;
     entity: string;
     entityId: string;
@@ -30,13 +31,14 @@ export async function writeAudit(
 ) {
   await tx.auditLog.create({
     data: {
+      tenantId: params.tenantId,
       userId: params.userId ?? null,
       entity: params.entity,
       entityId: params.entityId,
       action: params.action,
       diff: params.diff as Prisma.InputJsonValue | undefined,
       ip: params.ip ?? null,
-    } as Prisma.AuditLogUncheckedCreateInput,
+    },
   });
 }
 
