@@ -22,4 +22,12 @@ export const env = {
   s3AccessKey: process.env.S3_ACCESS_KEY ?? "",
   s3SecretKey: process.env.S3_SECRET_KEY ?? "",
   maxFileSizeMb: Number(process.env.MAX_FILE_SIZE_MB ?? 50),
+
+  // Ключи Web Push. Без них оповещения просто не включаются: приложение
+  // работает как обычно, а кнопка подписки честно говорит, что канал не настроен.
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? "",
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",
+  vapidSubject: process.env.VAPID_SUBJECT ?? "mailto:admin@finecrm.ru",
 };
+
+export const pushConfigured = Boolean(env.vapidPublicKey && env.vapidPrivateKey);

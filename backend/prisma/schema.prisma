@@ -42,6 +42,7 @@ model PlatformUser {
   auditLogs      PlatformAuditLog[]
   sessions       Session[]
   reviewedApplications TenantApplication[]
+  pushSubscriptions    PushSubscription[]
 }
 
 model Tenant {
@@ -785,17 +786,26 @@ model Notification {
   @@index([tenantId, userId, readAt])
 }
 
+/// Подписка браузера на push. Одна строка — одно устройство одного человека.
+/// tenantId и userId пустые у собственника платформы: он не принадлежит мастерской,
+/// а оповещения о новых заявках получать должен. Политика RLS пропускает такие
+/// строки только в режиме платформы, мастерским они не видны.
 model PushSubscription {
-  id        String   @id @default(uuid())
-  tenantId  String
-  userId    String
-  endpoint  String   @unique
-  p256dh    String
-  auth      String
-  createdAt DateTime @default(now())
+  id             String    @id @default(uuid())
+  tenantId       String?
+  userId         String?
+  platformUserId String?
+  endpoint       String    @unique
+  p256dh         String
+  auth           String
+  userAgent      String?
+  failedAt       DateTime?
+  createdAt      DateTime  @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  user   User   @relation(fields: [userId], references: [id])
+  tenant       Tenant?       @relation(fields: [tenantId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+  platformUser PlatformUser? @relation(fields: [platformUserId], references: [id])
 
   @@index([tenantId, userId])
+  @@index([platformUserId])
 }

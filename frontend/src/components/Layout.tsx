@@ -6,6 +6,7 @@ import { BrandRow } from "./Brand";
 import {
   IconAdmins,
   IconApplications,
+  IconBell,
   IconClients,
   IconDashboard,
   IconJournal,
@@ -36,6 +37,7 @@ function Badge({ count }: { count: number }) {
 export default function Layout() {
   const { me, can, logout, applyToken } = useAuth();
   const [pending, setPending] = useState(0);
+  const [unread, setUnread] = useState(0);
 
   const isPlatformPanel = me?.kind === "platform" && !me.impersonating;
   useEffect(() => {
@@ -54,6 +56,25 @@ export default function Layout() {
       clearInterval(timer);
     };
   }, [isPlatformPanel]);
+
+  const inWorkshopNow = me?.kind === "tenant" || (me?.kind === "platform" && !!me.impersonating);
+  useEffect(() => {
+    if (!inWorkshopNow) return;
+    let alive = true;
+    const load = () =>
+      api
+        .get<{ unread: number }>("/notifications")
+        .then((r) => alive && setUnread(r.unread))
+        .catch(() => undefined);
+    void load();
+    // Push доносит оповещение мгновенно, но он есть не у всех и не всегда.
+    // Счётчик в меню — тот канал, который работает у любого сотрудника.
+    const timer = setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [inWorkshopNow]);
 
   if (!me) return null;
 
@@ -82,9 +103,14 @@ export default function Layout() {
     { to: "/platform/applications", label: "Заявки", icon: <IconApplications />, badge: pending },
     { to: "/platform/admins", label: "Администраторы", icon: <IconAdmins /> },
     { to: "/platform/audit", label: "Журнал", icon: <IconJournal /> },
+    { to: "/notifications", label: "Оповещения", icon: <IconBell /> },
   ];
 
-  const items = inWorkshop ? workshopNav : platformNav;
+  const bell: NavItem = { to: "/notifications", label: "Оповещения", icon: <IconBell />, badge: unread };
+  // В боковом меню помещается, в нижней панели телефона — уже нет,
+  // поэтому там колокольчик уезжает в шапку.
+  const items = [...(inWorkshop ? workshopNav : platformNav), bell];
+  const bottomItems = inWorkshop ? workshopNav : platformNav;
   const title = me.kind === "tenant" ? (me.tenant?.name ?? "Мастерская") : (impersonating?.name ?? "Платформа");
   const subtitle =
     me.kind === "tenant"
@@ -162,13 +188,30 @@ export default function Layout() {
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5 lg:hidden">
             <BrandRow />
-            <button
+            <div className="flex items-center gap-1">
+              <NavLink
+                to="/notifications"
+                className={({ isActive }) =>
+                  "relative flex h-9 w-9 items-center justify-center rounded-field transition-colors duration-150 " +
+                  (isActive ? "bg-brand-tint text-brand" : "text-ink-muted hover:bg-surface-raised")
+                }
+                aria-label="Оповещения"
+              >
+                <IconBell className="h-[18px] w-[18px]" />
+                {!!unread && (
+                  <span className="absolute -right-1 -top-1">
+                    <Badge count={unread} />
+                  </span>
+                )}
+              </NavLink>
+              <button
               onClick={() => void logout()}
               className="flex h-9 items-center gap-2 rounded-field px-3 text-[13px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-raised"
             >
-              <IconLogout className="h-[17px] w-[17px]" />
-              Выйти
-            </button>
+                <IconLogout className="h-[17px] w-[17px]" />
+                Выйти
+              </button>
+            </div>
           </header>
 
           <main className="flex-1 p-4 pb-28 sm:p-6 lg:p-8 lg:pb-8">
@@ -178,7 +221,7 @@ export default function Layout() {
           </main>
 
           <nav className="fixed inset-x-0 bottom-0 z-40 grid auto-cols-[minmax(60px,1fr)] grid-flow-col overflow-x-auto border-t border-line bg-surface px-1 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
-            {items.map((i) => (
+            {bottomItems.map((i) => (
               <NavLink
                 key={i.to}
                 to={i.to}

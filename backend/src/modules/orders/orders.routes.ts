@@ -10,6 +10,7 @@ import {
 } from "../../lib/dictionaries";
 import { env } from "../../lib/env";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
+import { notifyTenant } from "../../lib/notify";
 import { nextOrderNumber } from "../../lib/orderNumber";
 import { PERMISSIONS } from "../../lib/permissions";
 import { isAllowedUpload, putOrderFile, removeFile, signedUrl } from "../../lib/storage";
@@ -24,6 +25,7 @@ import {
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import {
   assertOrderAccess,
+  limitExceeded,
   orderInclude,
   previousRepairSummary,
   projectOrder,
@@ -38,6 +40,29 @@ ordersRouter.use(authenticate, requireTenant, enforceTenantStatus);
 
 const tenantOf = (req: Request) => currentTenantId(req)!;
 const has = (req: Request, code: string) => permissionsOf(req).includes(code);
+
+/**
+ * Оповещение о превышении согласованной суммы.
+ * Отдельной функцией, потому что зовётся из двух мест — работы и запчасти
+ * правят по очереди, а лимит один на заказ.
+ */
+function notifyLimit(
+  tenantId: string,
+  orderId: string,
+  over: { number: string; total: number; limit: number } | null,
+  actorId: string | null
+): void {
+  if (!over) return;
+  const money = (v: number) => `${v.toLocaleString("ru-RU")} ₽`;
+  void notifyTenant(tenantId, {
+    event: "order.limit_exceeded",
+    title: `Заказ ${over.number}: вышли за согласованную сумму`,
+    body: `Насчитано ${money(over.total)} при согласованных ${money(over.limit)}. Нужно согласовать с клиентом.`,
+    url: `/orders/${orderId}`,
+    exceptUserId: actorId,
+    payload: { orderId },
+  });
+}
 
 /** Фото приходят с телефона мастера, поэтому держим их в памяти и сразу кладём в хранилище. */
 const upload = multer({
@@ -249,6 +274,20 @@ ordersRouter.post(
       return order;
     });
 
+    // После транзакции: оповещение читает уже записанное и ходит в сеть,
+    // держать ради него открытым соединение с базой незачем.
+    if (created.assignedMasterId) {
+      void notifyTenant(tenantId, {
+        event: "order.assigned",
+        title: `Новый заказ ${created.number}`,
+        body: [body.device.kind, body.device.brand, body.device.model].filter(Boolean).join(" "),
+        url: `/orders/${created.id}`,
+        targetUserId: created.assignedMasterId,
+        exceptUserId: userId,
+        payload: { orderId: created.id },
+      });
+    }
+
     res.status(201).json({ id: created.id, number: created.number });
   })
 );
@@ -318,7 +357,7 @@ ordersRouter.patch(
     const body = patchSchema.parse(req.body);
     const tenantId = tenantOf(req);
 
-    await withTenant(tenantId, async (tx) => {
+    const assigned = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
 
@@ -342,7 +381,26 @@ ordersRouter.patch(
         diff: safeDiff(body as Record<string, unknown>),
         ip: clientIp(req),
       });
+
+      // Оповещаем только когда мастера действительно сменили: сохранение
+      // карточки без изменений не должно дёргать человека второй раз.
+      const changed =
+        body.assignedMasterId !== undefined && body.assignedMasterId !== order.assignedMasterId;
+      return changed && body.assignedMasterId
+        ? { masterId: body.assignedMasterId, number: order.number }
+        : null;
     });
+
+    if (assigned) {
+      void notifyTenant(tenantId, {
+        event: "order.assigned",
+        title: `Вам назначен заказ ${assigned.number}`,
+        url: `/orders/${req.params.id}`,
+        targetUserId: assigned.masterId,
+        exceptUserId: actorUserId(req),
+        payload: { orderId: req.params.id },
+      });
+    }
 
     res.json({ ok: true });
   })
@@ -434,7 +492,7 @@ ordersRouter.put(
     const tenantId = tenantOf(req);
     const me = req.auth?.kind === "tenant" ? req.auth.userId : null;
 
-    await withTenant(tenantId, async (tx) => {
+    const over = await withTenant(tenantId, async (tx) => {
       const order = await loadEditableOrder(req, tx);
       await tx.orderWork.deleteMany({ where: { orderId: order.id } });
       for (const w of works) {
@@ -452,8 +510,10 @@ ordersRouter.put(
         diff: { works: works.length },
         ip: clientIp(req),
       });
+      return limitExceeded(tx, order.id);
     });
 
+    notifyLimit(tenantId, req.params.id, over, actorUserId(req));
     res.json({ ok: true });
   })
 );
@@ -477,7 +537,7 @@ ordersRouter.put(
     const { parts } = partsSchema.parse(req.body);
     const tenantId = tenantOf(req);
 
-    await withTenant(tenantId, async (tx) => {
+    const over = await withTenant(tenantId, async (tx) => {
       const order = await loadEditableOrder(req, tx);
       await tx.orderPart.deleteMany({ where: { orderId: order.id } });
       for (const p of parts) {
@@ -495,8 +555,10 @@ ordersRouter.put(
         diff: { parts: parts.length },
         ip: clientIp(req),
       });
+      return limitExceeded(tx, order.id);
     });
 
+    notifyLimit(tenantId, req.params.id, over, actorUserId(req));
     res.json({ ok: true });
   })
 );
@@ -518,7 +580,7 @@ ordersRouter.post(
     const tenantId = tenantOf(req);
     const me = req.auth?.kind === "tenant" ? req.auth.userId : null;
 
-    await withTenant(tenantId, async (tx) => {
+    const completed = await withTenant(tenantId, async (tx) => {
       const order = await loadEditableOrder(req, tx);
       const done = await tx.orderStatus.findFirst({ where: { group: "DONE" }, orderBy: { sortOrder: "asc" } });
 
@@ -562,6 +624,24 @@ ordersRouter.post(
         diff: { completed: true },
         ip: clientIp(req),
       });
+
+      const device = await tx.device.findFirst({
+        where: { id: order.deviceId ?? "" },
+        select: { kind: true, brand: true, model: true },
+      });
+      return {
+        number: order.number,
+        device: [device?.kind, device?.brand, device?.model].filter(Boolean).join(" "),
+      };
+    });
+
+    void notifyTenant(tenantId, {
+      event: "order.completed",
+      title: `Ремонт готов — ${completed.number}`,
+      body: completed.device ? `${completed.device}. Можно звонить клиенту.` : "Можно звонить клиенту.",
+      url: `/orders/${req.params.id}`,
+      exceptUserId: me,
+      payload: { orderId: req.params.id },
     });
 
     res.json({ ok: true });

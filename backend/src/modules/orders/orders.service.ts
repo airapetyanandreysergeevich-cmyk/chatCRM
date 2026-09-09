@@ -197,6 +197,36 @@ export async function recalcTotals(tx: Prisma.TransactionClient, orderId: string
   });
 }
 
+/**
+ * Не вышла ли сумма за то, что согласовал клиент.
+ *
+ * Вызывать сразу после recalcTotals. Возвращает данные для оповещения ровно
+ * один раз на заказ: мастер правит список работ по многу раз, и каждое
+ * сохранение не должно приносить приёмщику новое сообщение об одном и том же.
+ */
+export async function limitExceeded(
+  tx: Prisma.TransactionClient,
+  orderId: string
+): Promise<{ number: string; total: number; limit: number } | null> {
+  const order = await tx.order.findFirst({
+    where: { id: orderId },
+    select: { number: true, approvedLimit: true, total: true },
+  });
+  if (!order?.approvedLimit) return null;
+
+  const total = Number(order.total ?? 0);
+  const limit = Number(order.approvedLimit);
+  if (total <= limit) return null;
+
+  const already = await tx.notification.findFirst({
+    where: { type: "order.limit_exceeded", payload: { path: ["orderId"], equals: orderId } },
+    select: { id: true },
+  });
+  if (already) return null;
+
+  return { number: order.number, total, limit };
+}
+
 /** Подписанные ссылки на вложения выдаются по одной и живут 15 минут. */
 export async function attachmentUrls(
   attachments: Array<{ id: string; objectKey: string }>

@@ -8,6 +8,7 @@ import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
 import Clients from "./pages/Clients";
 import Dashboard from "./pages/Dashboard";
+import NotificationsPage from "./pages/Notifications";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import Orders from "./pages/Orders";
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/stock" element={<Stock />} />
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/staff" element={<Staff />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/platform/tenants" element={<Tenants />} />
           <Route path="/platform/applications" element={<Applications />} />
           <Route path="/platform/admins" element={<Soon title="Администраторы платформы" />} />
