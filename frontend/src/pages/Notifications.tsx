@@ -133,13 +133,22 @@ function DeviceCard() {
                 disabled={busy}
                 onClick={async () => {
                   setBusy(true);
+                  setError(null);
+                  setNotice(null);
                   try {
                     const r = await testPush();
-                    setNotice(
-                      r.sent > 0
-                        ? "Отправили. Оповещение придёт через несколько секунд."
-                        : "Отправить не удалось: подписка устарела, включите оповещения заново."
-                    );
+                    // Раньше здесь было «отправили» на любой ответ сервера.
+                    // Отказ сервиса push выглядел успехом, и человек ждал
+                    // оповещение, которое не могло прийти.
+                    if (r.sent > 0) {
+                      setNotice("Отправили. Оповещение придёт через несколько секунд.");
+                    } else if (r.reasons.length) {
+                      setError(r.reasons.join(". "));
+                    } else if (r.removed > 0) {
+                      setError("Подписка этого устройства устарела. Выключите и включите оповещения заново.");
+                    } else {
+                      setError("Отправить не удалось, причина неизвестна — посмотрите журнал сервера.");
+                    }
                   } catch (err) {
                     setError(err instanceof ApiError ? err.message : "Не получилось");
                   } finally {

@@ -146,17 +146,27 @@ pushRouter.post(
     );
     if (targets.length === 0) throw badRequest("На этом аккаунте нет ни одного подписанного устройства");
 
-    const dead = await sendPush(targets, {
+    const result = await sendPush(targets, {
       title: "FineCRM",
       body: "Проверка связи — оповещения работают.",
       url: "/",
       tag: "test",
     });
-    if (dead.length) {
-      await withPlatform((tx) => tx.pushSubscription.deleteMany({ where: { id: { in: dead } } }));
+    if (result.dead.length) {
+      await withPlatform((tx) =>
+        tx.pushSubscription.deleteMany({ where: { id: { in: result.dead } } })
+      );
     }
 
-    res.json({ sent: targets.length - dead.length, removed: dead.length });
+    // Отдаём причины отказа, а не только счётчик: раньше отвергнутая подпись
+    // считалась успешной отправкой, и кнопка бодро рапортовала об отправке,
+    // пока на телефон ничего не приходило.
+    res.json({
+      sent: result.delivered,
+      removed: result.dead.length,
+      failed: result.failures.length,
+      reasons: [...new Set(result.failures.map((f) => f.reason))],
+    });
   })
 );
 

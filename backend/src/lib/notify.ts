@@ -153,7 +153,7 @@ async function deliver(
   payload: { title: string; body?: string; url?: string; tag?: string }
 ): Promise<void> {
   if (targets.length === 0) return;
-  const dead = await sendPush(targets, payload);
+  const { dead } = await sendPush(targets, payload);
   if (dead.length) {
     // Мёртвые подписки чистим в режиме платформы: строка найдена по своему id,
     // а держать ради уборки ещё одну транзакцию мастерской незачем.

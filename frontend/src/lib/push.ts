@@ -91,7 +91,15 @@ export async function disablePush(): Promise<PushState> {
   return "off";
 }
 
-export const testPush = () => api.post<{ sent: number }>("/push/test", {});
+export interface TestPushResult {
+  sent: number;
+  removed: number;
+  failed: number;
+  /** Понятные причины отказа — их показываем прямо на экране. */
+  reasons: string[];
+}
+
+export const testPush = () => api.post<TestPushResult>("/push/test", {});
 
 /**
  * Ключ VAPID приходит в base64url, а pushManager принимает байты.
