@@ -1,0 +1,28 @@
+# Переводы строк.
+#
+# Проект редактируется на Windows, а выполняется на Linux. Скрипт с
+# виндовыми переводами строк bash не запускает вовсе — падает с
+# «\r: command not found», и по сообщению догадаться невозможно.
+# Поэтому для всего, что исполняется или разбирается на сервере,
+# перевод строки закреплён явно, независимо от настроек git у того,
+# кто делает clone.
+
+# По умолчанию git сам решает, что текст, а что двоичный файл
+* text=auto
+
+# Всегда LF — это выполняется на сервере
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.conf          text eol=lf
+*.template      text eol=lf
+*.sql           text eol=lf
+Dockerfile      text eol=lf
+.env.example    text eol=lf
+
+# Двоичное не трогать
+*.png           binary
+*.jpg           binary
+*.ico           binary
+*.apk           binary
+*.keystore      binary
