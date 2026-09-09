@@ -117,9 +117,13 @@ step 5 "Сборочный образ (первый раз это долго —
 docker build -t "$IMAGE" "$ANDROID_DIR"
 
 # ------------------------------------------------------------------ 6. сборка
-step 6 "Собираем APK"
+step 6 "Собираем APK (первый раз gradle тянет себя и зависимости — это долго)"
+# Кэш gradle в отдельном томе: иначе каждая пересборка заново качает
+# сам gradle и все зависимости плагина Android, а это сотни мегабайт.
+docker volume create finecrm-gradle-cache >/dev/null
 docker run --rm \
   -v "$ANDROID_DIR:/project" \
+  -v finecrm-gradle-cache:/root/.gradle \
   -e BUBBLEWRAP_KEYSTORE_PASSWORD="$KS_PASS" \
   -e BUBBLEWRAP_KEY_PASSWORD="$KS_PASS" \
   "$IMAGE" bash -lc '
