@@ -47,11 +47,17 @@ export const ORDER_KINDS = [
   { value: "REPEAT", label: "Повторное обращение" },
 ] as const;
 
-export interface ChecklistValue {
+/**
+ * Именно `type`, а не `interface`. TypeScript выводит неявную индексную
+ * сигнатуру только для псевдонимов типов, а Prisma ждёт от Json-поля тип
+ * с такой сигнатурой. С `interface` сборка падает на присвоении
+ * completeness и appearance — при том, что данные абсолютно те же.
+ */
+export type ChecklistValue = {
   key: string;
   label: string;
   checked: boolean;
-}
+};
 
 /**
  * Приводим присланное с фронтенда к справочнику: чужие ключи в базу не попадают,
