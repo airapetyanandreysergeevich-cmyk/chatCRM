@@ -49,7 +49,11 @@ function refreshOnce(): Promise<boolean> {
 
 async function request<T>(path: string, init: RequestInit = {}, allowRetry = true): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
-  if (init.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  // Для FormData заголовок не ставим: браузер добавит его сам вместе с границей,
+  // а наш application/json сломал бы разбор multipart на сервере.
+  if (init.body && !(init.body instanceof FormData) && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
   const res = await fetch(`/api${path}`, { ...init, headers, credentials: "include" });
@@ -71,6 +75,9 @@ export const api = {
   post: <T,>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T,>(path: string, body: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
+  put: <T,>(path: string, body: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
+  /** Загрузка файлов: тело — FormData, Content-Type ставит сам браузер вместе с границей. */
+  upload: <T,>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
   refresh: refreshOnce,
 };

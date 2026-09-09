@@ -8,6 +8,8 @@ import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
 import Clients from "./pages/Clients";
 import Dashboard from "./pages/Dashboard";
+import OrderCard from "./pages/OrderCard";
+import OrderNew from "./pages/OrderNew";
 import Orders from "./pages/Orders";
 import Purchases from "./pages/Purchases";
 import Staff from "./pages/Staff";
@@ -43,6 +45,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
           <Route path="/orders" element={<Orders />} />
+          <Route path="/orders/new" element={<OrderNew />} />
+          <Route path="/orders/:id" element={<OrderCard />} />
           <Route path="/clients" element={<Clients />} />
           <Route path="/stock" element={<Stock />} />
           <Route path="/purchases" element={<Purchases />} />

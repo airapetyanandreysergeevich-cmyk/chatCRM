@@ -113,6 +113,69 @@ export function Select({ invalid, className, ...props }: SelectHTMLAttributes<HT
   return <select className={cx(control, invalid ? "border-state-off" : "border-line", className)} {...props} />;
 }
 
+export function Textarea({
+  invalid,
+  className,
+  ...props
+}: import("react").TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }) {
+  return (
+    <textarea
+      rows={4}
+      className={cx(
+        control,
+        "min-h-[110px] resize-y py-3 leading-relaxed",
+        invalid ? "border-state-off" : "border-line",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+/** Чекбокс сделан на кнопке: нативный в тёмной теме выглядит чужеродно и мелко для пальца. */
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        "flex min-h-[42px] w-full items-center gap-2.5 rounded-field border px-3 text-left text-[14px] transition-all duration-150",
+        checked
+          ? "border-brand/60 bg-brand-tint text-ink"
+          : "border-line bg-surface-input text-ink-muted hover:border-line-strong hover:text-ink",
+        disabled && "cursor-not-allowed opacity-50"
+      )}
+    >
+      <span
+        className={cx(
+          "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors duration-150",
+          checked ? "border-brand bg-brand text-white" : "border-line-strong"
+        )}
+      >
+        {checked && (
+          <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.4}>
+            <path d="m3.5 8.5 3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </span>
+      {label}
+    </button>
+  );
+}
+
 export function SearchInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <span className={cx("relative inline-flex w-full items-center", className)}>

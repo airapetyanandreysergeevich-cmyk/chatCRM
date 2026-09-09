@@ -8,8 +8,12 @@ import { env } from "./lib/env";
 import { errorHandler } from "./lib/errors";
 import { authRouter } from "./modules/auth/auth.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
+import { customersRouter } from "./modules/customers/customers.routes";
+import { ordersRouter } from "./modules/orders/orders.routes";
 import { publicRouter } from "./modules/public/public.routes";
+import { referenceRouter } from "./modules/reference/reference.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
+import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 
 const app = express();
@@ -38,12 +42,18 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/public", publicRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/platform", platformRouter);
+app.use("/api/orders", ordersRouter);
+app.use("/api/customers", customersRouter);
+app.use("/api/reference", referenceRouter);
 app.use("/api", staffRouter);
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не найден" }));
 app.use(errorHandler);
 
 ensurePlatformOwner().catch((err) => console.error("Не удалось создать собственника платформы:", err));
+// Бакет создаётся при старте: иначе первая же загрузка фотографии упала бы
+// на пустом месте, и разбираться пришлось бы приёмщику у стойки.
+ensureBucket().catch((err) => console.error("Не удалось подготовить хранилище файлов:", err));
 
 const server = app.listen(env.port, () => {
   console.log(`RepairShop API слушает порт ${env.port}`);
