@@ -8,7 +8,9 @@ import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
 import Clients from "./pages/Clients";
 import Dashboard from "./pages/Dashboard";
+import DataPage from "./pages/Data";
 import NotificationsPage from "./pages/Notifications";
+import SettingsPage from "./pages/Settings";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import Orders from "./pages/Orders";
@@ -52,7 +54,12 @@ export default function App() {
           <Route path="/stock" element={<Stock />} />
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/staff" element={<Staff />} />
-          <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/notifications" element={<NotificationsPage />} />
+          <Route path="/settings/data" element={<DataPage />} />
+          {/* Оповещения переехали в настройки. Старый адрес мог попасть
+              в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}
+          <Route path="/notifications" element={<Navigate to="/settings/notifications" replace />} />
           <Route path="/platform/tenants" element={<Tenants />} />
           <Route path="/platform/applications" element={<Applications />} />
           <Route path="/platform/admins" element={<Soon title="Администраторы платформы" />} />

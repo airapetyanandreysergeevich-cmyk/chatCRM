@@ -14,8 +14,11 @@ build/
 .vite/
 
 # данные и загрузки
+# Ведущая косая черта обязательна: без неё «data/» прячет ЛЮБУЮ папку с
+# таким именем на любой глубине — в том числе backend/src/modules/data,
+# и целый модуль тихо не попадает в репозиторий.
 uploads/
-data/
+/data/
 postgres-data/
 minio-data/
 certbot/
@@ -43,3 +46,7 @@ deploy/android/store_icon.png
 deploy/android/manifest-checksum.txt
 # APK для скачивания собирается на сервере, в git ему делать нечего
 frontend/public/app/
+
+# Сюда складывается то, что не удалось удалить из песочницы.
+# Содержимое можно смело стирать вручную.
+_to_delete/

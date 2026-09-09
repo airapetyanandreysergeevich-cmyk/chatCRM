@@ -144,3 +144,27 @@ export const IconShare = (p: IconProps) => (
     <path d="M5.5 12.5v6a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-6" />
   </Icon>
 );
+
+export const IconDatabase = (p: IconProps) => (
+  <Icon {...p}>
+    <ellipse cx="12" cy="5.5" rx="7.5" ry="3" />
+    <path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6" />
+    <path d="M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6" />
+  </Icon>
+);
+
+export const IconUpload = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 15.5V4" />
+    <path d="M8 7.5 12 3.5l4 4" />
+    <path d="M5 15.5v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
+  </Icon>
+);
+
+export const IconDownload = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3.5V15" />
+    <path d="M8 11.5 12 15.5l4-4" />
+    <path d="M5 15.5v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
+  </Icon>
+);

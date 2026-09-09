@@ -70,6 +70,25 @@ async function request<T>(path: string, init: RequestInit = {}, allowRetry = tru
   return data as T;
 }
 
+/**
+ * Имя файла из Content-Disposition. Сначала смотрим filename*= с кодировкой:
+ * кириллица переживает пересылку только там, а обычный filename= сервер шлёт
+ * ради старых браузеров и пишет в него латиницу.
+ */
+function fileNameFrom(headers: Headers): string {
+  const raw = headers.get("Content-Disposition") ?? "";
+  const encoded = raw.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      /* испорченное имя — возьмём запасное ниже */
+    }
+  }
+  const plain = raw.match(/filename="([^"]+)"/i);
+  return plain ? plain[1] : "finecrm-выгрузка";
+}
+
 export const api = {
   get: <T,>(path: string) => request<T>(path),
   post: <T,>(path: string, body?: unknown) =>
@@ -78,6 +97,36 @@ export const api = {
   put: <T,>(path: string, body: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   /** Загрузка файлов: тело — FormData, Content-Type ставит сам браузер вместе с границей. */
   upload: <T,>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
+  /**
+   * Скачивание файла. Отдельно от request: тот разбирает ответ как JSON,
+   * а здесь нужен двоичный файл и имя из заголовка. Токен доступа живёт
+   * в памяти вкладки, поэтому просто перейти по ссылке нельзя — запрос
+   * должен нести заголовок авторизации, как и все остальные.
+   */
+  download: async (path: string): Promise<{ blob: Blob; fileName: string }> => {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+    let res = await fetch(`/api${path}`, { headers, credentials: "include" });
+    if (res.status === 401 && (await refreshOnce())) {
+      const retry: Record<string, string> = {};
+      if (accessToken) retry.Authorization = `Bearer ${accessToken}`;
+      res = await fetch(`/api${path}`, { headers: retry, credentials: "include" });
+    }
+
+    if (!res.ok) {
+      const text = await res.text();
+      let message = "Не удалось выгрузить";
+      try {
+        message = JSON.parse(text)?.error ?? message;
+      } catch {
+        /* сервер ответил не json — оставим общее сообщение */
+      }
+      throw new ApiError(res.status, message);
+    }
+
+    return { blob: await res.blob(), fileName: fileNameFrom(res.headers) };
+  },
   del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
   refresh: refreshOnce,
 };

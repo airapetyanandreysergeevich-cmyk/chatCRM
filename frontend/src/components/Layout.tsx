@@ -14,6 +14,7 @@ import {
   IconLogout,
   IconOrders,
   IconPurchases,
+  IconSettings,
   IconStaff,
   IconStock,
   IconWorkshops,
@@ -89,11 +90,15 @@ export default function Layout() {
     { to: "/stock", label: "Склад", icon: <IconStock /> },
     { to: "/purchases", label: "Закупки", icon: <IconPurchases /> },
     { to: "/staff", label: "Сотрудники", icon: <IconStaff /> },
+    { to: "/settings", label: "Настройки", icon: <IconSettings /> },
   ].filter((i) => {
     if (i.to === "/clients") return can("customers.view", "customers.edit");
     if (i.to === "/stock") return can("stock.view");
     if (i.to === "/purchases") return can("purchases.view", "purchases.create");
     if (i.to === "/staff") return can("staff.manage");
+    // «Настройки» видны всем: внутри у каждого своё — мастеру только
+    // оповещения, владельцу ещё и базы.
+    if (i.to === "/settings") return true;
     if (i.to === "/orders")
       return can("orders.view.all", "orders.view.assigned", "orders.view.delivery");
     return true;
@@ -104,14 +109,14 @@ export default function Layout() {
     { to: "/platform/applications", label: "Заявки", icon: <IconApplications />, badge: pending },
     { to: "/platform/admins", label: "Администраторы", icon: <IconAdmins /> },
     { to: "/platform/audit", label: "Журнал", icon: <IconJournal /> },
-    { to: "/notifications", label: "Оповещения", icon: <IconBell /> },
+    { to: "/settings/notifications", label: "Оповещения", icon: <IconBell /> },
   ];
 
-  const bell: NavItem = { to: "/notifications", label: "Оповещения", icon: <IconBell />, badge: unread };
-  // В боковом меню помещается, в нижней панели телефона — уже нет,
-  // поэтому там колокольчик уезжает в шапку.
-  const items = [...(inWorkshop ? workshopNav : platformNav), bell];
-  const bottomItems = inWorkshop ? workshopNav : platformNav;
+  // Оповещения переехали в «Настройки», но лента нужна всем и часто —
+  // мастеру в том числе, а настройки ему недоступны. Поэтому колокольчик
+  // живёт отдельной кнопкой: в боковом меню сверху и в шапке телефона.
+  const items = inWorkshop ? workshopNav : platformNav;
+  const bottomItems = items;
   const title = me.kind === "tenant" ? (me.tenant?.name ?? "Мастерская") : (impersonating?.name ?? "Платформа");
   const subtitle =
     me.kind === "tenant"
@@ -146,8 +151,23 @@ export default function Layout() {
 
       <div className="lg:flex">
         <aside className="hidden w-[240px] shrink-0 border-r border-line bg-surface p-3.5 lg:flex lg:min-h-screen lg:flex-col">
-          <div className="mb-6 px-1.5 pt-1.5">
+          <div className="mb-6 flex items-center justify-between gap-2 px-1.5 pt-1.5">
             <BrandRow />
+            <NavLink
+              to="/settings/notifications"
+              aria-label="Оповещения"
+              className={({ isActive }) =>
+                "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-field transition-colors duration-150 " +
+                (isActive ? "bg-brand-tint text-brand" : "text-ink-muted hover:bg-surface-raised hover:text-ink")
+              }
+            >
+              <IconBell className="h-[18px] w-[18px]" />
+              {!!unread && (
+                <span className="absolute -right-1 -top-1">
+                  <Badge count={unread} />
+                </span>
+              )}
+            </NavLink>
           </div>
 
           <nav className="space-y-1">
@@ -192,7 +212,7 @@ export default function Layout() {
             <BrandRow />
             <div className="flex items-center gap-1">
               <NavLink
-                to="/notifications"
+                to="/settings/notifications"
                 className={({ isActive }) =>
                   "relative flex h-9 w-9 items-center justify-center rounded-field transition-colors duration-150 " +
                   (isActive ? "bg-brand-tint text-brand" : "text-ink-muted hover:bg-surface-raised")

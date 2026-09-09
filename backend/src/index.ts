@@ -9,6 +9,7 @@ import { errorHandler } from "./lib/errors";
 import { authRouter } from "./modules/auth/auth.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
 import { customersRouter } from "./modules/customers/customers.routes";
+import { dataRouter } from "./modules/data/data.routes";
 import { ordersRouter } from "./modules/orders/orders.routes";
 import { notificationsRouter, pushRouter } from "./modules/notifications/notifications.routes";
 import { publicRouter } from "./modules/public/public.routes";
@@ -49,6 +50,7 @@ app.use("/api/customers", customersRouter);
 app.use("/api/reference", referenceRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/push", pushRouter);
+app.use("/api/data", dataRouter);
 app.use("/api", staffRouter);
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не найден" }));

@@ -1,7 +1,17 @@
 import type { Prisma } from "@prisma/client";
 import type { Request } from "express";
 
-export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "STATUS" | "LOGIN" | "PASSWORD";
+export type AuditAction =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "STATUS"
+  | "LOGIN"
+  | "PASSWORD"
+  // Выгрузка всей клиентской базы и загрузка чужого файла — как раз
+  // те действия, о которых потом спрашивают «кто это сделал».
+  | "EXPORT"
+  | "IMPORT";
 
 /**
  * Запись в аудит-лог мастерской. Вызывается внутри той же транзакции, что и само изменение:
@@ -10,7 +20,6 @@ export type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "STATUS" | "LOGIN" | 
 export async function writeAudit(
   tx: Prisma.TransactionClient,
   params: {
-    tenantId: string;
     userId?: string | null;
     entity: string;
     entityId: string;
@@ -21,14 +30,13 @@ export async function writeAudit(
 ) {
   await tx.auditLog.create({
     data: {
-      tenantId: params.tenantId,
       userId: params.userId ?? null,
       entity: params.entity,
       entityId: params.entityId,
       action: params.action,
       diff: params.diff as Prisma.InputJsonValue | undefined,
       ip: params.ip ?? null,
-    },
+    } as Prisma.AuditLogUncheckedCreateInput,
   });
 }
 
