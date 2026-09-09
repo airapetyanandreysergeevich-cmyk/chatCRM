@@ -3,12 +3,15 @@
 # Сборка APK-обёртки FineCRM для Android.
 #
 # Что делает:
-#   1. собирает образ с Android SDK (один раз, потом берётся из кэша);
+#   1. проверяет, что сайт отдаётся по https;
 #   2. создаёт ключ подписи, если его ещё нет, и запоминает пароль в deploy/.env;
 #   3. кладёт .well-known/assetlinks.json с отпечатком ключа во фронтенд;
-#   4. собирает и подписывает APK.
+#   4. собирает образ с Android SDK и подписанный APK.
 #
-# Запускать с сервера, из корня проекта:  bash deploy/build-apk.sh
+# На сервере ничего ставить не надо: Java, Android SDK и bubblewrap живут
+# внутри контейнеров. Нужен только докер.
+#
+# Запускать из корня проекта:  bash deploy/build-apk.sh
 #
 set -euo pipefail
 
@@ -18,10 +21,26 @@ ENV_FILE="$ROOT/deploy/.env"
 KEYSTORE="$ANDROID_DIR/android.keystore"
 ALIAS="finecrm"
 IMAGE="finecrm-android-build"
+# Тот же образ, что и в deploy/android/Dockerfile — слой скачается один раз на двоих.
+JDK_IMAGE="eclipse-temurin:17-jdk"
 
 step() { printf '\n\033[1m[%s/6] %s\033[0m\n' "$1" "$2"; }
 die() { printf '\n\033[31mОшибка: %s\033[0m\n' "$1" >&2; exit 1; }
 
+# keytool идёт вместе с JDK, которого на сервере нет и не должно быть:
+# всё остальное тут живёт в контейнерах, и ключ подписи — не исключение.
+# Пароль передаём переменной окружения, а не аргументом: аргументы видно
+# в списке процессов, переменную — нет.
+keytool_in_docker() {
+  docker run --rm -i \
+    -e KSPASS="$KS_PASS" \
+    -v "$ANDROID_DIR:/work" \
+    -w /work \
+    "$JDK_IMAGE" keytool "$@"
+}
+
+command -v docker >/dev/null 2>&1 || die "не найден docker"
+docker info >/dev/null 2>&1 || die "докер не отвечает — запущен ли он?"
 [ -f "$ENV_FILE" ] || die "не найден $ENV_FILE"
 
 DOMAIN="$(grep -E '^DOMAIN=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'"' \r')"
@@ -54,10 +73,11 @@ mkdir -p "$ANDROID_DIR"
 if [ -f "$KEYSTORE" ]; then
   echo "  уже есть: $KEYSTORE"
 else
-  keytool -genkeypair -v \
-    -keystore "$KEYSTORE" -alias "$ALIAS" \
+  echo "  скачиваем JDK-образ, если его ещё нет…"
+  keytool_in_docker -genkeypair -v \
+    -keystore android.keystore -alias "$ALIAS" \
     -keyalg RSA -keysize 2048 -validity 10000 \
-    -storepass "$KS_PASS" -keypass "$KS_PASS" \
+    -storepass:env KSPASS -keypass:env KSPASS \
     -dname "CN=FineCRM, O=FineCRM, C=RU" >/dev/null
   chmod 600 "$KEYSTORE"
   echo "  создан: $KEYSTORE"
@@ -67,9 +87,10 @@ else
   echo "  сотрудникам придётся сносить старое и ставить заново."
 fi
 
-FINGERPRINT="$(keytool -list -v -keystore "$KEYSTORE" -alias "$ALIAS" -storepass "$KS_PASS" 2>/dev/null \
+FINGERPRINT="$(keytool_in_docker -list -v -keystore android.keystore -alias "$ALIAS" \
+  -storepass:env KSPASS 2>/dev/null \
   | grep -i 'SHA256:' | head -1 | sed 's/.*SHA256: *//' | tr -d ' \r')"
-[ -n "$FINGERPRINT" ] || die "не удалось прочитать отпечаток ключа — проверьте пароль"
+[ -n "$FINGERPRINT" ] || die "не удалось прочитать отпечаток ключа — проверьте ANDROID_KEYSTORE_PASSWORD"
 echo "  отпечаток: $FINGERPRINT"
 
 # ------------------------------------------------------------------ 4. assetlinks
