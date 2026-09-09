@@ -150,6 +150,31 @@ export const statusTone = (group: StatusGroup) =>
     CANCELLED: "cancelled",
   })[group] as "new" | "progress" | "waiting" | "done" | "cancelled";
 
+/**
+ * Значок строки списка. В отличие от цвета выданный заказ отличается от
+ * готового: в списке это разные состояния, и мастер их путать не должен.
+ */
+export const statusGlyphTone = (group: StatusGroup) =>
+  ({
+    NEW: "new",
+    IN_PROGRESS: "progress",
+    WAITING: "waiting",
+    DONE: "done",
+    CLOSED: "closed",
+    CANCELLED: "cancelled",
+  })[group] as "new" | "progress" | "waiting" | "done" | "closed" | "cancelled";
+
+/** Цвет текста статуса рядом со значком — тот же смысл, что и у плашки. */
+export const statusTextClass = (group: StatusGroup) =>
+  ({
+    NEW: "text-[#7FB0FF]",
+    IN_PROGRESS: "text-[#79D2E2]",
+    WAITING: "text-[#EFC079]",
+    DONE: "text-[#72D6A6]",
+    CLOSED: "text-ink-muted",
+    CANCELLED: "text-[#EE9494]",
+  })[group];
+
 export const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toLocaleString("ru-RU")} ₽`;
 

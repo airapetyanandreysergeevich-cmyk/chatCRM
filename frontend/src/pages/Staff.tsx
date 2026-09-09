@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
-import { Banner, Button, Card, Field, Input, SectionLabel, Select, Spinner } from "../components/ui";
+import { IconPerson } from "../components/icons";
+import {
+  Badge,
+  Banner,
+  Button,
+  Field,
+  Input,
+  List,
+  ListRow,
+  SectionLabel,
+  Select,
+  Spinner,
+  StatusGlyph,
+} from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { formatDateTime, plural } from "../lib/format";
 
@@ -66,46 +79,71 @@ export default function Staff() {
         <Button onClick={() => setCreating(true)}>Добавить сотрудника</Button>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <List>
         {rows.map((u) => (
-          <Card key={u.id}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-[17px] font-bold leading-tight">
-                  {u.fullName}
-                  {u.isOwner && <span className="ml-2 text-[13px] font-bold text-brand">владелец</span>}
-                </h2>
-                <p className="mt-1 text-sm text-ink-muted">
-                  {u.role?.name ?? "без роли"} · <span className="font-mono">{u.email}</span>
-                </p>
-              </div>
-              {!u.isActive && <span className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12.5px] font-semibold text-ink-dim">отключён</span>}
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-[13px] text-ink-muted">
-              <span>Последний вход: {formatDateTime(u.lastLoginAt)}</span>
-              {/* Мастер без приложения не получает оповещений о заказах —
-                  владельцу стоит видеть это, не спрашивая каждого. */}
-              {u.androidAppAt ? (
-                <span className="text-ink-dim">приложение установлено</span>
-              ) : (
-                <span className="text-ink-dim">приложение не установлено</span>
-              )}
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="secondary" className="px-4 text-sm" onClick={() => setResetting(u)}>
-                Сменить пароль
-              </Button>
-              {!u.isOwner && (
-                <Button variant={u.isActive ? "danger" : "secondary"} className="px-4 text-sm" onClick={() => void toggleActive(u)}>
-                  {u.isActive ? "Отключить" : "Включить"}
+          <ListRow
+            key={u.id}
+            glyph={
+              <StatusGlyph
+                tone={u.isActive ? "neutral" : "cancelled"}
+                title={u.isActive ? "Работает" : "Доступ отключён"}
+                icon={<IconPerson />}
+              />
+            }
+            title={
+              <>
+                <span className={u.isActive ? "truncate" : "truncate text-ink-muted line-through"}>{u.fullName}</span>
+                {u.isOwner && <Badge tone="brand">владелец</Badge>}
+                {!u.isActive && <Badge tone="danger">отключён</Badge>}
+              </>
+            }
+            subtitle={
+              <>
+                {u.role?.name ?? "без роли"} · <span className="font-mono text-[13px]">{u.email}</span>
+              </>
+            }
+            meta={
+              <>
+                {/* Мастер без приложения не получает оповещений о заказах —
+                    владельцу стоит видеть это, не спрашивая каждого. */}
+                <span
+                  className={
+                    "whitespace-nowrap lg:w-[128px] lg:text-right " +
+                    (u.androidAppAt ? "text-state-done" : "text-ink-dim")
+                  }
+                >
+                  {u.androidAppAt ? "приложение есть" : "без приложения"}
+                </span>
+                <span className="whitespace-nowrap lg:w-[150px] lg:text-right">
+                  вход {formatDateTime(u.lastLoginAt)}
+                </span>
+              </>
+            }
+            actions={
+              // Ширина колонки кнопок задана, чтобы у владельца, у которого кнопка
+              // одна, остальные столбцы не разъезжались.
+              <div className="flex flex-col gap-1.5 sm:w-[190px] sm:flex-row sm:justify-end">
+                <Button
+                  variant="secondary"
+                  className="min-h-[34px] px-3 text-[13px]"
+                  onClick={() => setResetting(u)}
+                >
+                  Пароль
                 </Button>
-              )}
-            </div>
-          </Card>
+                {!u.isOwner && (
+                  <Button
+                    variant={u.isActive ? "danger" : "secondary"}
+                    className="min-h-[34px] px-3 text-[13px]"
+                    onClick={() => void toggleActive(u)}
+                  >
+                    {u.isActive ? "Отключить" : "Включить"}
+                  </Button>
+                )}
+              </div>
+            }
+          />
         ))}
-      </div>
+      </List>
 
       {creating && (
         <StaffModal

@@ -168,3 +168,88 @@ export const IconDownload = (p: IconProps) => (
     <path d="M5 15.5v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
   </Icon>
 );
+
+/**
+ * Значки состояния заказа. Рисуем по одному на каждую системную группу
+ * статуса, а не на название: названия владелец переименовывает как хочет,
+ * группа остаётся. Форма разная не для красоты — чтобы список читался
+ * и тем, кто не различает цвета.
+ */
+export const IconStatusNew = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z" />
+    <path d="M4 8.5 12 13l8-4.5M12 13v7" />
+  </Icon>
+);
+
+export const IconStatusProgress = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14.5 5.5a4 4 0 0 0-5.2 5.2l-5 5a1.8 1.8 0 0 0 2.5 2.5l5-5a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.1-.5-.5-2.1 2.5-2.3Z" />
+  </Icon>
+);
+
+export const IconStatusWaiting = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="M12 7.5V12l3 2" />
+  </Icon>
+);
+
+export const IconStatusDone = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="m8.5 12.2 2.4 2.4 4.6-5" />
+  </Icon>
+);
+
+export const IconStatusClosed = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.5 7.5h17v3h-17z" />
+    <path d="M5 10.5v8a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-8" />
+    <path d="M10 14h4" />
+  </Icon>
+);
+
+export const IconStatusCancelled = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="m9.5 9.5 5 5m0-5-5 5" />
+  </Icon>
+);
+
+export const IconUrgent = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13 3 5.5 13.5H11L10 21l7.5-10.5H12L13 3Z" />
+  </Icon>
+);
+
+export const IconWarranty = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3.5 5 6.2v5.1c0 4 3 7.5 7 9.2 4-1.7 7-5.2 7-9.2V6.2L12 3.5Z" />
+    <path d="m9.2 11.8 2 2 3.6-4" />
+  </Icon>
+);
+
+export const IconCompany = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 20.5V6a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 13 6v14.5" />
+    <path d="M13 10h5.5A1.5 1.5 0 0 1 20 11.5v9" />
+    <path d="M3 20.5h18M6.8 8h2.5M6.8 11.5h2.5M6.8 15h2.5M16 13.5h1.5M16 17h1.5" />
+  </Icon>
+);
+
+export const IconPerson = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5 20.5c0-3.6 3.1-6 7-6s7 2.4 7 6" />
+  </Icon>
+);
+
+/** «Ещё» в нижнем меню телефона: три точки — общепринятый знак «здесь спрятано остальное». */
+export const IconMore = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="5" cy="12" r="1.4" />
+    <circle cx="12" cy="12" r="1.4" />
+    <circle cx="19" cy="12" r="1.4" />
+  </Icon>
+);

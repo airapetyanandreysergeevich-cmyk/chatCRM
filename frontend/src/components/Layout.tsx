@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { BrandRow } from "./Brand";
@@ -12,6 +12,7 @@ import {
   IconDashboard,
   IconJournal,
   IconLogout,
+  IconMore,
   IconOrders,
   IconPurchases,
   IconSettings,
@@ -40,6 +41,12 @@ export default function Layout() {
   const { me, can, logout, applyToken } = useAuth();
   const [pending, setPending] = useState(0);
   const [unread, setUnread] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const location = useLocation();
+
+  // Меню «Ещё» закрывается при переходе: иначе оно накрывает страницу,
+  // на которую только что нажали.
+  useEffect(() => setMoreOpen(false), [location.pathname]);
 
   const isPlatformPanel = me?.kind === "platform" && !me.impersonating;
   useEffect(() => {
@@ -116,7 +123,11 @@ export default function Layout() {
   // мастеру в том числе, а настройки ему недоступны. Поэтому колокольчик
   // живёт отдельной кнопкой: в боковом меню сверху и в шапке телефона.
   const items = inWorkshop ? workshopNav : platformNav;
-  const bottomItems = items;
+  // На телефоне в ряд помещается четыре подписи. Пятой кнопкой открываем
+  // остальные списком: горизонтальная прокрутка внизу экрана не работает —
+  // о том, что там что-то есть, никто не догадывается.
+  const bottomItems = items.slice(0, 4);
+  const restItems = items.slice(4);
   const title = me.kind === "tenant" ? (me.tenant?.name ?? "Мастерская") : (impersonating?.name ?? "Платформа");
   const subtitle =
     me.kind === "tenant"
@@ -242,15 +253,44 @@ export default function Layout() {
             </div>
           </main>
 
-          <nav className="fixed inset-x-0 bottom-0 z-40 grid auto-cols-[minmax(60px,1fr)] grid-flow-col overflow-x-auto border-t border-line bg-surface px-1 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
+          {moreOpen && (
+            <button
+              type="button"
+              aria-label="Закрыть меню"
+              onClick={() => setMoreOpen(false)}
+              className="fixed inset-0 z-40 bg-black/55 lg:hidden"
+            />
+          )}
+
+          {moreOpen && restItems.length > 0 && (
+            <div className="fixed inset-x-0 bottom-[calc(74px+env(safe-area-inset-bottom))] z-50 mx-3 overflow-hidden rounded-panel border border-line bg-surface shadow-modal lg:hidden">
+              {restItems.map((i) => (
+                <NavLink
+                  key={i.to}
+                  to={i.to}
+                  end={i.to === "/"}
+                  className={({ isActive }) =>
+                    "flex min-h-[52px] items-center gap-3 border-b border-line px-4 text-[15px] font-medium last:border-b-0 " +
+                    (isActive ? "bg-brand-tint text-brand-ink" : "text-ink")
+                  }
+                >
+                  <span className="[&>svg]:h-[20px] [&>svg]:w-[20px]">{i.icon}</span>
+                  <span className="flex-1">{i.label}</span>
+                  {!!i.badge && <Badge count={i.badge} />}
+                </NavLink>
+              ))}
+            </div>
+          )}
+
+          <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-line bg-surface px-1 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
             {bottomItems.map((i) => (
               <NavLink
                 key={i.to}
                 to={i.to}
                 end={i.to === "/"}
                 className={({ isActive }) =>
-                  "flex flex-col items-center gap-1 rounded-field py-1.5 text-[10.5px] font-medium transition-colors duration-150 " +
-                  (isActive ? "text-brand" : "text-ink-dim")
+                  "flex flex-1 flex-col items-center gap-1 rounded-field py-1.5 text-[10.5px] font-medium transition-colors duration-150 " +
+                  (isActive && !moreOpen ? "text-brand" : "text-ink-dim")
                 }
               >
                 <span className="relative [&>svg]:h-[21px] [&>svg]:w-[21px]">
@@ -264,6 +304,28 @@ export default function Layout() {
                 {i.label}
               </NavLink>
             ))}
+
+            {restItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMoreOpen((v) => !v)}
+                aria-expanded={moreOpen}
+                className={
+                  "flex flex-1 flex-col items-center gap-1 rounded-field py-1.5 text-[10.5px] font-medium transition-colors duration-150 " +
+                  (moreOpen || restItems.some((i) => i.to === location.pathname) ? "text-brand" : "text-ink-dim")
+                }
+              >
+                <span className="relative [&>svg]:h-[21px] [&>svg]:w-[21px]">
+                  <IconMore />
+                  {restItems.some((i) => !!i.badge) && (
+                    <span className="absolute -right-2.5 -top-1.5">
+                      <Badge count={restItems.reduce((n, i) => n + (i.badge ?? 0), 0)} />
+                    </span>
+                  )}
+                </span>
+                Ещё
+              </button>
+            )}
           </nav>
         </div>
       </div>

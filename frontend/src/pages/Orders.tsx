@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { IconOrders, IconPlus } from "../components/icons";
-import { Banner, Button, Card, EmptyState, PageHeader, SearchInput, Spinner, StatusChip } from "../components/ui";
+import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  EmptyState,
+  List,
+  ListRow,
+  PageHeader,
+  SearchInput,
+  Spinner,
+  StatusGlyph,
+} from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { formatDate, formatDateTime } from "../lib/format";
+import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
 import {
   money,
   ORDER_KIND_LABEL,
   ordersApi,
-  statusTone,
+  statusGlyphTone,
+  statusTextClass,
   type Order,
-  type Reference,
 } from "../lib/orders";
 
 const GROUPS = [
@@ -23,11 +35,13 @@ const GROUPS = [
   { value: "CLOSED", label: "Выданы" },
 ] as const;
 
+const deviceTitle = (o: Order) =>
+  [o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") || "Техника не указана";
+
 export default function Orders() {
   const { can } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState<Order[] | null>(null);
-  const [reference, setReference] = useState<Reference | null>(null);
   const [group, setGroup] = useState("");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -48,16 +62,14 @@ export default function Orders() {
   }, [group, search]);
 
   useEffect(() => {
-    ordersApi.reference().then(setReference).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
     const t = setTimeout(() => void load(), search ? 350 : 0);
     return () => clearTimeout(t);
   }, [load, search]);
 
   if (error) return <Banner tone="error">{error}</Banner>;
+
+  const overdue = rows?.filter((o) => dueLabel(o.dueAt)?.overdue && o.status.group !== "CLOSED").length ?? 0;
 
   return (
     <div className="space-y-5">
@@ -105,6 +117,13 @@ export default function Orders() {
         </div>
       </Card>
 
+      {overdue > 0 && (
+        <Banner tone="warning">
+          {plural(overdue, "заказ просрочен", "заказа просрочены", "заказов просрочено")} — они помечены в списке
+          красным сроком.
+        </Banner>
+      )}
+
       {!rows ? (
         <Spinner />
       ) : rows.length === 0 ? (
@@ -124,52 +143,81 @@ export default function Orders() {
             : "Заведите первый заказ — заполните бланк приёма, и он появится здесь."}
         </EmptyState>
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
-          {rows.map((o) => (
-            <Link key={o.id} to={`/orders/${o.id}`} className="block">
-              <Card interactive className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[15px] font-bold">{o.number}</span>
+        <List>
+          {rows.map((o) => {
+            const due = o.status.group === "CLOSED" ? null : dueLabel(o.dueAt);
+            return (
+              <Link key={o.id} to={`/orders/${o.id}`} className="block">
+                <ListRow
+                  glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
+                  title={
+                    <>
+                      <span className="font-mono text-[14px] text-ink-soft">{o.number}</span>
+                      <span className="truncate">{deviceTitle(o)}</span>
                       {o.isUrgent && (
-                        <span className="rounded-pill bg-[#2D1A1D] px-2 py-0.5 text-[11.5px] font-bold text-[#EE9494]">
+                        <Badge tone="danger" icon={<IconUrgent />}>
                           срочный
-                        </span>
+                        </Badge>
                       )}
-                      {o.kind !== "REPAIR" && (
-                        <span className="rounded-pill bg-surface-raised px-2 py-0.5 text-[11.5px] font-semibold text-ink-muted">
-                          {ORDER_KIND_LABEL[o.kind]}
-                        </span>
+                      {o.kind === "WARRANTY" && (
+                        <Badge tone="warning" icon={<IconWarranty />}>
+                          гарантия
+                        </Badge>
                       )}
-                    </div>
-                    <p className="mt-1.5 truncate text-[15px] font-semibold">
-                      {[o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") ||
-                        "Техника не указана"}
-                    </p>
-                    <p className="mt-1 line-clamp-2 text-[13.5px] text-ink-muted">{o.complaint}</p>
-                  </div>
-                  <StatusChip tone={statusTone(o.status.group)}>{o.status.name}</StatusChip>
-                </div>
-
-                <div className="mt-3.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-line pt-3 text-[12.5px] text-ink-dim">
-                  <span>Принят {formatDate(o.acceptedAt)}</span>
-                  {o.dueAt && <span>Срок {formatDate(o.dueAt)}</span>}
-                  {o.assignedMaster && <span>Мастер: {o.assignedMaster.fullName}</span>}
-                  {o.customer.name && <span>{o.customer.name}</span>}
-                  {o.total !== undefined && o.total !== null && o.total > 0 && (
-                    <span className="ml-auto font-semibold text-ink-soft">{money(o.total)}</span>
-                  )}
-                </div>
-              </Card>
-            </Link>
-          ))}
-        </div>
+                      {o.kind !== "REPAIR" && o.kind !== "WARRANTY" && (
+                        <Badge>{ORDER_KIND_LABEL[o.kind]}</Badge>
+                      )}
+                    </>
+                  }
+                  subtitle={
+                    <>
+                      {o.customer.name && <span className="text-ink-soft">{o.customer.name}</span>}
+                      {o.customer.name && " · "}
+                      {o.complaint || "без описания"}
+                    </>
+                  }
+                  meta={
+                    <>
+                      {/* Пустые ячейки на широком экране остаются на месте:
+                          без этого колонки съезжают у заказов без мастера
+                          или без суммы, и список перестаёт читаться сверху вниз. */}
+                      <span
+                        className={
+                          "empty:hidden lg:empty:block whitespace-nowrap lg:w-[146px] lg:text-right font-semibold " +
+                          statusTextClass(o.status.group)
+                        }
+                      >
+                        {o.status.name}
+                      </span>
+                      <span
+                        className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[104px] lg:text-right"
+                        title={o.assignedMaster?.fullName}
+                      >
+                        {o.assignedMaster ? shortName(o.assignedMaster.fullName) : ""}
+                      </span>
+                      <span
+                        className={
+                          "empty:hidden lg:empty:block whitespace-nowrap lg:w-[126px] lg:text-right " +
+                          (due?.overdue ? "font-semibold text-state-off" : due?.soon ? "text-state-waiting" : "")
+                        }
+                      >
+                        {due ? due.text : formatDateShort(o.acceptedAt)}
+                      </span>
+                      <span className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[88px] lg:text-right font-semibold text-ink-soft">
+                        {o.total !== undefined && o.total !== null && o.total > 0 ? money(o.total) : ""}
+                      </span>
+                    </>
+                  }
+                />
+              </Link>
+            );
+          })}
+        </List>
       )}
 
-      {rows && rows.length > 0 && reference && (
+      {rows && rows.length > 0 && (
         <p className="text-[12.5px] text-ink-dim">
-          Показано {rows.length}. Последнее обновление {formatDateTime(new Date())}.
+          {plural(rows.length, "заказ", "заказа", "заказов")} в списке.
         </p>
       )}
     </div>

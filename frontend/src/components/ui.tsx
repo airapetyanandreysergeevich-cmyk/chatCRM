@@ -1,5 +1,13 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
-import { IconSearch } from "./icons";
+import type { ButtonHTMLAttributes, ComponentType, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import {
+  IconSearch,
+  IconStatusNew,
+  IconStatusProgress,
+  IconStatusWaiting,
+  IconStatusDone,
+  IconStatusClosed,
+  IconStatusCancelled,
+} from "./icons";
 
 const cx = (...p: Array<string | false | null | undefined>) => p.filter(Boolean).join(" ");
 
@@ -206,6 +214,159 @@ export function StatusChip({
       <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />
       {children}
     </span>
+  );
+}
+
+/**
+ * Значок-плашка для строки списка. Форма значка несёт тот же смысл, что и
+ * цвет: список должен читаться и в ярком цеховом свете, и тем, кто цвета
+ * различает плохо.
+ */
+export type GlyphTone = "new" | "progress" | "waiting" | "done" | "closed" | "cancelled" | "neutral";
+
+const GLYPH: Record<GlyphTone, [ComponentType<{ className?: string }>, string]> = {
+  new: [IconStatusNew, "bg-[#152239] text-[#7FB0FF]"],
+  progress: [IconStatusProgress, "bg-[#13272C] text-[#79D2E2]"],
+  waiting: [IconStatusWaiting, "bg-[#2B2416] text-[#EFC079]"],
+  done: [IconStatusDone, "bg-[#152A22] text-[#72D6A6]"],
+  closed: [IconStatusClosed, "bg-[#1E222C] text-[#9AA2B4]"],
+  cancelled: [IconStatusCancelled, "bg-[#2D1A1D] text-[#EE9494]"],
+  neutral: [IconStatusClosed, "bg-surface-raised text-ink-muted"],
+};
+
+export function StatusGlyph({
+  tone,
+  title,
+  icon,
+  className,
+}: {
+  tone: GlyphTone;
+  /** Подпись для наведения и для тех, кто слушает страницу голосом. */
+  title?: string;
+  /** Свой значок вместо статусного — для списков, где статуса нет. */
+  icon?: ReactNode;
+  className?: string;
+}) {
+  const [Glyph, skin] = GLYPH[tone];
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      role={title ? "img" : undefined}
+      className={cx(
+        "flex h-10 w-10 shrink-0 items-center justify-center rounded-card [&>svg]:h-[20px] [&>svg]:w-[20px]",
+        skin,
+        className
+      )}
+    >
+      {icon ?? <Glyph />}
+    </span>
+  );
+}
+
+/** Короткая пометка рядом с названием: срочный, организация, отключён. */
+export function Badge({
+  tone = "neutral",
+  icon,
+  children,
+}: {
+  tone?: "neutral" | "danger" | "warning" | "brand" | "done";
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  const map = {
+    neutral: "bg-surface-raised text-ink-muted",
+    danger: "bg-[#2D1A1D] text-[#EE9494]",
+    warning: "bg-[#2B2416] text-[#EFC079]",
+    brand: "bg-brand-tint text-brand-ink",
+    done: "bg-[#152A22] text-[#72D6A6]",
+  } as const;
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[11.5px] font-bold [&>svg]:h-3 [&>svg]:w-3",
+        map[tone]
+      )}
+    >
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Список вместо сетки карточек.
+ *
+ * Панельками экран вмещает пять-шесть заказов, списком — полтора десятка,
+ * и глаз идёт по одной колонке сверху вниз, а не прыгает по плитке. Строки
+ * разделены линией, а не тенями: так их видно как единый перечень.
+ */
+export function List({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cx(
+        "overflow-hidden rounded-panel border border-line bg-surface shadow-card [&>*+*]:border-t [&>*+*]:border-line",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Строка списка. На широком экране: значок — название — справа сводка.
+ * На телефоне сводка переезжает под название, потому что ужимать её в
+ * тот же ряд значит сделать нечитаемым и её, и название.
+ */
+export function ListRow({
+  glyph,
+  title,
+  subtitle,
+  meta,
+  actions,
+  className,
+}: {
+  glyph?: ReactNode;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cx(
+        "flex items-start gap-3 px-3.5 py-3 transition-colors duration-150 hover:bg-surface-raised sm:gap-4 sm:px-4",
+        className
+      )}
+    >
+      {glyph}
+      <div className="min-w-0 flex-1 lg:flex lg:items-center lg:gap-5">
+        <div className="min-w-0 lg:flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold leading-tight">
+            {title}
+          </div>
+          {subtitle && <div className="mt-1 truncate text-[13.5px] text-ink-muted">{subtitle}</div>}
+        </div>
+        {meta && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-ink-dim lg:mt-0 lg:shrink-0 lg:justify-end lg:gap-4">
+            {meta}
+          </div>
+        )}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+/** Заголовок группы внутри списка — «Сегодня», «Просроченные». */
+export function ListGroupLabel({ children, right }: { children: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 bg-surface-raised/60 px-4 py-2">
+      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-ink-dim">{children}</span>
+      {right && <span className="text-[12px] text-ink-dim">{right}</span>}
+    </div>
   );
 }
 

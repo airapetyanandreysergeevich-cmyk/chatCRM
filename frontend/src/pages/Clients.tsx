@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { IconClients } from "../components/icons";
-import { Banner, Card, EmptyState, PageHeader, SearchInput, Spinner } from "../components/ui";
+import { IconClients, IconCompany, IconPerson } from "../components/icons";
+import {
+  Badge,
+  Banner,
+  Card,
+  EmptyState,
+  List,
+  ListRow,
+  PageHeader,
+  SearchInput,
+  Spinner,
+  StatusGlyph,
+} from "../components/ui";
 import { ApiError, api } from "../lib/api";
-import { formatDate, plural } from "../lib/format";
+import { formatDateShort, plural } from "../lib/format";
 
 interface Client {
   id: string;
@@ -66,31 +77,57 @@ export default function Clients() {
             : "Первый клиент появится здесь сразу после того, как приёмщик заведёт заказ."}
         </EmptyState>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+        <List>
           {rows.map((c) => (
-            <Card key={c.id} interactive className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="truncate text-[16px] font-bold">{c.name}</h2>
-                  <a href={`tel:${c.phone}`} className="mt-1 block text-[14px] font-semibold text-brand">
+            <ListRow
+              key={c.id}
+              glyph={
+                <StatusGlyph
+                  tone={c.type === "COMPANY" ? "new" : "neutral"}
+                  title={c.type === "COMPANY" ? "Организация" : "Частное лицо"}
+                  icon={c.type === "COMPANY" ? <IconCompany /> : <IconPerson />}
+                />
+              }
+              title={
+                <>
+                  <span className="truncate">{c.name}</span>
+                  {c.type === "COMPANY" && <Badge>организация</Badge>}
+                </>
+              }
+              subtitle={
+                <>
+                  {/* Позвонить прямо из списка — самое частое действие приёмщика,
+                      поэтому телефон здесь ссылка, а не просто текст. */}
+                  <a
+                    href={`tel:${c.phone}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-semibold text-brand-ink hover:underline"
+                  >
                     {c.phone}
                   </a>
-                </div>
-                {c.type === "COMPANY" && (
-                  <span className="rounded-pill bg-surface-raised px-2.5 py-1 text-[11.5px] font-semibold text-ink-muted">
-                    организация
+                  {c.email && <span className="text-ink-dim"> · {c.email}</span>}
+                </>
+              }
+              meta={
+                <>
+                  <span className="whitespace-nowrap lg:w-[100px] lg:text-right">
+                    {plural(c.orderCount, "заказ", "заказа", "заказов")}
                   </span>
-                )}
-              </div>
-
-              <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-3 text-[12.5px] text-ink-dim">
-                <span>{plural(c.orderCount, "заказ", "заказа", "заказов")}</span>
-                <span>{plural(c.deviceCount, "аппарат", "аппарата", "аппаратов")}</span>
-                <span className="ml-auto">с {formatDate(c.createdAt)}</span>
-              </div>
-            </Card>
+                  <span className="whitespace-nowrap lg:w-[112px] lg:text-right">
+                    {plural(c.deviceCount, "аппарат", "аппарата", "аппаратов")}
+                  </span>
+                  <span className="whitespace-nowrap lg:w-[104px] lg:text-right">
+                    с {formatDateShort(c.createdAt)}
+                  </span>
+                </>
+              }
+            />
           ))}
-        </div>
+        </List>
+      )}
+
+      {rows && rows.length > 0 && (
+        <p className="text-[12.5px] text-ink-dim">{plural(rows.length, "клиент", "клиента", "клиентов")} в списке.</p>
       )}
     </div>
   );
