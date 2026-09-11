@@ -122,7 +122,7 @@ export default function Staff() {
             actions={
               // Ширина колонки кнопок задана, чтобы у владельца, у которого кнопка
               // одна, остальные столбцы не разъезжались.
-              <div className="flex flex-col gap-1.5 sm:w-[190px] sm:flex-row sm:justify-end">
+              <div className="flex flex-wrap gap-1.5 sm:min-w-[190px] sm:justify-end">
                 <Button
                   variant="secondary"
                   className="min-h-[34px] px-3 text-[13px]"

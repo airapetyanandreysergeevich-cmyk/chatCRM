@@ -40,7 +40,7 @@ export const NOTIFICATION_EVENTS = [
   {
     code: "purchase.requested",
     title: "Заявка на закупку",
-    hint: "Заработает вместе с модулем закупок.",
+    hint: "Мастер попросил купить деталь — заявка ждёт согласования.",
     hasDirectTarget: false,
     defaultRoles: ["Управляющий", "Владелец"],
   },

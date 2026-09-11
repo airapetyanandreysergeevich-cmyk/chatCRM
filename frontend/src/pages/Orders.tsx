@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
 import {
   Badge,
@@ -42,7 +42,16 @@ export default function Orders() {
   const { can } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState<Order[] | null>(null);
-  const [group, setGroup] = useState("");
+  // Группа берётся из адреса: со сводки сюда приходят по ссылке
+  // «3 просрочено», и фильтр должен уже стоять, а не сбрасываться.
+  const [params, setParams] = useSearchParams();
+  const group = params.get("group") ?? "";
+  const setGroup = (next: string) => {
+    const p = new URLSearchParams(params);
+    if (next) p.set("group", next);
+    else p.delete("group");
+    setParams(p, { replace: true });
+  };
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -93,7 +102,7 @@ export default function Orders() {
       <Card className="p-3.5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <SearchInput
-            placeholder="Номер, неисправность, модель или серийный номер"
+            placeholder="Номер, техника, серийный номер, неисправность или комментарий"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="lg:max-w-[380px]"

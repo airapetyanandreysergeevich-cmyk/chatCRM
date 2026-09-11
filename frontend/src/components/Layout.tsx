@@ -8,6 +8,7 @@ import {
   IconAdmins,
   IconApplications,
   IconBell,
+  IconCash,
   IconClients,
   IconDashboard,
   IconJournal,
@@ -96,12 +97,14 @@ export default function Layout() {
     { to: "/clients", label: "Клиенты", icon: <IconClients /> },
     { to: "/stock", label: "Склад", icon: <IconStock /> },
     { to: "/purchases", label: "Закупки", icon: <IconPurchases /> },
+    { to: "/finance", label: "Касса", icon: <IconCash /> },
     { to: "/staff", label: "Сотрудники", icon: <IconStaff /> },
     { to: "/settings", label: "Настройки", icon: <IconSettings /> },
   ].filter((i) => {
     if (i.to === "/clients") return can("customers.view", "customers.edit");
     if (i.to === "/stock") return can("stock.view");
     if (i.to === "/purchases") return can("purchases.view", "purchases.create");
+    if (i.to === "/finance") return can("finance.view", "finance.payment", "finance.manage");
     if (i.to === "/staff") return can("staff.manage");
     // «Настройки» видны всем: внутри у каждого своё — мастеру только
     // оповещения, владельцу ещё и базы.
@@ -218,7 +221,7 @@ export default function Layout() {
           </div>
         </aside>
 
-        <div className="flex min-h-screen flex-1 flex-col">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5 lg:hidden">
             <BrandRow />
             <div className="flex items-center gap-1">

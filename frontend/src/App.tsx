@@ -9,6 +9,7 @@ import Applications from "./pages/platform/Applications";
 import Clients from "./pages/Clients";
 import Dashboard from "./pages/Dashboard";
 import DataPage from "./pages/Data";
+import Finance from "./pages/Finance";
 import NotificationsPage from "./pages/Notifications";
 import SettingsPage from "./pages/Settings";
 import OrderCard from "./pages/OrderCard";
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/clients" element={<Clients />} />
           <Route path="/stock" element={<Stock />} />
           <Route path="/purchases" element={<Purchases />} />
+          <Route path="/finance" element={<Finance />} />
           <Route path="/staff" element={<Staff />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/notifications" element={<NotificationsPage />} />

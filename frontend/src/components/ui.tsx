@@ -342,20 +342,25 @@ export function ListRow({
       )}
     >
       {glyph}
-      <div className="min-w-0 flex-1 lg:flex lg:items-center lg:gap-5">
-        <div className="min-w-0 lg:flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold leading-tight">
-            {title}
+      <div className="min-w-0 flex-1">
+        <div className="lg:flex lg:items-center lg:gap-4">
+          <div className="min-w-0 lg:flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold leading-tight">
+              {title}
+            </div>
+            {subtitle && <div className="mt-1 truncate text-[13.5px] text-ink-muted">{subtitle}</div>}
           </div>
-          {subtitle && <div className="mt-1 truncate text-[13.5px] text-ink-muted">{subtitle}</div>}
+          {meta && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-ink-dim lg:mt-0 lg:shrink-0 lg:justify-end lg:gap-4">
+              {meta}
+            </div>
+          )}
         </div>
-        {meta && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-ink-dim lg:mt-0 lg:shrink-0 lg:justify-end lg:gap-4">
-            {meta}
-          </div>
-        )}
+        {/* На телефоне кнопки уезжают под строку: сбоку они съедали бы
+            половину ширины, и от названия оставалось бы «Блок питания …». */}
+        {actions && <div className="mt-2.5 sm:hidden">{actions}</div>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="hidden shrink-0 items-center gap-2 sm:flex">{actions}</div>}
     </div>
   );
 }

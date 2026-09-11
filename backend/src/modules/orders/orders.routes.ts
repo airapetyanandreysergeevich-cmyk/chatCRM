@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { z } from "zod";
@@ -72,6 +73,42 @@ const upload = multer({
 
 // ---------------------------------------------------------------- список
 
+/**
+ * Поиск по заказу.
+ *
+ * Ищем не только по номеру и технике, но и по всему, что люди пишут о
+ * заказе словами: жалоба клиента, примечание приёмщика, диагноз, комментарии
+ * мастера, рекомендация и подписи к смене статуса. Приёмщик помнит ремонт не
+ * по номеру, а по фразе «та самая мамка с залитием» — и должен его найти.
+ *
+ * Контакты клиента подмешиваем только тому, кому они вообще положены:
+ * иначе по ним можно перебором вытащить телефон, не имея права его видеть.
+ */
+function searchWhere(search: string, withContacts: boolean): Prisma.OrderWhereInput[] {
+  const like = { contains: search, mode: "insensitive" as const };
+  return [
+    { number: like },
+    { complaint: like },
+    { receptionNote: like },
+    { diagnosis: like },
+    { masterComment: like },
+    { internalComment: like },
+    { recommendation: like },
+    { appearanceNote: like },
+    { storageLocation: like },
+    { statusHistory: { some: { comment: like } } },
+    { device: { is: { serial: like } } },
+    { device: { is: { model: like } } },
+    { device: { is: { brand: like } } },
+    ...(withContacts
+      ? [
+          { customer: { is: { name: like } } },
+          { customer: { is: { phone: { contains: search } } } },
+        ]
+      : []),
+  ];
+}
+
 ordersRouter.get(
   "/",
   requirePermission(
@@ -101,22 +138,7 @@ ordersRouter.get(
           ...(onlyMine && me ? { assignedMasterId: me } : {}),
           ...(q.statusId ? { statusId: q.statusId } : {}),
           ...(q.group ? { status: { group: q.group } } : {}),
-          ...(q.search
-            ? {
-                OR: [
-                  { number: { contains: q.search, mode: "insensitive" as const } },
-                  { complaint: { contains: q.search, mode: "insensitive" as const } },
-                  { device: { is: { serial: { contains: q.search, mode: "insensitive" as const } } } },
-                  { device: { is: { model: { contains: q.search, mode: "insensitive" as const } } } },
-                  ...(seesCustomerContacts(req)
-                    ? [
-                        { customer: { is: { name: { contains: q.search, mode: "insensitive" as const } } } },
-                        { customer: { is: { phone: { contains: q.search } } } },
-                      ]
-                    : []),
-                ],
-              }
-            : {}),
+          ...(q.search ? { OR: searchWhere(q.search, seesCustomerContacts(req)) } : {}),
         },
         orderBy: [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
         take: q.limit,
