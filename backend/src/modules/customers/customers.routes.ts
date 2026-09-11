@@ -147,6 +147,20 @@ const customerSchema = z.object({
   discountPercent: z.number().min(0).max(100).optional(),
 });
 
+/**
+ * Стёртое в форме поле приходит пустой строкой. В базе это должен быть null:
+ * пустая строка в телефоне ломает поиск, а в email — проверку на занятость.
+ */
+const OPTIONAL_TEXT = ["phone2", "email", "address", "inn", "source", "note"] as const;
+
+function blankToNull(body: Record<string, unknown>): Record<string, null> {
+  const out: Record<string, null> = {};
+  for (const key of OPTIONAL_TEXT) {
+    if (body[key] === "") out[key] = null;
+  }
+  return out;
+}
+
 customersRouter.post(
   "/",
   requirePermission(PERMISSIONS.CUSTOMERS_EDIT),
@@ -159,7 +173,7 @@ customersRouter.post(
         data: {
           tenantId,
           ...body,
-          email: body.email || null,
+          ...blankToNull(body),
           createdById: actorUserId(req),
         },
       });
@@ -192,7 +206,7 @@ customersRouter.patch(
 
       await tx.customer.update({
         where: { id: customer.id },
-        data: { ...body, email: body.email === "" ? null : body.email },
+        data: { ...body, ...blankToNull(body) },
       });
       await writeAudit(tx, {
         tenantId,
@@ -201,6 +215,35 @@ customersRouter.patch(
         entityId: customer.id,
         action: "UPDATE",
         diff: safeDiff(body as Record<string, unknown>),
+        ip: clientIp(req),
+      });
+    });
+
+    res.json({ ok: true });
+  })
+);
+
+customersRouter.delete(
+  "/:id",
+  requirePermission(PERMISSIONS.CUSTOMERS_EDIT),
+  ah(async (req, res) => {
+    const tenantId = tenantOf(req);
+
+    await withTenant(tenantId, async (tx) => {
+      const customer = await tx.customer.findFirst({ where: { id: req.params.id, deletedAt: null } });
+      if (!customer) throw notFound("Клиент не найден");
+
+      await tx.customer.update({
+        where: { id: customer.id },
+        data: { deletedAt: new Date() },
+      });
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Customer",
+        entityId: customer.id,
+        action: "DELETE",
+        diff: {},
         ip: clientIp(req),
       });
     });

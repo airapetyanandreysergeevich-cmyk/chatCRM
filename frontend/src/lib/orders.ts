@@ -164,13 +164,17 @@ export const statusGlyphTone = (group: StatusGroup) =>
     CANCELLED: "cancelled",
   })[group] as "new" | "progress" | "waiting" | "done" | "closed" | "cancelled";
 
-/** Цвет текста статуса рядом со значком — тот же смысл, что и у плашки. */
+/**
+ * Цвет текста статуса рядом со значком — тот же смысл, что и у плашки.
+ * Четыре рабочие группы берут цвета стадий с главной: заказ, который на
+ * доске лежит в розовой колонке, и в списке должен быть розовым.
+ */
 export const statusTextClass = (group: StatusGroup) =>
   ({
-    NEW: "text-[#7FB0FF]",
-    IN_PROGRESS: "text-[#79D2E2]",
-    WAITING: "text-[#EFC079]",
-    DONE: "text-[#72D6A6]",
+    NEW: "text-[#FFF993]",
+    IN_PROGRESS: "text-[#FE3E7D]",
+    WAITING: "text-[#FC7E68]",
+    DONE: "text-[#A5F88B]",
     CLOSED: "text-ink-muted",
     CANCELLED: "text-[#EE9494]",
   })[group];

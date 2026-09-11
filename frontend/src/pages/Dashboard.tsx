@@ -1,312 +1,224 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  IconOrders,
-  IconPurchases,
-  IconStatusDone,
-  IconStatusProgress,
-  IconStatusWaiting,
-  IconStock,
-  IconUrgent,
-} from "../components/icons";
-import {
-  Banner,
-  Card,
-  EmptyState,
-  List,
-  ListRow,
-  PageHeader,
-  SectionLabel,
-  Spinner,
-  StatusGlyph,
-} from "../components/ui";
+import { IconOrders } from "../components/icons";
+import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
-import { money, statusGlyphTone, statusTextClass } from "../lib/orders";
-import { summaryApi, type Summary } from "../lib/workshop";
+import { dueLabel, plural, shortName } from "../lib/format";
+import { STAGES, type Stage } from "../lib/stages";
+import { summaryApi, type BoardCard, type StageColumn, type Summary } from "../lib/workshop";
 
 /**
- * Сводка мастерской.
+ * Главный экран мастерской.
  *
- * Каждая цифра здесь — ответ на вопрос «что мне делать прямо сейчас», а не
- * украшение. Поэтому плитки кликаются: увидел «3 просрочено» — нажал и
- * попал в список этих трёх. Показатель, на который нельзя нажать и ничего
- * с ним сделать, на главной не нужен.
+ * Это доска, а не сводка: четыре стадии — четыре колонки, в колонках лежат
+ * заказы, карточка открывает заказ. Колонки одинаковой ширины и растут вниз
+ * сами по себе, поэтому по высоте столбца сразу видно, где затор.
+ *
+ * Цифры без заказов за ними отсюда убраны намеренно. Показатель, по которому
+ * нельзя ткнуть и попасть в работу, на рабочем экране только занимает место.
  */
 
-function Tile({
-  to,
-  value,
-  label,
-  hint,
-  icon,
-  tone,
-}: {
-  to: string;
-  value: number;
-  label: string;
-  hint?: string;
-  icon: ReactNode;
-  tone?: "danger" | "warning" | "done" | "progress";
-}) {
-  const valueTone =
-    tone === "danger"
-      ? "text-state-off"
-      : tone === "warning"
-        ? "text-state-waiting"
-        : tone === "done"
-          ? "text-state-done"
-          : tone === "progress"
-            ? "text-state-progress"
-            : "text-ink";
+/** Часы обновляются раз в секунду — иначе это не часы, а надпись со временем. */
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const time = now.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const date = now.toLocaleDateString("ru-RU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
   return (
-    <Link to={to} className="block">
-      <Card interactive className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className={"text-[32px] font-extrabold leading-none tracking-tight " + (value ? valueTone : "text-ink-dim")}>
-              {value}
-            </p>
-            <p className="mt-2.5 text-[14px] font-semibold">{label}</p>
-            {hint && <p className="mt-0.5 truncate text-[12.5px] text-ink-dim">{hint}</p>}
-          </div>
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-surface-raised text-ink-muted [&>svg]:h-[18px] [&>svg]:w-[18px]">
-            {icon}
+    <div className="shrink-0 text-right">
+      {/* tabular-nums: без него строка дёргается каждую секунду. */}
+      <p className="font-mono text-[24px] font-bold leading-none tracking-tight tabular-nums sm:text-[34px] lg:text-[40px]">
+        {time}
+      </p>
+      <p className="mt-1.5 text-[12px] text-ink-muted first-letter:uppercase sm:text-[13px]">{date}</p>
+    </div>
+  );
+}
+
+function OrderCardTile({ card }: { card: BoardCard }) {
+  const due = dueLabel(card.dueAt);
+  const device =
+    [card.device?.kind, card.device?.brand, card.device?.model].filter(Boolean).join(" ") ||
+    "Техника не указана";
+
+  return (
+    <Link
+      to={`/orders/${card.id}`}
+      className="block rounded-card border border-line bg-surface p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+    >
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[13px] font-semibold text-ink-soft">{card.number}</span>
+        {card.isUrgent && <Badge tone="danger">срочный</Badge>}
+      </div>
+
+      <p className="mt-1.5 truncate text-[14px] font-semibold">{device}</p>
+
+      {/* Имени клиента у мастера нет — строку в этом случае не рисуем вовсе,
+          чтобы не оставлять пустое место непонятного назначения. */}
+      {card.customer.name && (
+        <p className="mt-0.5 truncate text-[12.5px] text-ink-muted">{card.customer.name}</p>
+      )}
+
+      {/* Статус и срок — одной строкой: перенос ставил точку-разделитель
+          в начало новой строки, и она читалась как маркер списка. */}
+      <div className="mt-2 flex items-center justify-between gap-2 text-[12px]">
+        <span className="truncate text-ink-dim">{card.status.name}</span>
+        {due && (
+          <span
+            className={
+              "shrink-0 whitespace-nowrap " +
+              (due.overdue
+                ? "font-semibold text-state-off"
+                : due.soon
+                  ? "font-semibold text-state-waiting"
+                  : "text-ink-dim")
+            }
+          >
+            {due.text}
           </span>
-        </div>
-      </Card>
+        )}
+      </div>
+
+      {card.master && (
+        <p className="mt-1 truncate text-[12px] text-ink-dim">{shortName(card.master.fullName)}</p>
+      )}
     </Link>
   );
 }
 
-function MoneyRow({ revenue }: { revenue: NonNullable<Summary["revenue"]> }) {
-  const cells = [
-    ["Сегодня", revenue.today],
-    ["За неделю", revenue.week],
-    ["За месяц", revenue.month],
-  ] as const;
+function StageColumnPanel({ stage, column }: { stage: Stage; column: StageColumn }) {
+  const hidden = column.total - column.items.length;
+
   return (
-    <Card>
-      <SectionLabel>Выдано клиентам</SectionLabel>
-      <div className="mt-3 grid gap-4 sm:grid-cols-3">
-        {cells.map(([label, value]) => (
-          <div key={label}>
-            <p className="text-[22px] font-extrabold leading-none tracking-tight">{money(value)}</p>
-            <p className="mt-1.5 text-[12.5px] text-ink-dim">{label}</p>
-          </div>
-        ))}
-      </div>
-      {/* Оговорка не для красоты: это сумма закрытых заказов, а не касса.
-          Путать их — верный способ однажды не сойтись с бухгалтерией. */}
-      <p className="mt-3 border-t border-line pt-3 text-[12px] text-ink-dim">
-        Сумма выданных заказов за период. Живые деньги — в разделе «Касса».
-      </p>
-    </Card>
+    <section className={"rounded-panel border p-3 sm:p-3.5 " + stage.panel}>
+      <header className="flex items-center justify-between gap-2 px-0.5 pb-3">
+        <h2 className={"text-[13px] font-bold uppercase tracking-[0.1em] " + stage.text}>
+          {stage.label}
+        </h2>
+        <span
+          className={
+            "inline-flex h-6 min-w-[24px] items-center justify-center rounded-pill px-2 text-[12px] font-bold " +
+            stage.chip
+          }
+        >
+          {column.total}
+        </span>
+      </header>
+
+      {column.items.length === 0 ? (
+        <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Пусто</p>
+      ) : (
+        <div className="space-y-2">
+          {column.items.map((card) => (
+            <OrderCardTile key={card.id} card={card} />
+          ))}
+        </div>
+      )}
+
+      {hidden > 0 && (
+        <Link
+          to={`/orders?group=${stage.key}`}
+          className="mt-2 block px-0.5 text-[12.5px] font-semibold text-brand-ink hover:underline"
+        >
+          ещё {plural(hidden, "заказ", "заказа", "заказов")}
+        </Link>
+      )}
+    </section>
   );
 }
 
 export default function Dashboard() {
-  const { me, can } = useAuth();
+  const { me } = useAuth();
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const name = me?.kind === "tenant" ? me.user.fullName.split(" ")[0] : "";
 
   useEffect(() => {
     summaryApi
       .get()
       .then(setData)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить сводку"));
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить доску"));
   }, []);
 
-  if (error) return <Banner tone="error">{error}</Banner>;
-  if (!data) return <Spinner label="Считаем" />;
+  const workshop =
+    me?.kind === "tenant"
+      ? (me.tenant?.name ?? "Мастерская")
+      : me?.kind === "platform"
+        ? (me.impersonating?.name ?? "Мастерская")
+        : "Мастерская";
 
-  const g = data.groups;
-  const nothingYet =
-    Object.values(g).every((n) => n === 0) && data.recent.length === 0;
+  const header = (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-ink-dim">
+          {data?.scope === "mine" ? "Мои заказы" : "Мастерская"}
+        </p>
+        {/* Название не обрезаем: длинное имя мастерской лучше перенести
+            на вторую строку, чем показать «Сервис на …». */}
+        <h1 className="mt-1.5 text-[24px] font-extrabold leading-tight tracking-tight [overflow-wrap:anywhere] sm:text-[32px] lg:text-[38px]">
+          {workshop}
+        </h1>
+      </div>
+      <Clock />
+    </div>
+  );
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <Banner tone="error">{error}</Banner>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <Spinner label="Собираем доску" />
+      </div>
+    );
+  }
+
+  const byKey = new Map(data.stages.map((s) => [s.key, s]));
+  const empty = data.stages.every((s) => s.total === 0);
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        eyebrow="Мастерская"
-        title={name ? `Здравствуйте, ${name}` : "Сводка"}
-        subtitle={
-          data.scope === "mine"
-            ? "Ваши ремонты: что в работе, что ждёт, что горит."
-            : "Что в работе, что готово, что тормозит."
-        }
-      />
+    <div className="space-y-6">
+      {header}
 
-      {nothingYet ? (
-        <EmptyState icon={<IconOrders />} title="Заказов пока нет">
-          Сводка считается по настоящим заказам. Заведите первый — и цифры появятся здесь сами.
+      {empty ? (
+        <EmptyState icon={<IconOrders />} title="Заказов в работе нет">
+          Доска показывает то, что сейчас в мастерской. Примите первый заказ — он появится в
+          «Диагностике».
         </EmptyState>
       ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Tile
-              to="/orders?group=IN_PROGRESS"
-              value={g.IN_PROGRESS}
-              label="В работе"
-              hint="мастер занят ими сейчас"
-              icon={<IconStatusProgress />}
-              tone="progress"
+        // items-start: колонки не тянутся до высоты самой длинной, а растут
+        // каждая на свою высоту — по ней и видно, где скопилась работа.
+        <div className="grid items-start gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {STAGES.map((stage) => (
+            <StageColumnPanel
+              key={stage.key}
+              stage={stage}
+              column={byKey.get(stage.key) ?? { key: stage.key, total: 0, items: [] }}
             />
-            <Tile
-              to="/orders?group=DONE"
-              value={g.DONE}
-              label="Ждут выдачи"
-              hint="готовы, но не забраны"
-              icon={<IconStatusDone />}
-              tone="done"
-            />
-            <Tile
-              to="/orders?group=WAITING"
-              value={g.WAITING}
-              label="Ожидают"
-              hint="остановлены до запчасти"
-              icon={<IconStatusWaiting />}
-              tone="warning"
-            />
-            <Tile
-              to="/orders"
-              value={data.overdue}
-              label="Просрочено"
-              hint="срок готовности прошёл"
-              icon={<IconUrgent />}
-              tone="danger"
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-x-6 gap-y-1.5 px-1 text-[13px] text-ink-muted">
-            <span>
-              Сегодня принято <span className="font-bold text-ink">{data.acceptedToday}</span>
-            </span>
-            <span>
-              Выдано <span className="font-bold text-ink">{data.issuedToday}</span>
-            </span>
-            <span>
-              Новых <span className="font-bold text-ink">{g.NEW}</span>
-            </span>
-          </div>
-
-          {(!!data.lowStock || !!data.purchasesPending) && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {!!data.lowStock && (
-                <Link to="/stock?filter=low" className="block">
-                  <Banner tone="warning">
-                    <span className="inline-flex items-center gap-2">
-                      <IconStock className="h-4 w-4" />
-                      {plural(data.lowStock, "позиция", "позиции", "позиций")} на складе ниже минимума —
-                      посмотреть
-                    </span>
-                  </Banner>
-                </Link>
-              )}
-              {!!data.purchasesPending && (
-                <Link to="/purchases?status=PENDING" className="block">
-                  <Banner>
-                    <span className="inline-flex items-center gap-2">
-                      <IconPurchases className="h-4 w-4" />
-                      {plural(data.purchasesPending, "заявка ждёт", "заявки ждут", "заявок ждут")}
-                      {" "}согласования — открыть
-                    </span>
-                  </Banner>
-                </Link>
-              )}
-            </div>
-          )}
-
-          {data.revenue && <MoneyRow revenue={data.revenue} />}
-
-          <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between px-1">
-                <SectionLabel>Последние заказы</SectionLabel>
-                <Link to="/orders" className="text-[12.5px] font-semibold text-brand-ink hover:underline">
-                  все заказы
-                </Link>
-              </div>
-              <List>
-                {data.recent.map((o) => {
-                  const due = o.status.group === "CLOSED" ? null : dueLabel(o.dueAt);
-                  return (
-                    <Link key={o.id} to={`/orders/${o.id}`} className="block">
-                      <ListRow
-                        glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
-                        title={
-                          <>
-                            <span className="font-mono text-[14px] text-ink-soft">{o.number}</span>
-                            <span className="truncate">
-                              {[o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") ||
-                                "Техника не указана"}
-                            </span>
-                          </>
-                        }
-                        subtitle={o.customer.name ?? o.complaint}
-                        meta={
-                          <>
-                            <span
-                              className={
-                                "whitespace-nowrap font-semibold " +
-                                statusTextClass(o.status.group)
-                              }
-                            >
-                              {o.status.name}
-                            </span>
-                            <span
-                              className={
-                                "whitespace-nowrap " +
-                                (due?.overdue ? "font-semibold text-state-off" : "")
-                              }
-                            >
-                              {due ? due.text : formatDateShort(o.acceptedAt)}
-                            </span>
-                          </>
-                        }
-                      />
-                    </Link>
-                  );
-                })}
-              </List>
-            </div>
-
-            {data.masters && (
-              <div className="space-y-2.5">
-                <SectionLabel>Загрузка мастеров</SectionLabel>
-                {data.masters.length === 0 ? (
-                  <Card className="p-4 text-[13.5px] text-ink-dim">
-                    Ни на кого сейчас не назначено ни одного заказа.
-                  </Card>
-                ) : (
-                  <List>
-                    {data.masters.map((m) => (
-                      <ListRow
-                        key={m.id}
-                        title={<span className="truncate">{shortName(m.fullName)}</span>}
-                        meta={
-                          <span className="whitespace-nowrap font-semibold text-ink-soft">
-                            {plural(m.active, "заказ", "заказа", "заказов")}
-                          </span>
-                        }
-                      />
-                    ))}
-                  </List>
-                )}
-                {can("staff.manage") && (
-                  <Link
-                    to="/staff"
-                    className="block px-1 text-[12.5px] font-semibold text-brand-ink hover:underline"
-                  >
-                    все сотрудники
-                  </Link>
-                )}
-              </div>
-            )}
-          </div>
-        </>
+          ))}
+        </div>
       )}
     </div>
   );

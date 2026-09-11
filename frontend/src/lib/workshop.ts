@@ -1,21 +1,34 @@
 import { api } from "./api";
-import type { Order, StatusGroup } from "./orders";
+import type { OrderStatus } from "./orders";
+import type { StageKey } from "./stages";
 
 /** Склад, закупки, касса и сводка — то, чем мастерская живёт помимо заказов. */
 
 // ------------------------------------------------------------------ сводка
 
+/** Карточка на доске: ровно те поля, что видно на ней глазами. */
+export interface BoardCard {
+  id: string;
+  number: string;
+  isUrgent: boolean;
+  acceptedAt: string;
+  dueAt: string | null;
+  status: OrderStatus;
+  device: { kind: string; brand: string | null; model: string | null } | null;
+  master: { id: string; fullName: string } | null;
+  /** Имени нет, если сотруднику не показываются контакты клиентов. */
+  customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string };
+}
+
+export interface StageColumn {
+  key: StageKey;
+  /** Всего заказов на стадии — items может быть обрезан. */
+  total: number;
+  items: BoardCard[];
+}
+
 export interface Summary {
-  groups: Record<StatusGroup, number>;
-  overdue: number;
-  acceptedToday: number;
-  issuedToday: number;
-  /** null — этому сотруднику деньги не показываются. */
-  revenue: { today: number; week: number; month: number } | null;
-  masters: Array<{ id: string; fullName: string; active: number }> | null;
-  lowStock: number | null;
-  purchasesPending: number | null;
-  recent: Order[];
+  stages: StageColumn[];
   scope: "mine" | "all";
 }
 

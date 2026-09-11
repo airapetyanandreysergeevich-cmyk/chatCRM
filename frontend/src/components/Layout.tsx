@@ -2,13 +2,15 @@ import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { BrandRow } from "./Brand";
+import { BrandMark, BrandRow } from "./Brand";
 import { InstallAppBanner } from "./InstallApp";
 import {
   IconAdmins,
   IconApplications,
   IconBell,
   IconCash,
+  IconChevronLeft,
+  IconChevronRight,
   IconClients,
   IconDashboard,
   IconJournal,
@@ -44,6 +46,29 @@ export default function Layout() {
   const [unread, setUnread] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
+
+  /**
+   * Свёрнутое меню — это выбор рабочего места, а не настройка учётной записи:
+   * на ноутбуке приёмщика место на экране дороже подписей, на большом мониторе
+   * мастерской — наоборот. Поэтому выбор живёт в этом браузере и никуда не
+   * уезжает вместе с человеком.
+   */
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("sidebar:collapsed") === "1";
+    } catch {
+      // Приватное окно или запрещённые данные сайта — меню просто развёрнуто.
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sidebar:collapsed", collapsed ? "1" : "0");
+    } catch {
+      /* не сохранилось — переживём, это всего лишь ширина меню */
+    }
+  }, [collapsed]);
 
   // Меню «Ещё» закрывается при переходе: иначе оно накрывает страницу,
   // на которую только что нажали.
@@ -143,8 +168,10 @@ export default function Layout() {
   }
 
   const sideLink = ({ isActive }: { isActive: boolean }) =>
-    "group relative flex h-11 items-center gap-3 rounded-field px-3 text-[14.5px] font-medium " +
+    "group relative flex h-11 items-center rounded-field text-[14.5px] font-medium " +
     "transition-all duration-150 " +
+    (collapsed ? "justify-center px-0" : "gap-3 px-3") +
+    " " +
     (isActive
       ? "bg-brand-tint text-brand-ink font-semibold"
       : "text-ink-muted hover:bg-surface-raised hover:text-ink");
@@ -164,29 +191,60 @@ export default function Layout() {
       )}
 
       <div className="lg:flex">
-        <aside className="hidden w-[240px] shrink-0 border-r border-line bg-surface p-3.5 lg:flex lg:min-h-screen lg:flex-col">
-          <div className="mb-6 flex items-center justify-between gap-2 px-1.5 pt-1.5">
-            <BrandRow />
-            <NavLink
-              to="/settings/notifications"
-              aria-label="Оповещения"
-              className={({ isActive }) =>
-                "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-field transition-colors duration-150 " +
-                (isActive ? "bg-brand-tint text-brand" : "text-ink-muted hover:bg-surface-raised hover:text-ink")
-              }
-            >
-              <IconBell className="h-[18px] w-[18px]" />
-              {!!unread && (
-                <span className="absolute -right-1 -top-1">
-                  <Badge count={unread} />
-                </span>
-              )}
-            </NavLink>
+        <aside
+          className={
+            "hidden shrink-0 border-r border-line bg-surface p-3 transition-[width] duration-200 lg:flex lg:min-h-screen lg:flex-col " +
+            (collapsed ? "w-[76px] items-center" : "w-[240px]")
+          }
+        >
+          <div className={"mb-6 flex items-center gap-2 pt-1.5 " + (collapsed ? "" : "justify-between px-1.5")}>
+            {collapsed ? <BrandMark size={34} /> : <BrandRow />}
+            {!collapsed && (
+              <NavLink
+                to="/settings/notifications"
+                aria-label="Оповещения"
+                className={({ isActive }) =>
+                  "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-field transition-colors duration-150 " +
+                  (isActive ? "bg-brand-tint text-brand" : "text-ink-muted hover:bg-surface-raised hover:text-ink")
+                }
+              >
+                <IconBell className="h-[18px] w-[18px]" />
+                {!!unread && (
+                  <span className="absolute -right-1 -top-1">
+                    <Badge count={unread} />
+                  </span>
+                )}
+              </NavLink>
+            )}
           </div>
 
-          <nav className="space-y-1">
+          <nav className={"space-y-1 " + (collapsed ? "w-[52px]" : "")}>
+            {/* Свёрнутое меню — это ряд значков без подписей, поэтому
+                колокольчик встаёт в тот же ряд: отдельная кнопка сверху
+                в узкой полосе выглядит потерянной. */}
+            {collapsed && (
+              <NavLink to="/settings/notifications" className={sideLink} title="Оповещения">
+                <span className="relative [&>svg]:h-[19px] [&>svg]:w-[19px]">
+                  <IconBell />
+                  {!!unread && (
+                    <span className="absolute -right-2.5 -top-1.5">
+                      <Badge count={unread} />
+                    </span>
+                  )}
+                </span>
+              </NavLink>
+            )}
+
             {items.map((i) => (
-              <NavLink key={i.to} to={i.to} end={i.to === "/"} className={sideLink}>
+              <NavLink
+                key={i.to}
+                to={i.to}
+                end={i.to === "/"}
+                className={sideLink}
+                // В свёрнутом виде подпись остаётся только подсказкой: без неё
+                // ряд одинаковых значков приходится разгадывать.
+                title={collapsed ? i.label : undefined}
+              >
                 {({ isActive }) => (
                   <>
                     <span
@@ -195,28 +253,64 @@ export default function Layout() {
                         (isActive ? "opacity-100" : "opacity-0")
                       }
                     />
-                    <span className="[&>svg]:h-[19px] [&>svg]:w-[19px] [&>svg]:transition-transform [&>svg]:duration-150 group-hover:[&>svg]:scale-110">
+                    <span className="relative [&>svg]:h-[19px] [&>svg]:w-[19px] [&>svg]:transition-transform [&>svg]:duration-150 group-hover:[&>svg]:scale-110">
                       {i.icon}
+                      {collapsed && !!i.badge && (
+                        <span className="absolute -right-2.5 -top-1.5">
+                          <Badge count={i.badge} />
+                        </span>
+                      )}
                     </span>
-                    <span className="flex-1">{i.label}</span>
-                    {!!i.badge && <Badge count={i.badge} />}
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1">{i.label}</span>
+                        {!!i.badge && <Badge count={i.badge} />}
+                      </>
+                    )}
                   </>
                 )}
               </NavLink>
             ))}
           </nav>
 
-          <div className="mt-auto border-t border-line pt-3">
-            <div className="px-2 pb-2">
-              <p className="truncate text-[13.5px] font-semibold">{title}</p>
-              <p className="truncate text-[12px] text-ink-dim">{subtitle}</p>
-            </div>
+          <div className={"mt-auto border-t border-line pt-3 " + (collapsed ? "w-[52px]" : "w-full")}>
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
+              title={collapsed ? "Развернуть меню" : "Свернуть меню"}
+              className={
+                "flex h-10 items-center rounded-field text-[13.5px] font-medium text-ink-dim transition-colors duration-150 hover:bg-surface-raised hover:text-ink " +
+                (collapsed ? "w-full justify-center" : "w-full gap-3 px-3")
+              }
+            >
+              {collapsed ? (
+                <IconChevronRight className="h-[18px] w-[18px]" />
+              ) : (
+                <>
+                  <IconChevronLeft className="h-[18px] w-[18px]" />
+                  Свернуть меню
+                </>
+              )}
+            </button>
+
+            {!collapsed && (
+              <div className="px-2 pb-2 pt-1">
+                <p className="truncate text-[13.5px] font-semibold">{title}</p>
+                <p className="truncate text-[12px] text-ink-dim">{subtitle}</p>
+              </div>
+            )}
+
             <button
               onClick={() => void logout()}
-              className="flex h-10 w-full items-center gap-3 rounded-field px-3 text-[14px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink"
+              aria-label="Выйти"
+              title={collapsed ? "Выйти" : undefined}
+              className={
+                "flex h-10 items-center rounded-field text-[14px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink " +
+                (collapsed ? "w-full justify-center" : "w-full gap-3 px-3")
+              }
             >
               <IconLogout className="h-[18px] w-[18px]" />
-              Выйти
+              {!collapsed && "Выйти"}
             </button>
           </div>
         </aside>

@@ -201,11 +201,12 @@ export function StatusChip({
   tone: "new" | "waiting" | "progress" | "done" | "cancelled";
   children: ReactNode;
 }) {
+  // Цвета рабочих стадий совпадают с колонками на главной — см. lib/stages.ts.
   const map = {
-    new: ["bg-[#152239]", "text-[#7FB0FF]", "bg-state-new"],
-    waiting: ["bg-[#2B2416]", "text-[#EFC079]", "bg-state-waiting"],
-    progress: ["bg-[#13272C]", "text-[#79D2E2]", "bg-state-progress"],
-    done: ["bg-[#152A22]", "text-[#72D6A6]", "bg-state-done"],
+    new: ["bg-[#FFF993]/10", "text-[#FFF993]", "bg-[#FFF993]"],
+    waiting: ["bg-[#FC7E68]/10", "text-[#FC7E68]", "bg-[#FC7E68]"],
+    progress: ["bg-[#FE3E7D]/10", "text-[#FE3E7D]", "bg-[#FE3E7D]"],
+    done: ["bg-[#A5F88B]/10", "text-[#A5F88B]", "bg-[#A5F88B]"],
     cancelled: ["bg-[#2D1A1D]", "text-[#EE9494]", "bg-state-off"],
   } as const;
   const [bg, fg, dot] = map[tone];
@@ -225,10 +226,10 @@ export function StatusChip({
 export type GlyphTone = "new" | "progress" | "waiting" | "done" | "closed" | "cancelled" | "neutral";
 
 const GLYPH: Record<GlyphTone, [ComponentType<{ className?: string }>, string]> = {
-  new: [IconStatusNew, "bg-[#152239] text-[#7FB0FF]"],
-  progress: [IconStatusProgress, "bg-[#13272C] text-[#79D2E2]"],
-  waiting: [IconStatusWaiting, "bg-[#2B2416] text-[#EFC079]"],
-  done: [IconStatusDone, "bg-[#152A22] text-[#72D6A6]"],
+  new: [IconStatusNew, "bg-[#FFF993]/10 text-[#FFF993]"],
+  progress: [IconStatusProgress, "bg-[#FE3E7D]/10 text-[#FE3E7D]"],
+  waiting: [IconStatusWaiting, "bg-[#FC7E68]/10 text-[#FC7E68]"],
+  done: [IconStatusDone, "bg-[#A5F88B]/10 text-[#A5F88B]"],
   closed: [IconStatusClosed, "bg-[#1E222C] text-[#9AA2B4]"],
   cancelled: [IconStatusCancelled, "bg-[#2D1A1D] text-[#EE9494]"],
   neutral: [IconStatusClosed, "bg-surface-raised text-ink-muted"],

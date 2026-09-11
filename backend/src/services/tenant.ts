@@ -2,15 +2,27 @@ import { prisma, withTenant } from "../lib/db";
 import { ALL_PERMISSIONS, ROLE_PRESETS } from "../lib/permissions";
 import { hashPassword } from "../lib/password";
 
+/**
+ * Статусы мастерской по умолчанию.
+ *
+ * Группа статуса — это колонка на главной: NEW — «Диагностика», WAITING —
+ * «Согласование», IN_PROGRESS — «Ремонт», DONE — «Выдача». Поэтому статус
+ * «Диагностика» лежит в NEW, а не в IN_PROGRESS: заказ, по которому ещё
+ * выясняют неисправность, не должен попадать в колонку «Ремонт» — доска
+ * тогда врёт про то, сколько техники реально чинится.
+ *
+ * Цвета взяты те же, что у колонок, чтобы список заказов и доска не
+ * расходились.
+ */
 const DEFAULT_STATUSES = [
-  { name: "Новый", group: "NEW" as const, color: "#3559F5", isInitial: true },
-  { name: "Диагностика", group: "IN_PROGRESS" as const, color: "#5CC2D0", isInitial: false },
-  { name: "Ожидает согласования", group: "WAITING" as const, color: "#F0B75E", isInitial: false },
-  { name: "В работе", group: "IN_PROGRESS" as const, color: "#5CC2D0", isInitial: false },
-  { name: "Ожидание запчасти", group: "WAITING" as const, color: "#F0B75E", isInitial: false },
-  { name: "Тестирование", group: "IN_PROGRESS" as const, color: "#8FA7FF", isInitial: false },
-  { name: "Готов", group: "DONE" as const, color: "#68C08D", isInitial: false },
-  { name: "Выдан", group: "CLOSED" as const, color: "#186B41", isInitial: false },
+  { name: "Новый", group: "NEW" as const, color: "#FFF993", isInitial: true },
+  { name: "Диагностика", group: "NEW" as const, color: "#FFF993", isInitial: false },
+  { name: "Ожидает согласования", group: "WAITING" as const, color: "#FC7E68", isInitial: false },
+  { name: "Ожидание запчасти", group: "WAITING" as const, color: "#FC7E68", isInitial: false },
+  { name: "В работе", group: "IN_PROGRESS" as const, color: "#FE3E7D", isInitial: false },
+  { name: "Тестирование", group: "IN_PROGRESS" as const, color: "#FE3E7D", isInitial: false },
+  { name: "Готов", group: "DONE" as const, color: "#A5F88B", isInitial: false },
+  { name: "Выдан", group: "CLOSED" as const, color: "#8A90A2", isInitial: false },
   { name: "Возврат без ремонта", group: "CANCELLED" as const, color: "#E38080", isInitial: false },
 ];
 

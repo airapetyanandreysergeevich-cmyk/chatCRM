@@ -262,3 +262,42 @@ export const IconCash = (p: IconProps) => (
     <path d="M6 9.5v5M18 9.5v5" />
   </Icon>
 );
+
+/** Плюс без обводки: круг рисует сама кнопка, второй контур внутри лишний. */
+export const IconAdd = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 5.5v13M5.5 12h13" />
+  </Icon>
+);
+
+/** Правка: карандаш. */
+export const IconEdit = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 20.4h4.3L19.2 9.5a2.4 2.4 0 0 0-3.4-3.4L4.9 17.1 4 20.4Z" />
+    <path d="m14.6 7.4 3.4 3.4" />
+  </Icon>
+);
+
+/** Удаление: корзина. */
+export const IconDelete = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 6.5h16" />
+    <path d="M9.5 6.5V5A1.5 1.5 0 0 1 11 3.5h2A1.5 1.5 0 0 1 14.5 5v1.5" />
+    <path d="m6.6 6.5.9 12.6a2 2 0 0 0 2 1.9h5a2 2 0 0 0 2-1.9l.9-12.6" />
+    <path d="M10.4 10.5v6.5M13.6 10.5v6.5" />
+  </Icon>
+);
+
+/** Свернуть боковое меню. */
+export const IconChevronLeft = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14.5 5 7.5 12l7 7" />
+  </Icon>
+);
+
+/** Развернуть боковое меню. */
+export const IconChevronRight = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9.5 5l7 7-7 7" />
+  </Icon>
+);
