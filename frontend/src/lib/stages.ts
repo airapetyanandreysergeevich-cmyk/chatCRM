@@ -23,6 +23,8 @@ export interface Stage {
   panel: string;
   /** Плашка статуса: та же заливка, тот же цвет текста. */
   chip: string;
+  /** Выбранный фильтр в списке заказов. */
+  pill: string;
   text: string;
 }
 
@@ -39,6 +41,7 @@ export const STAGES: Stage[] = [
     color: "#FFF993",
     panel: "border-[#FFF993]/40 bg-[#FFF993]/[0.04]",
     chip: "bg-[#FFF993]/10 text-[#FFF993]",
+    pill: "border-[#FFF993]/50 bg-[#FFF993]/[0.14] text-[#FFF993]",
     text: "text-[#FFF993]",
   },
   {
@@ -47,6 +50,7 @@ export const STAGES: Stage[] = [
     color: "#FC7E68",
     panel: "border-[#FC7E68]/40 bg-[#FC7E68]/[0.04]",
     chip: "bg-[#FC7E68]/10 text-[#FC7E68]",
+    pill: "border-[#FC7E68]/50 bg-[#FC7E68]/[0.14] text-[#FC7E68]",
     text: "text-[#FC7E68]",
   },
   {
@@ -55,6 +59,7 @@ export const STAGES: Stage[] = [
     color: "#FE3E7D",
     panel: "border-[#FE3E7D]/40 bg-[#FE3E7D]/[0.045]",
     chip: "bg-[#FE3E7D]/[0.12] text-[#FE3E7D]",
+    pill: "border-[#FE3E7D]/50 bg-[#FE3E7D]/[0.14] text-[#FE3E7D]",
     text: "text-[#FE3E7D]",
   },
   {
@@ -63,6 +68,7 @@ export const STAGES: Stage[] = [
     color: "#A5F88B",
     panel: "border-[#A5F88B]/40 bg-[#A5F88B]/[0.04]",
     chip: "bg-[#A5F88B]/10 text-[#A5F88B]",
+    pill: "border-[#A5F88B]/50 bg-[#A5F88B]/[0.14] text-[#A5F88B]",
     text: "text-[#A5F88B]",
   },
 ];

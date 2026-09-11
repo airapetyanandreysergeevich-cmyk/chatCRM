@@ -25,15 +25,17 @@ import {
   statusTextClass,
   type Order,
 } from "../lib/orders";
+import { STAGES } from "../lib/stages";
 
-const GROUPS = [
-  { value: "", label: "Все" },
-  { value: "NEW", label: "Новые" },
-  { value: "IN_PROGRESS", label: "В работе" },
-  { value: "WAITING", label: "Ожидают" },
-  { value: "DONE", label: "Готовы" },
-  { value: "CLOSED", label: "Выданы" },
-] as const;
+/**
+ * Фильтры повторяют колонки на главной: человек нажал панель «Ремонт» и
+ * попал сюда с тем же набором заказов. Разные названия для одного и того
+ * же на двух экранах — верный способ запутать приёмщика.
+ */
+const FILTERS: Array<{ value: string; label: string; pill: string | null }> = [
+  { value: "", label: "Все", pill: null },
+  ...STAGES.map((s) => ({ value: s.key, label: s.label, pill: s.pill })),
+];
 
 const deviceTitle = (o: Order) =>
   [o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") || "Техника не указана";
@@ -108,20 +110,25 @@ export default function Orders() {
             className="lg:max-w-[380px]"
           />
           <div className="flex flex-wrap gap-1.5">
-            {GROUPS.map((g) => (
-              <button
-                key={g.value}
-                onClick={() => setGroup(g.value)}
-                className={
-                  "rounded-pill px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
-                  (group === g.value
-                    ? "bg-brand text-white"
-                    : "border border-line bg-surface-raised text-ink-muted hover:text-ink")
-                }
-              >
-                {g.label}
-              </button>
-            ))}
+            {FILTERS.map((f) => {
+              const active = group === f.value;
+              return (
+                <button
+                  key={f.value}
+                  onClick={() => setGroup(f.value)}
+                  className={
+                    "rounded-pill border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
+                    (active
+                      ? // Выбранный фильтр окрашен в цвет своей стадии — тот же,
+                        // что у панели на главной, откуда сюда и приходят.
+                        (f.pill ?? "border-brand bg-brand text-white")
+                      : "border-line bg-surface-raised text-ink-muted hover:text-ink")
+                  }
+                >
+                  {f.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </Card>

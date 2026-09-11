@@ -68,35 +68,26 @@ function OrderCardTile({ card }: { card: BoardCard }) {
 
       <p className="mt-1.5 truncate text-[14px] font-semibold">{device}</p>
 
-      {/* Имени клиента у мастера нет — строку в этом случае не рисуем вовсе,
-          чтобы не оставлять пустое место непонятного назначения. */}
-      {card.customer.name && (
-        <p className="mt-0.5 truncate text-[12.5px] text-ink-muted">{card.customer.name}</p>
-      )}
-
-      {/* Статус и срок — одной строкой: перенос ставил точку-разделитель
-          в начало новой строки, и она читалась как маркер списка. */}
+      {/* Ни клиента, ни названия статуса здесь нет: доска отвечает на вопрос
+          «что чинить дальше», а колонка уже сказала, на какой это стадии.
+          Всё остальное — на карточке заказа, в одном нажатии отсюда. */}
       <div className="mt-2 flex items-center justify-between gap-2 text-[12px]">
-        <span className="truncate text-ink-dim">{card.status.name}</span>
-        {due && (
-          <span
-            className={
-              "shrink-0 whitespace-nowrap " +
-              (due.overdue
-                ? "font-semibold text-state-off"
-                : due.soon
-                  ? "font-semibold text-state-waiting"
-                  : "text-ink-dim")
-            }
-          >
-            {due.text}
-          </span>
+        <span
+          className={
+            "truncate " +
+            (due?.overdue
+              ? "font-semibold text-state-off"
+              : due?.soon
+                ? "font-semibold text-state-waiting"
+                : "text-ink-dim")
+          }
+        >
+          {due ? due.text : ""}
+        </span>
+        {card.master && (
+          <span className="shrink-0 truncate text-ink-dim">{shortName(card.master.fullName)}</span>
         )}
       </div>
-
-      {card.master && (
-        <p className="mt-1 truncate text-[12px] text-ink-dim">{shortName(card.master.fullName)}</p>
-      )}
     </Link>
   );
 }
@@ -106,7 +97,13 @@ function StageColumnPanel({ stage, column }: { stage: Stage; column: StageColumn
 
   return (
     <section className={"rounded-panel border p-3 sm:p-3.5 " + stage.panel}>
-      <header className="flex items-center justify-between gap-2 px-0.5 pb-3">
+      {/* Заголовок — ссылка в список заказов с тем же фильтром. Сама панель
+          ссылкой быть не может: внутри неё уже лежат ссылки на заказы. */}
+      <Link
+        to={`/orders?group=${stage.key}`}
+        title={`Все заказы: ${stage.label.toLowerCase()}`}
+        className="flex items-center justify-between gap-2 rounded-field px-0.5 pb-3 transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+      >
         <h2 className={"text-[13px] font-bold uppercase tracking-[0.1em] " + stage.text}>
           {stage.label}
         </h2>
@@ -118,7 +115,7 @@ function StageColumnPanel({ stage, column }: { stage: Stage; column: StageColumn
         >
           {column.total}
         </span>
-      </header>
+      </Link>
 
       {column.items.length === 0 ? (
         <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Пусто</p>

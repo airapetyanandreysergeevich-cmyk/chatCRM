@@ -93,6 +93,89 @@ customersRouter.get(
   })
 );
 
+/**
+ * Подсказки на приёме техники: приёмщик набирает телефон или имя, а система
+ * показывает, кто из уже заведённых клиентов на это похож.
+ *
+ * Отдаём список, а не одну карточку: в мастерской сплошь и рядом два
+ * Кузнецова и один телефон на всю семью. Выбор оставляем человеку — молча
+ * подставленный не тот клиент хуже, чем лишний дубль.
+ */
+customersRouter.get(
+  "/suggest",
+  requirePermission(PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.ORDERS_CREATE),
+  ah(async (req, res) => {
+    const q = z
+      .object({
+        phone: z.string().trim().max(40).optional(),
+        name: z.string().trim().max(120).optional(),
+      })
+      .parse(req.query);
+
+    const digits = (q.phone ?? "").replace(/[^0-9]/g, "");
+    const name = (q.name ?? "").trim();
+
+    // Слишком короткий запрос вернёт пол-базы — это не подсказка, а шум.
+    if (digits.length < 3 && name.length < 2) return res.json([]);
+
+    const tenantId = tenantOf(req);
+
+    const rows = await withTenant(tenantId, async (tx) => {
+      const ids = new Set<string>();
+
+      if (digits.length >= 3) {
+        // Телефоны в базе записаны как попало: «+7 921 555-00-11»,
+        // «8(921)5550011», «921 555 00 11». Сравнивать их как строки
+        // бесполезно, поэтому с обеих сторон оставляем одни цифры.
+        // Запрос идёт внутри withTenant, значит его дополнительно режет RLS.
+        const found = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM "Customer"
+          WHERE "tenantId" = ${tenantId}
+            AND "deletedAt" IS NULL
+            AND (
+              regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') LIKE ${"%" + digits + "%"}
+              OR regexp_replace(COALESCE(phone2, ''), '[^0-9]', '', 'g') LIKE ${"%" + digits + "%"}
+            )
+          LIMIT 8
+        `;
+        for (const f of found) ids.add(f.id);
+      }
+
+      if (name.length >= 2) {
+        const found = await tx.customer.findMany({
+          where: { deletedAt: null, name: { contains: name, mode: "insensitive" } },
+          select: { id: true },
+          take: 8,
+        });
+        for (const f of found) ids.add(f.id);
+      }
+
+      if (ids.size === 0) return [];
+
+      return tx.customer.findMany({
+        where: { id: { in: [...ids] }, deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        take: 6,
+        include: { _count: { select: { orders: true } } },
+      });
+    });
+
+    res.json(
+      rows.map((c) => ({
+        id: c.id,
+        type: c.type,
+        name: c.name,
+        phone: c.phone,
+        phone2: c.phone2,
+        email: c.email,
+        address: c.address,
+        source: c.source,
+        orderCount: c._count.orders,
+      }))
+    );
+  })
+);
+
 customersRouter.get(
   "/:id",
   requirePermission(PERMISSIONS.CUSTOMERS_VIEW),

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { IconCompany, IconPerson } from "../components/icons";
 import {
   Banner,
   Button,
@@ -14,12 +15,49 @@ import {
   Textarea,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
-import { ordersApi, type Reference } from "../lib/orders";
+import { plural } from "../lib/format";
+import { ordersApi, type CustomerHit, type Reference } from "../lib/orders";
 
 const toggle = (list: string[], key: string) =>
   list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
 
 const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(",", ".")));
+
+/**
+ * Похожие клиенты под полем. Показываем, а не подставляем молча: в мастерской
+ * бывает два Кузнецова и один телефон на всю семью, и решить, тот ли это
+ * человек, может только приёмщик — он с ним сейчас разговаривает.
+ */
+function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: CustomerHit) => void }) {
+  if (hits.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-hidden rounded-field border border-line bg-surface-raised">
+      <p className="border-b border-line px-3 py-1.5 text-[11.5px] font-semibold uppercase tracking-[0.1em] text-ink-dim">
+        Уже есть в базе
+      </p>
+      {hits.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          onClick={() => onPick(c)}
+          className="flex w-full items-center gap-3 border-b border-line px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 hover:bg-[#242936]"
+        >
+          <span className="text-ink-dim [&>svg]:h-[18px] [&>svg]:w-[18px]">
+            {c.type === "COMPANY" ? <IconCompany /> : <IconPerson />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[14px] font-semibold">{c.name}</span>
+            <span className="block truncate text-[12.5px] text-ink-muted">
+              {c.phone}
+              {c.orderCount > 0 && ` · ${plural(c.orderCount, "заказ", "заказа", "заказов")}`}
+            </span>
+          </span>
+          <span className="shrink-0 text-[12.5px] font-semibold text-brand-ink">выбрать</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Бланк приёма техники. Порядок полей повторяет разговор у стойки:
@@ -30,7 +68,10 @@ export default function OrderNew() {
   const [ref, setRef] = useState<Reference | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
-  const [foundCustomer, setFoundCustomer] = useState<string | null>(null);
+  const [phoneHits, setPhoneHits] = useState<CustomerHit[]>([]);
+  const [nameHits, setNameHits] = useState<CustomerHit[]>([]);
+  /** Выбранная карточка: пока она есть, подсказки не мешаются. */
+  const [picked, setPicked] = useState<CustomerHit | null>(null);
 
   const [customer, setCustomer] = useState({
     id: "",
@@ -72,25 +113,64 @@ export default function OrderNew() {
       .catch(() => setError(new ApiError(0, "Не удалось загрузить справочники")));
   }, []);
 
-  /** Если человек уже обращался, подставляем его данные и не плодим карточку. */
-  const lookup = useCallback(async (phone: string) => {
-    if (phone.replace(/\D/g, "").length < 6) return;
-    try {
-      const found = await ordersApi.lookupCustomer(phone);
-      if (!found) return;
-      setCustomer((c) => ({
-        ...c,
-        id: found.id,
-        name: c.name || found.name,
-        phone2: c.phone2 || found.phone2 || "",
-        email: c.email || found.email || "",
-        address: c.address || found.address || "",
-      }));
-      setFoundCustomer(found.name);
-    } catch {
-      /* поиск клиента не должен мешать приёму */
+  /**
+   * Ищем по телефону и по имени независимо: у стойки человек называет то
+   * одно, то другое. Запрос уходит с задержкой — иначе сервер получает по
+   * запросу на каждую нажатую цифру.
+   */
+  useEffect(() => {
+    if (picked) return;
+    if (customer.phone.replace(/\D/g, "").length < 3) {
+      setPhoneHits([]);
+      return;
     }
-  }, []);
+    const t = setTimeout(() => {
+      ordersApi
+        .suggestCustomers({ phone: customer.phone })
+        .then(setPhoneHits)
+        // Подсказка — удобство, а не условие приёма: если поиск отвалился,
+        // приёмщик просто заводит нового клиента.
+        .catch(() => setPhoneHits([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [customer.phone, picked]);
+
+  useEffect(() => {
+    if (picked) return;
+    if (customer.name.trim().length < 2) {
+      setNameHits([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      ordersApi
+        .suggestCustomers({ name: customer.name })
+        .then(setNameHits)
+        .catch(() => setNameHits([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [customer.name, picked]);
+
+  function pickCustomer(c: CustomerHit) {
+    setCustomer({
+      id: c.id,
+      type: c.type,
+      name: c.name,
+      phone: c.phone,
+      phone2: c.phone2 ?? "",
+      email: c.email ?? "",
+      address: c.address ?? "",
+      source: c.source ?? "",
+    });
+    setPicked(c);
+    setPhoneHits([]);
+    setNameHits([]);
+  }
+
+  /** «Это другой человек»: отвязываем карточку, поля оставляем как есть. */
+  function unpickCustomer() {
+    setPicked(null);
+    setCustomer((c) => ({ ...c, id: "" }));
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -163,27 +243,64 @@ export default function OrderNew() {
         <Card>
           <SectionLabel>Клиент</SectionLabel>
           <div className="mt-4 space-y-4">
-            <Field
-              label="Телефон"
-              error={fieldError("customer.phone")}
-              hint={foundCustomer ? `Уже обращался: ${foundCustomer}` : "Найдём по нему прошлые обращения"}
-            >
-              <Input
-                type="tel"
-                value={customer.phone}
-                onChange={(e) => setCustomer({ ...customer, phone: e.target.value, id: "" })}
-                onBlur={(e) => void lookup(e.target.value)}
-                placeholder="+7 900 000-00-00"
-                invalid={!!fieldError("customer.phone")}
-              />
-            </Field>
-            <Field label="Имя или название" error={fieldError("customer.name")}>
-              <Input
-                value={customer.name}
-                onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
-                invalid={!!fieldError("customer.name")}
-              />
-            </Field>
+            {picked && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-field border border-brand/40 bg-brand-tint px-3 py-2.5">
+                <span className="text-[13.5px]">
+                  Карточка из базы: <span className="font-semibold">{picked.name}</span>
+                  {picked.orderCount > 0 && (
+                    <span className="text-ink-muted">
+                      {" "}
+                      · {plural(picked.orderCount, "заказ", "заказа", "заказов")}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={unpickCustomer}
+                  className="text-[12.5px] font-semibold text-brand-ink hover:underline"
+                >
+                  это другой человек
+                </button>
+              </div>
+            )}
+
+            {/* Подсказки лежат рядом с полем, а не внутри него: Field — это
+                <label>, и кнопка внутри неё спорила бы с фокусом ввода. */}
+            <div>
+              <Field
+                label="Телефон"
+                error={fieldError("customer.phone")}
+                hint="Начните набирать — покажем, обращались ли уже"
+              >
+                <Input
+                  type="tel"
+                  value={customer.phone}
+                  onChange={(e) => setCustomer({ ...customer, phone: e.target.value, id: "" })}
+                  placeholder="+7 900 000-00-00"
+                  invalid={!!fieldError("customer.phone")}
+                />
+              </Field>
+              {!picked && <CustomerHints hits={phoneHits} onPick={pickCustomer} />}
+            </div>
+
+            <div>
+              <Field label="Имя или название" error={fieldError("customer.name")}>
+                <Input
+                  value={customer.name}
+                  onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
+                  invalid={!!fieldError("customer.name")}
+                />
+              </Field>
+              {/* Если тот же клиент уже нашёлся по телефону, второй раз его
+                  не предлагаем — один и тот же список под двумя полями
+                  читается как ошибка. */}
+              {!picked && (
+                <CustomerHints
+                  hits={nameHits.filter((h) => !phoneHits.some((p) => p.id === h.id))}
+                  onPick={pickCustomer}
+                />
+              )}
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Тип">
                 <Select value={customer.type} onChange={(e) => setCustomer({ ...customer, type: e.target.value })}>

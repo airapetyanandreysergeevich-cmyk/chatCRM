@@ -179,6 +179,19 @@ export const statusTextClass = (group: StatusGroup) =>
     CANCELLED: "text-[#EE9494]",
   })[group];
 
+/** Найденный клиент в подсказках на приёме техники. */
+export interface CustomerHit {
+  id: string;
+  type: "INDIVIDUAL" | "COMPANY";
+  name: string;
+  phone: string;
+  phone2: string | null;
+  email: string | null;
+  address: string | null;
+  source: string | null;
+  orderCount: number;
+}
+
 export const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toLocaleString("ru-RU")} ₽`;
 
@@ -203,8 +216,14 @@ export const ordersApi = {
   },
   attachmentUrl: (orderId: string, attachmentId: string) =>
     api.get<{ url: string }>(`/orders/${orderId}/attachments/${attachmentId}/url`),
-  lookupCustomer: (phone: string) =>
-    api.get<{ id: string; name: string; phone: string; phone2: string | null; email: string | null; address: string | null } | null>(
-      `/customers/lookup?phone=${encodeURIComponent(phone)}`
-    ),
+  /**
+   * Похожие клиенты для формы приёма. Ищем и по телефону, и по имени —
+   * приёмщик начинает с того, что первым назвал человек у стойки.
+   */
+  suggestCustomers: (by: { phone?: string; name?: string }) => {
+    const p = new URLSearchParams();
+    if (by.phone) p.set("phone", by.phone);
+    if (by.name) p.set("name", by.name);
+    return api.get<CustomerHit[]>(`/customers/suggest?${p.toString()}`);
+  },
 };
