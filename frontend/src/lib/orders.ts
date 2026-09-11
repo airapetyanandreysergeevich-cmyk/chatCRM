@@ -112,6 +112,10 @@ export interface Order {
   parentOrderId: string | null;
 
   estimatedCost?: number | null;
+  /** Процент скидки клиента на работы, застывший на заказе при приёме. */
+  workDiscountPercent?: number | null;
+  /** Рубли этой скидки — считает сервер, чтобы копейки сходились с итогом. */
+  workDiscount?: number | null;
   prepayment?: number | null;
   discount?: number | null;
   total?: number | null;
@@ -189,6 +193,7 @@ export interface CustomerHit {
   email: string | null;
   address: string | null;
   source: string | null;
+  discountPercent: number;
   orderCount: number;
 }
 
@@ -208,6 +213,8 @@ export const ordersApi = {
   complete: (id: string, body: unknown) => api.post(`/orders/${id}/complete`, body),
   issue: (id: string, discount = 0, reason?: string) =>
     api.post(`/orders/${id}/issue`, { discount, ...(reason ? { reason } : {}) }),
+  /** Мягкое удаление: заказ уходит из списков, но остаётся в базе и в журнале. */
+  remove: (id: string, reason: string) => api.del(`/orders/${id}?reason=${encodeURIComponent(reason)}`),
   upload: (orderId: string, files: FileList | File[], kind: "INTAKE" | "COMPLETION") => {
     const form = new FormData();
     form.append("kind", kind);

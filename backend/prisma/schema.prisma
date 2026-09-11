@@ -422,8 +422,13 @@ model Order {
 
   totalWork  Decimal @default(0) @db.Decimal(12, 2)
   totalParts Decimal @default(0) @db.Decimal(12, 2)
-  discount   Decimal @default(0) @db.Decimal(12, 2)
+  discount   Decimal @default(0) @db.Decimal(12, 2) // разовая скидка при выдаче, в рублях
   total      Decimal @default(0) @db.Decimal(12, 2)
+
+  // Скидка клиента на работы, снятая с его карточки при приёме и здесь
+  // застывшая: если клиенту потом поменяют процент, старые заказы не должны
+  // пересчитываться задним числом — по ним уже выдана квитанция.
+  workDiscountPercent Decimal @default(0) @db.Decimal(5, 2)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

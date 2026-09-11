@@ -30,6 +30,7 @@ interface Client {
   address: string | null;
   source: string | null;
   note: string | null;
+  discountPercent: number;
   createdAt: string;
   orderCount: number;
   deviceCount: number;
@@ -44,6 +45,7 @@ const blank = {
   email: "",
   address: "",
   note: "",
+  discountPercent: "0",
 };
 
 type Form = typeof blank;
@@ -56,6 +58,7 @@ const formOf = (c: Client): Form => ({
   email: c.email ?? "",
   address: c.address ?? "",
   note: c.note ?? "",
+  discountPercent: String(c.discountPercent ?? 0),
 });
 
 export default function Clients() {
@@ -161,7 +164,11 @@ export default function Clients() {
                     {plural(c.deviceCount, "аппарат", "аппарата", "аппаратов")}
                   </span>
                   <span className="whitespace-nowrap lg:w-[104px] lg:text-right">
-                    с {formatDateShort(c.createdAt)}
+                    {c.discountPercent > 0 ? (
+                      <span className="font-semibold text-brand-ink">скидка {c.discountPercent}%</span>
+                    ) : (
+                      `с ${formatDateShort(c.createdAt)}`
+                    )}
                   </span>
                 </>
               }
@@ -227,8 +234,12 @@ function ClientModal({
     try {
       // Пустые строки отправляем как есть: сервер сам превратит их в null,
       // а отличать «не заполнено» от «стёрли» на клиенте незачем.
-      if (client) await api.patch(`/customers/${client.id}`, form);
-      else await api.post("/customers", form);
+      const body = {
+        ...form,
+        discountPercent: form.discountPercent.trim() === "" ? 0 : Number(form.discountPercent.replace(",", ".")),
+      };
+      if (client) await api.patch(`/customers/${client.id}`, body);
+      else await api.post("/customers", body);
       onDone();
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
@@ -293,6 +304,19 @@ function ClientModal({
 
         <Field label="Адрес" error={error?.field("address")}>
           <Input value={form.address} onChange={set("address")} />
+        </Field>
+
+        <Field
+          label="Скидка на работы, %"
+          error={error?.field("discountPercent")}
+          hint="Постоянная скидка клиента. Считается только от стоимости работ — запчасти она не трогает."
+        >
+          <Input
+            inputMode="decimal"
+            value={form.discountPercent}
+            onChange={set("discountPercent")}
+            invalid={!!error?.field("discountPercent")}
+          />
         </Field>
 
         <Field label="Заметка" error={error?.field("note")} hint="Видна только сотрудникам мастерской">

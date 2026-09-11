@@ -53,7 +53,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
     name: "Управляющий",
     permissions: [
       P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_STATUS, P.ORDERS_ISSUE,
-      P.ORDERS_CUSTOMER_CONTACTS, P.ORDERS_COST,
+      P.ORDERS_DELETE, P.ORDERS_CUSTOMER_CONTACTS, P.ORDERS_COST,
       P.CUSTOMERS_VIEW, P.CUSTOMERS_EDIT,
       P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_INVENTORY,
       P.PURCHASES_VIEW, P.PURCHASES_CREATE, P.PURCHASES_APPROVE,
@@ -132,7 +132,7 @@ export const PERMISSION_GROUPS: Array<{ group: string; items: Array<{ code: Perm
       { code: P.ORDERS_STATUS, label: "Меняет статус любого заказа" },
       { code: P.ORDERS_STATUS_OWN, label: "Меняет статус своих заказов" },
       { code: P.ORDERS_ISSUE, label: "Выдаёт технику клиенту" },
-      { code: P.ORDERS_DELETE, label: "Отменяет заказы" },
+      { code: P.ORDERS_DELETE, label: "Удаляет заказы", hint: "Заказ убирается из списков; движения склада и кассы остаются" },
       { code: P.ORDERS_CUSTOMER_CONTACTS, label: "Видит контакты клиента" },
       { code: P.ORDERS_COST, label: "Видит себестоимость и маржу" },
     ],

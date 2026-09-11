@@ -262,6 +262,9 @@ ordersRouter.post(
           deviceId: device.id,
           statusId: status.id,
           acceptedById: userId,
+          // Скидку снимаем с карточки клиента сейчас и больше не трогаем:
+          // заказ должен считаться по той договорённости, что была при приёме.
+          workDiscountPercent: Number(customer.discountPercent) || 0,
           dueAt: body.dueAt ? new Date(body.dueAt) : null,
           complaint: body.complaint,
           receptionNote: body.receptionNote || null,
@@ -854,5 +857,52 @@ ordersRouter.get(
       });
     });
     res.json(rows);
+  })
+);
+
+// --------------------------------------------------------------- удаление
+
+/**
+ * Удаление заказа.
+ *
+ * Физически строка не исчезает — проставляется deletedAt. Заказ связан с
+ * движениями склада, кассой и заявками на закупку, и настоящее удаление
+ * оставило бы после себя списанные детали и деньги, не привязанные ни к чему.
+ *
+ * Поэтому и причина обязательна: заказ убирают из списка редко, и через
+ * полгода единственным объяснением будет запись в журнале.
+ */
+ordersRouter.delete(
+  "/:id",
+  requirePermission(PERMISSIONS.ORDERS_DELETE),
+  ah(async (req, res) => {
+    // Причина приходит в адресе, а не в теле: тело у DELETE поддерживают
+    // не все посредники, и запрос может дойти уже без него.
+    const { reason } = z
+      .object({ reason: z.string().trim().min(3, "Напишите, почему удаляем заказ").max(300) })
+      .parse(req.query);
+    const tenantId = tenantOf(req);
+
+    await withTenant(tenantId, async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: req.params.id, deletedAt: null },
+        select: { id: true, number: true, statusId: true },
+      });
+      if (!order) throw notFound("Заказ не найден");
+
+      await tx.order.update({ where: { id: order.id }, data: { deletedAt: new Date() } });
+
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Order",
+        entityId: order.id,
+        action: "DELETE",
+        diff: { number: order.number, reason },
+        ip: clientIp(req),
+      });
+    });
+
+    res.json({ ok: true });
   })
 );

@@ -181,6 +181,8 @@ export default function OrderCard() {
   const [parts, setParts] = useState<OrderPart[]>([]);
   const [finish, setFinish] = useState({ diagnosis: "", masterComment: "", recommendation: "", warrantyDays: "" });
   const [returnReason, setReturnReason] = useState<string | null>(null);
+  /** null — блок удаления свёрнут, строка — набранная причина. */
+  const [deleteReason, setDeleteReason] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -491,7 +493,27 @@ export default function OrderCard() {
                   items={[
                     { label: "Предварительно", value: money(order.estimatedCost) },
                     { label: "Работы", value: money(order.totalWork) },
+                    // Скидку показываем отдельной строкой, а не вычтенной из
+                    // работ: клиент должен видеть, что она у него есть.
+                    ...(order.workDiscount
+                      ? [
+                          {
+                            label: `Скидка на работы, ${order.workDiscountPercent}%`,
+                            value: (
+                              <span className="text-state-done">−{money(order.workDiscount)}</span>
+                            ),
+                          },
+                        ]
+                      : []),
                     { label: "Запчасти", value: money(order.totalParts) },
+                    ...(order.discount
+                      ? [
+                          {
+                            label: "Скидка при выдаче",
+                            value: <span className="text-state-done">−{money(order.discount)}</span>,
+                          },
+                        ]
+                      : []),
                     { label: "Предоплата", value: money(order.prepayment) },
                     {
                       label: "Итого",
@@ -587,6 +609,63 @@ export default function OrderCard() {
             </div>
           </Card>
         </>
+      )}
+
+      {/* Удаление внизу и в два шага: это не то действие, которое должно
+          случаться от промаха по соседней кнопке. */}
+      {can("orders.delete") && (
+        <Card className="border-[#40252B]">
+          <SectionLabel>Удаление заказа</SectionLabel>
+          {deleteReason === null ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[13.5px] text-ink-muted">
+                Заказ уйдёт из списков и с доски. Списанные запчасти и движения по кассе останутся
+                на месте — их поправляют в своих разделах.
+              </p>
+              <Button variant="danger" onClick={() => setDeleteReason("")}>
+                Удалить заказ
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <Field
+                label="Причина"
+                hint="Останется в журнале — через полгода это будет единственное объяснение"
+              >
+                <Input
+                  value={deleteReason}
+                  autoFocus
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Завели по ошибке, дубль заказа Р-2026-00041"
+                />
+              </Field>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setDeleteReason(null)}>
+                  Отмена
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={saving || deleteReason.trim().length < 3}
+                  onClick={() =>
+                    void (async () => {
+                      setSaving(true);
+                      setError(null);
+                      try {
+                        await ordersApi.remove(order.id, deleteReason.trim());
+                        navigate("/orders");
+                      } catch (err) {
+                        setError(err instanceof ApiError ? err.message : "Не удалось удалить заказ");
+                        setSaving(false);
+                      }
+                    })()
+                  }
+                >
+                  Удалить
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
       )}
     </div>
   );

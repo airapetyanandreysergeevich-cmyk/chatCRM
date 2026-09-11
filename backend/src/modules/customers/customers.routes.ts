@@ -54,6 +54,7 @@ customersRouter.get(
         address: c.address,
         source: c.source,
         note: c.note,
+        discountPercent: Number(c.discountPercent),
         createdAt: c.createdAt,
         orderCount: c._count.orders,
         deviceCount: c._count.devices,
@@ -170,6 +171,7 @@ customersRouter.get(
         email: c.email,
         address: c.address,
         source: c.source,
+        discountPercent: Number(c.discountPercent),
         orderCount: c._count.orders,
       }))
     );
@@ -227,7 +229,8 @@ const customerSchema = z.object({
   inn: z.string().trim().optional(),
   source: z.string().trim().optional(),
   note: z.string().trim().optional(),
-  discountPercent: z.number().min(0).max(100).optional(),
+  // Из формы число приходит строкой, поэтому coerce, а не number.
+  discountPercent: z.coerce.number().min(0).max(100).optional(),
 });
 
 /**

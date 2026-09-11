@@ -253,6 +253,14 @@ export default function OrderNew() {
                       · {plural(picked.orderCount, "заказ", "заказа", "заказов")}
                     </span>
                   )}
+                  {/* Скидка достанется заказу автоматически, но приёмщик
+                      должен знать о ней до того, как назовёт клиенту сумму. */}
+                  {picked.discountPercent > 0 && (
+                    <span className="font-semibold text-state-done">
+                      {" "}
+                      · скидка на работы {picked.discountPercent}%
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"

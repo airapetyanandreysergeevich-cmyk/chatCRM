@@ -166,10 +166,32 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
           estimatedCost: num(order.estimatedCost),
           prepayment: num(order.prepayment),
           discount: num(order.discount),
+          // Процент и рубли отдаём вместе: считать скидку на стороне браузера
+          // нельзя — округление разойдётся с тем, что уже записано в total.
+          workDiscountPercent: Number(order.workDiscountPercent),
+          workDiscount: discountOnWork(Number(order.totalWork), order.workDiscountPercent),
           total: num(order.total),
         }
       : {}),
   };
+}
+
+/**
+ * Скидка клиента считается только от стоимости работ.
+ *
+ * Запчасть мастерская покупает за живые деньги, и процент с неё — это процент
+ * из своего кармана. Скидывать можно только то, что заработано руками, поэтому
+ * запчасти в расчёт не входят вовсе.
+ */
+export function discountOnWork(
+  totalWork: number,
+  percent: Prisma.Decimal | number | null | undefined
+): number {
+  const p = Number(percent ?? 0);
+  if (!p) return 0;
+  // Округляем до копеек здесь, а не при выводе: иначе в квитанции и в кассе
+  // окажутся суммы, различающиеся на копейку, и сойтись они уже не смогут.
+  return Math.round(totalWork * p) / 100;
 }
 
 /** Пересчёт сумм после любой правки работ или запчастей — источник истины один. */
@@ -185,6 +207,7 @@ export async function recalcTotals(tx: Prisma.TransactionClient, orderId: string
 
   const totalWork = sum(order.works);
   const totalParts = sum(order.parts);
+  const workDiscount = discountOnWork(totalWork, order.workDiscountPercent);
   const discount = Number(order.discount);
 
   await tx.order.update({
@@ -192,7 +215,7 @@ export async function recalcTotals(tx: Prisma.TransactionClient, orderId: string
     data: {
       totalWork,
       totalParts,
-      total: Math.max(0, totalWork + totalParts - discount),
+      total: Math.max(0, totalWork - workDiscount + totalParts - discount),
     },
   });
 }
