@@ -159,6 +159,7 @@ stockRouter.post(
       }
       const created = await tx.stockItem.create({
         data: {
+          tenantId,
           sku: body.sku || null,
           name: body.name,
           unit: body.unit,
@@ -263,7 +264,7 @@ stockRouter.post(
       const item = await tx.stockItem.findFirst({ where: { id: body.stockItemId } });
       if (!item) throw notFound("Позиция не найдена");
 
-      const warehouse = await defaultWarehouse(tx, body.warehouseId ?? null);
+      const warehouse = await defaultWarehouse(tx, tenantId, body.warehouseId ?? null);
 
       let order: { id: string; number: string; assignedMasterId: string | null } | null = null;
       if (body.orderId) {
@@ -278,6 +279,7 @@ stockRouter.post(
       }
 
       const movement = await applyMovement(tx, {
+        tenantId,
         warehouseId: warehouse.id,
         stockItemId: item.id,
         type: body.type,
@@ -298,6 +300,7 @@ stockRouter.post(
         const cost = num(balance?.avgCost);
         await tx.orderPart.create({
           data: {
+            tenantId,
             orderId: order.id,
             name: item.name,
             qty: body.qty,

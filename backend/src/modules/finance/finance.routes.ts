@@ -50,10 +50,19 @@ const daysAgo = (n: number) => {
 };
 
 /**
+ * tenantId в data пишем явно, хотя прокси из lib/db его тоже подставит:
+ * прокси работает в рантайме, а типы Prisma требуют поле на этапе сборки.
+ */
+
+/**
  * Касса по умолчанию: мастерская, которая ещё не заводила кассы, всё равно
  * должна суметь принять оплату за первый ремонт.
  */
-async function defaultRegister(tx: Prisma.TransactionClient, wanted?: string | null) {
+async function defaultRegister(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  wanted?: string | null
+) {
   if (wanted) {
     const r = await tx.cashRegister.findFirst({ where: { id: wanted, isActive: true } });
     if (!r) throw notFound("Касса не найдена");
@@ -61,13 +70,14 @@ async function defaultRegister(tx: Prisma.TransactionClient, wanted?: string | n
   }
   return (
     (await tx.cashRegister.findFirst({ where: { isActive: true }, orderBy: { name: "asc" } })) ??
-    (await tx.cashRegister.create({ data: { name: "Наличные", kind: "CASH" } }))
+    (await tx.cashRegister.create({ data: { tenantId, name: "Наличные", kind: "CASH" } }))
   );
 }
 
 /** Статьи заводятся по мере надобности: заранее придуманный справочник никто не заполняет. */
 async function categoryByName(
   tx: Prisma.TransactionClient,
+  tenantId: string,
   name: string | null | undefined,
   direction: "IN" | "OUT"
 ) {
@@ -75,7 +85,7 @@ async function categoryByName(
   if (!clean) return null;
   const found = await tx.transactionCategory.findFirst({ where: { name: clean } });
   if (found) return found;
-  return tx.transactionCategory.create({ data: { name: clean, direction } });
+  return tx.transactionCategory.create({ data: { tenantId, name: clean, direction } });
 }
 
 // ------------------------------------------------------------------- кассы
@@ -123,8 +133,9 @@ financeRouter.post(
       })
       .parse(req.body);
 
-    const created = await withTenant(tenantOf(req), (tx) =>
-      tx.cashRegister.create({ data: { name: body.name, kind: body.kind } })
+    const tenantId = tenantOf(req);
+    const created = await withTenant(tenantId, (tx) =>
+      tx.cashRegister.create({ data: { tenantId, name: body.name, kind: body.kind } })
     );
     res.status(201).json({ id: created.id, name: created.name });
   })
@@ -234,7 +245,7 @@ financeRouter.post(
     }
 
     const created = await withTenant(tenantId, async (tx) => {
-      const register = await defaultRegister(tx, body.cashRegisterId ?? null);
+      const register = await defaultRegister(tx, tenantId, body.cashRegisterId ?? null);
 
       let customerId: string | null = null;
       if (body.orderId) {
@@ -246,10 +257,11 @@ financeRouter.post(
         customerId = order.customerId;
       }
 
-      const category = await categoryByName(tx, body.category, body.direction);
+      const category = await categoryByName(tx, tenantId, body.category, body.direction);
 
       const row = await tx.transaction.create({
         data: {
+          tenantId,
           cashRegisterId: register.id,
           categoryId: category?.id ?? null,
           direction: body.direction,
@@ -300,6 +312,7 @@ financeRouter.post(
 
       const row = await tx.transaction.create({
         data: {
+          tenantId,
           cashRegisterId: source.cashRegisterId,
           categoryId: source.categoryId,
           direction: source.direction === "IN" ? "OUT" : "IN",

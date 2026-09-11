@@ -6,11 +6,21 @@ export const num = (v: Prisma.Decimal | number | null | undefined): number =>
   v === null || v === undefined ? 0 : Number(v);
 
 /**
+ * tenantId в data пишем явно, хотя прокси из lib/db его тоже подставит.
+ * Прокси работает в рантайме, а типы Prisma требуют поле на этапе сборки —
+ * без него не компилируется. Дублирование безвредно: значения одинаковые.
+ */
+
+/**
  * Склад по умолчанию. Мастерская почти всегда одна и складов не заводит,
  * поэтому первый приход создаёт «Основной склад» сам — заставлять человека
  * сначала завести склад, чтобы оприходовать одну планку памяти, незачем.
  */
-export async function defaultWarehouse(tx: Prisma.TransactionClient, wanted?: string | null) {
+export async function defaultWarehouse(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  wanted?: string | null
+) {
   if (wanted) {
     const w = await tx.warehouse.findFirst({ where: { id: wanted } });
     if (!w) throw notFound("Склад не найден");
@@ -18,7 +28,7 @@ export async function defaultWarehouse(tx: Prisma.TransactionClient, wanted?: st
   }
   return (
     (await tx.warehouse.findFirst({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] })) ??
-    (await tx.warehouse.create({ data: { name: "Основной склад", isDefault: true } }))
+    (await tx.warehouse.create({ data: { tenantId, name: "Основной склад", isDefault: true } }))
   );
 }
 
@@ -33,6 +43,7 @@ export async function defaultWarehouse(tx: Prisma.TransactionClient, wanted?: st
 export async function applyMovement(
   tx: Prisma.TransactionClient,
   params: {
+    tenantId: string;
     warehouseId: string;
     stockItemId: string;
     type: "IN" | "OUT" | "WRITE_OFF" | "RETURN" | "INVENTORY";
@@ -49,7 +60,13 @@ export async function applyMovement(
       where: { warehouseId: params.warehouseId, stockItemId: params.stockItemId },
     })) ??
     (await tx.stockBalance.create({
-      data: { warehouseId: params.warehouseId, stockItemId: params.stockItemId, qty: 0, avgCost: 0 },
+      data: {
+        tenantId: params.tenantId,
+        warehouseId: params.warehouseId,
+        stockItemId: params.stockItemId,
+        qty: 0,
+        avgCost: 0,
+      },
     }));
 
   const have = num(balance.qty);
@@ -85,6 +102,7 @@ export async function applyMovement(
 
   return tx.stockMovement.create({
     data: {
+      tenantId: params.tenantId,
       warehouseId: params.warehouseId,
       stockItemId: params.stockItemId,
       type: params.type,

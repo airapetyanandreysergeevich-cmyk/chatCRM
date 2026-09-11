@@ -180,6 +180,7 @@ purchasesRouter.post(
           const number = await nextNumber(tx);
           const request = await tx.purchaseRequest.create({
             data: {
+              tenantId,
               number,
               createdById: userId,
               orderId: body.orderId ?? null,
@@ -192,6 +193,7 @@ purchasesRouter.post(
           // tenantId не подставит, и RLS такую вставку отклонит.
           await tx.purchaseRequestItem.createMany({
             data: body.items.map((i) => ({
+              tenantId,
               requestId: request.id,
               name: i.name,
               qty: i.qty,
@@ -339,7 +341,7 @@ purchasesRouter.post(
       if (!request) throw notFound("Заявка не найдена");
       if (request.status === "REJECTED") throw badRequest("Заявка отклонена — приходовать нечего");
 
-      const warehouse = await defaultWarehouse(tx, body.warehouseId ?? null);
+      const warehouse = await defaultWarehouse(tx, tenantId, body.warehouseId ?? null);
       let received = 0;
 
       for (const line of body.items) {
@@ -358,11 +360,12 @@ purchasesRouter.post(
           });
           stockItemId =
             found?.id ??
-            (await tx.stockItem.create({ data: { name: item.name, unit: item.unit } })).id;
+            (await tx.stockItem.create({ data: { tenantId, name: item.name, unit: item.unit } })).id;
           await tx.purchaseRequestItem.update({ where: { id: item.id }, data: { stockItemId } });
         }
 
         await applyMovement(tx, {
+          tenantId,
           warehouseId: warehouse.id,
           stockItemId,
           type: "IN",
