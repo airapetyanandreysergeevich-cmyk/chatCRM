@@ -27,6 +27,7 @@ import {
   type OrderWork,
   type Reference,
 } from "../lib/orders";
+import { matchServices, PINNED_LIMIT, type Service } from "../lib/services";
 
 /** Ссылка на файл подписанная и живёт недолго, поэтому запрашиваем её при показе. */
 function Photo({ orderId, attachmentId, name }: { orderId: string; attachmentId: string; name: string }) {
@@ -93,6 +94,95 @@ function Checklist({ title, items }: { title: string; items: Array<{ key: string
 }
 
 /** Редактор строк работ или запчастей: одна и та же таблица с разным набором колонок. */
+/**
+ * Поле названия с подсказками из прайса.
+ *
+ * Подсказка не обязывает: мастер волен дописать что угодно своими словами,
+ * список просто избавляет от набора одного и того же по двадцать раз в
+ * неделю. Выбор подставляет и цену — иначе половина смысла прайса теряется.
+ */
+function ServiceNameInput({
+  value,
+  onChange,
+  onPick,
+  services,
+}: {
+  value: string;
+  onChange: (name: string) => void;
+  onPick: (service: Service) => void;
+  services: Service[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+
+  const hits = matchServices(services, value);
+  const show = open && hits.length > 0;
+
+  function pick(service: Service) {
+    onPick(service);
+    setOpen(false);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Escape") return setOpen(false);
+    if (!show) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => (h + 1) % hits.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => (h - 1 + hits.length) % hits.length);
+    } else if (e.key === "Enter") {
+      // Перехватываем Enter только когда список открыт: иначе отберём
+      // у формы обычное подтверждение.
+      e.preventDefault();
+      pick(hits[highlight] ?? hits[0]);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        placeholder="Наименование"
+        autoComplete="off"
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+          setHighlight(0);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+      />
+      {show && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-field border border-line bg-surface-raised shadow-modal">
+          {hits.map((s, i) => (
+            <button
+              key={s.id}
+              type="button"
+              // onMouseDown вместо onClick: клик по подсказке иначе сначала
+              // снимает фокус с поля, список закрывается, и выбор не доходит.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(s);
+              }}
+              onMouseEnter={() => setHighlight(i)}
+              className={
+                "flex w-full items-center gap-3 border-b border-line px-3 py-2 text-left text-[13.5px] last:border-b-0 " +
+                (i === highlight ? "bg-[#242936] text-ink" : "text-ink-soft")
+              }
+            >
+              <span className="min-w-0 flex-1 truncate">{s.name}</span>
+              <span className="shrink-0 font-semibold text-ink-muted">{money(s.price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LineEditor<T extends OrderWork>({
   title,
   rows,
@@ -101,6 +191,7 @@ function LineEditor<T extends OrderWork>({
   extraColumn,
   onSave,
   saving,
+  services,
 }: {
   title: string;
   rows: T[];
@@ -109,9 +200,16 @@ function LineEditor<T extends OrderWork>({
   extraColumn?: (row: T, update: (patch: Partial<T>) => void) => React.ReactNode;
   onSave: () => void;
   saving: boolean;
+  /** Прайс для подсказок. Не передан — поле обычное, как было. */
+  services?: Service[];
 }) {
   const update = (i: number, patch: Partial<T>) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const addService = (s: Service) =>
+    setRows([...rows, { ...empty, name: s.name, qty: 1, price: s.price }]);
+
+  const pinned = (services ?? []).filter((s) => s.isPinned).slice(0, PINNED_LIMIT);
 
   const total = rows.reduce((acc, r) => acc + (Number(r.qty) || 0) * (Number(r.price) || 0), 0);
 
@@ -125,11 +223,20 @@ function LineEditor<T extends OrderWork>({
       <div className="mt-4 space-y-2">
         {rows.map((row, i) => (
           <div key={i} className="grid gap-2 sm:grid-cols-[1fr_78px_110px_auto] sm:items-center">
-            <Input
-              value={row.name}
-              placeholder="Наименование"
-              onChange={(e) => update(i, { name: e.target.value } as Partial<T>)}
-            />
+            {services ? (
+              <ServiceNameInput
+                value={row.name}
+                services={services}
+                onChange={(name) => update(i, { name } as Partial<T>)}
+                onPick={(s) => update(i, { name: s.name, price: s.price } as Partial<T>)}
+              />
+            ) : (
+              <Input
+                value={row.name}
+                placeholder="Наименование"
+                onChange={(e) => update(i, { name: e.target.value } as Partial<T>)}
+              />
+            )}
             <Input
               inputMode="decimal"
               value={String(row.qty)}
@@ -155,6 +262,26 @@ function LineEditor<T extends OrderWork>({
         ))}
         {rows.length === 0 && <p className="text-[13.5px] text-ink-dim">Пока ничего не добавлено.</p>}
       </div>
+
+      {/* Частое — рядом с «Добавить строку»: это тот же жест, только сразу
+          с названием и ценой. Список задаётся в настройках, в разделе услуг. */}
+      {pinned.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[12.5px] text-ink-dim">Частое:</span>
+          {pinned.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => addService(s)}
+              title={`Добавить: ${s.name} — ${money(s.price)}`}
+              className="rounded-pill border border-line bg-surface-raised px-3 py-1.5 text-[13px] font-semibold text-ink-soft transition-colors duration-150 hover:border-line-strong hover:text-ink"
+            >
+              {s.name}
+              <span className="ml-1.5 font-normal text-ink-dim">{money(s.price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" variant="secondary" icon={<IconPlus />} onClick={() => setRows([...rows, { ...empty }])}>
@@ -535,6 +662,7 @@ export default function OrderCard() {
             setRows={setWorks}
             empty={{ name: "", qty: 1, price: 0 }}
             saving={saving}
+            services={ref?.services ?? []}
             onSave={() => void run(() => ordersApi.saveWorks(order.id, works), "Работы сохранены")}
           />
 

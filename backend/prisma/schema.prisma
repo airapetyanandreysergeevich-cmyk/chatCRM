@@ -75,6 +75,7 @@ model Tenant {
   customers           Customer[]
   devices             Device[]
   orderStatuses       OrderStatus[]
+  services            Service[]
   orders              Order[]
   orderStatusHistory  OrderStatusHistory[]
   orderWorks          OrderWork[]
@@ -458,6 +459,31 @@ model Order {
   @@index([tenantId, assignedMasterId])
   @@index([tenantId, customerId])
   @@index([tenantId, acceptedAt])
+}
+
+/**
+ * Прайс мастерской: что она делает и почём.
+ *
+ * Это справочник для подсказок, а не источник истины по деньгам. В заказ
+ * попадает копия названия и цены (OrderWork), поэтому поднятие прайса не
+ * переписывает суммы в старых ремонтах, а удаление услуги не стирает
+ * выполненную работу.
+ */
+model Service {
+  id       String  @id @default(uuid())
+  tenantId String
+  name     String
+  price    Decimal @default(0) @db.Decimal(12, 2)
+  note     String? // уточнение для приёмщика: что входит, что нет
+  isPinned Boolean @default(false) // вынесена кнопкой в карточку заказа
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model OrderStatusHistory {

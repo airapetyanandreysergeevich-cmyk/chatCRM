@@ -23,13 +23,16 @@ const tenantOf = (req: Request) => currentTenantId(req)!;
 referenceRouter.get(
   "/",
   ah(async (req, res) => {
-    const [statuses, masters] = await withTenant(tenantOf(req), async (tx) => [
+    const [statuses, masters, services] = await withTenant(tenantOf(req), async (tx) => [
       await tx.orderStatus.findMany({ orderBy: { sortOrder: "asc" } }),
       await tx.user.findMany({
         where: { deletedAt: null, isActive: true, role: { code: "MASTER" } },
         orderBy: { fullName: "asc" },
         select: { id: true, fullName: true },
       }),
+      // Прайс едет вместе со справочниками, чтобы подсказки в карточке
+      // заказа работали мгновенно и не ходили на сервер на каждую букву.
+      await tx.service.findMany({ orderBy: { name: "asc" } }),
     ]);
 
     res.json({
@@ -45,6 +48,13 @@ referenceRouter.get(
         isInitial: s.isInitial,
       })),
       masters,
+      services: services.map((s) => ({
+        id: s.id,
+        name: s.name,
+        price: Number(s.price),
+        note: s.note,
+        isPinned: s.isPinned,
+      })),
     });
   })
 );

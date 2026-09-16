@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase } from "../components/icons";
+import { IconBell, IconDatabase, IconServices } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 
@@ -18,6 +18,13 @@ const SECTIONS: Section[] = [
     title: "Оповещения",
     text: "Что приходит на телефон, кому и о чём. Здесь же включается приложение на этом устройстве.",
     icon: <IconBell />,
+  },
+  {
+    to: "/settings/services",
+    title: "Услуги",
+    text: "Прайс мастерской: что делаем и почём. Отсюда подставляются названия и цены в выполненные работы.",
+    icon: <IconServices />,
+    need: "settings.manage",
   },
   {
     to: "/settings/data",

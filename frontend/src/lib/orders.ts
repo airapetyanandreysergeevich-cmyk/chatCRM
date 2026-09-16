@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { Service } from "./services";
 
 export type StatusGroup = "NEW" | "IN_PROGRESS" | "WAITING" | "DONE" | "CLOSED" | "CANCELLED";
 
@@ -128,6 +129,8 @@ export interface Reference {
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   masters: Array<{ id: string; fullName: string }>;
+  /** Прайс мастерской — для подсказок при наборе выполненных работ. */
+  services: Service[];
 }
 
 export const ORDER_KIND_LABEL: Record<Order["kind"], string> = {
