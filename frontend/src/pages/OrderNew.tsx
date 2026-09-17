@@ -14,8 +14,10 @@ import {
   Spinner,
   Textarea,
 } from "../components/ui";
+import { SuggestInput } from "../components/SuggestInput";
 import { ApiError } from "../lib/api";
 import { plural } from "../lib/format";
+import { EMPTY_HINTS, hintsApi, matchHints, withoutHint, type Hints } from "../lib/hints";
 import { ordersApi, type CustomerHit, type Reference } from "../lib/orders";
 
 const toggle = (list: string[], key: string) =>
@@ -102,6 +104,7 @@ export default function OrderNew() {
   });
   const [completeness, setCompleteness] = useState<string[]>([]);
   const [appearance, setAppearance] = useState<string[]>([]);
+  const [hints, setHints] = useState<Hints>(EMPTY_HINTS);
 
   useEffect(() => {
     ordersApi
@@ -111,7 +114,24 @@ export default function OrderNew() {
         setDevice((d) => ({ ...d, kind: d.kind || r.deviceKinds[0] }));
       })
       .catch(() => setError(new ApiError(0, "Не удалось загрузить справочники")));
+
+    // Память полей техники. Без неё бланк работает как раньше, поэтому
+    // ошибку не показываем — просто не будет подсказок.
+    hintsApi.list().then(setHints).catch(() => {});
   }, []);
+
+  /**
+   * Убрать вариант из памяти.
+   *
+   * Из списка он исчезает сразу, не дожидаясь ответа сервера: человек
+   * нажимает урну, когда хочет избавиться от своей же опечатки, и видеть её
+   * ещё секунду — раздражает. Если удалить не вышло, вариант вернётся при
+   * следующем открытии бланка.
+   */
+  function forget(hint: { id: string }) {
+    setHints((h) => withoutHint(h, hint.id));
+    hintsApi.remove(hint.id).catch(() => {});
+  }
 
   /**
    * Ищем по телефону и по имени независимо: у стойки человек называет то
@@ -356,13 +376,30 @@ export default function OrderNew() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Бренд">
-                <Input value={device.brand} onChange={(e) => setDevice({ ...device, brand: e.target.value })} />
+              {/* Марку и модель мастерская набирает руками, и одни и те же
+                  аппараты приходят снова и снова. Поэтому оба поля помнят
+                  прежние варианты и предлагают их с первой буквы. */}
+              <Field label="Бренд" interactive>
+                <SuggestInput
+                  value={device.brand}
+                  onChange={(brand) => setDevice({ ...device, brand })}
+                  items={matchHints(hints.brand, device.brand)}
+                  onForget={forget}
+                  placeholder="Lenovo, ASUS, HP…"
+                />
               </Field>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Модель">
-                <Input value={device.model} onChange={(e) => setDevice({ ...device, model: e.target.value })} />
+              <Field label="Модель" interactive>
+                <SuggestInput
+                  value={device.model}
+                  // Модели показываем только для выбранной марки: IdeaPad
+                  // незачем подсказывать, когда в бренде стоит ASUS.
+                  onChange={(model) => setDevice({ ...device, model })}
+                  items={matchHints(hints.model, device.model, device.brand)}
+                  onForget={forget}
+                  placeholder="IdeaPad 5, VivoBook 15…"
+                />
               </Field>
               <Field label="Серийный номер">
                 <Input value={device.serial} onChange={(e) => setDevice({ ...device, serial: e.target.value })} />

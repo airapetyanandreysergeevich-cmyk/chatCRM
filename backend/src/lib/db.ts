@@ -4,7 +4,7 @@ export const prisma = new PrismaClient();
 
 /** Делегаты Prisma для таблиц с tenantId. Совпадает со списком таблиц в prisma/rls.sql. */
 const TENANT_DELEGATES = new Set([
-  "branch", "role", "user", "customer", "device", "orderStatus", "service", "order",
+  "branch", "role", "user", "customer", "device", "deviceHint", "orderStatus", "service", "order",
   "orderStatusHistory", "orderWork", "orderPart", "attachment",
   "purchaseRequest", "purchaseRequestItem",
   "warehouse", "stockItem", "stockBalance", "stockMovement",

@@ -97,6 +97,49 @@ settingsRouter.get(
   })
 );
 
+/**
+ * Название мастерской.
+ *
+ * Лежит не в settings, а в собственной колонке Tenant.name: по нему
+ * мастерскую находит платформа, оно стоит в письмах и в печатных бланках.
+ * Tenant — таблица платформы, RLS на неё не распространяется, поэтому
+ * where по id здесь обязателен и написан руками.
+ */
+settingsRouter.put(
+  "/workshop",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const { name } = z
+      .object({
+        name: z
+          .string()
+          .trim()
+          .min(2, "Название слишком короткое")
+          .max(80, "Название длиннее 80 знаков не поместится в бланк"),
+      })
+      .parse(req.body);
+    const tenantId = tenantOf(req);
+
+    await withTenant(tenantId, async (tx) => {
+      const before = await tx.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+      if (before?.name === name) return;
+
+      await tx.tenant.update({ where: { id: tenantId }, data: { name } });
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        diff: { name: { from: before?.name ?? null, to: name } },
+        ip: clientIp(req),
+      });
+    });
+
+    res.json({ ok: true });
+  })
+);
+
 settingsRouter.put(
   "/branding",
   requirePermission(PERMISSIONS.SETTINGS_MANAGE),

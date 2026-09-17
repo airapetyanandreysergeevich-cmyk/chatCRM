@@ -24,6 +24,7 @@ import {
   requireTenant,
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
+import { rememberDevice } from "../hints/hints.service";
 import {
   assertOrderAccess,
   limitExceeded,
@@ -243,6 +244,10 @@ ordersRouter.post(
           serial: body.device.serial || null,
         },
       });
+
+      // Марку и модель кладём в память подсказок: в следующий раз такую же
+      // технику приёмщик выберет из списка, а не наберёт заново.
+      await rememberDevice(tx, body.device);
 
       if (body.parentOrderId) {
         const parent = await tx.order.findFirst({ where: { id: body.parentOrderId, deletedAt: null } });

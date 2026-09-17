@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconMoon, IconSun } from "../components/icons";
 import { Banner, Button, Card, Field, Input, SectionLabel, PageHeader } from "../components/ui";
-import { LOGO_TYPES, prepareLogo, type Branding } from "../lib/branding";
+import { appearanceApi, LOGO_TYPES, prepareLogo, type Branding } from "../lib/branding";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
@@ -132,8 +132,15 @@ function ColorModal({
   );
 }
 
+/** Как мастерская называется сейчас — из того же источника, что и в меню. */
+function currentWorkshopName(me: ReturnType<typeof useAuth>["me"]): string {
+  if (me?.kind === "tenant") return me.tenant?.name ?? "";
+  if (me?.kind === "platform") return me.impersonating?.name ?? "";
+  return "";
+}
+
 export default function Interface() {
-  const { can } = useAuth();
+  const { can, me, reload } = useAuth();
   const { mode, saved, setMode, preview, revert, save, reset, branding, saveBranding } = useTheme();
   const [draft, setDraft] = useState<Theme>(saved);
   const [picking, setPicking] = useState<keyof Palette | null>(null);
@@ -142,8 +149,11 @@ export default function Interface() {
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [printNote, setPrintNote] = useState(branding.printNote ?? "");
+  const savedName = currentWorkshopName(me);
+  const [name, setName] = useState(savedName);
 
   useEffect(() => setPrintNote(branding.printNote ?? ""), [branding.printNote]);
+  useEffect(() => setName(savedName), [savedName]);
 
   const mayEdit = can("settings.manage");
 
@@ -213,6 +223,22 @@ export default function Interface() {
     }
   }
 
+  async function onRename() {
+    setBusy(true);
+    setError(null);
+    try {
+      await appearanceApi.rename(name.trim());
+      // Название стоит в меню, в шапке бланков и в письмах — перечитываем
+      // данные о себе, чтобы новое появилось везде сразу, без перезахода.
+      await reload();
+      setNotice("Название сохранено");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось сохранить название");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onLogoPicked(file: File) {
     setError(null);
     try {
@@ -262,8 +288,37 @@ export default function Interface() {
 
       {mayEdit && (
         <Card>
-          <SectionLabel>Логотип мастерской</SectionLabel>
-          <p className="mt-2 text-[13px] text-ink-dim">
+          <SectionLabel>Мастерская</SectionLabel>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Field
+              label="Название компании"
+              hint="Стоит внизу бокового меню, в шапке печатных бланков и в письмах клиентам"
+              error={name.trim().length > 0 && name.trim().length < 2 ? "Слишком короткое" : undefined}
+            >
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={80}
+                placeholder="Сервис на Ленина"
+              />
+            </Field>
+            <Button
+              variant="secondary"
+              disabled={busy || name.trim().length < 2 || name.trim() === savedName}
+              onClick={() => void onRename()}
+            >
+              Сохранить
+            </Button>
+          </div>
+
+          {/* Отчерчиваем: выше — как мастерская называется, ниже — как она
+              выглядит. Без линии подпись к названию и текст про логотип
+              сливаются в один абзац. */}
+          <p className="mt-7 border-t border-line pt-5 text-[13px] font-semibold text-ink-soft">
+            Логотип
+          </p>
+          <p className="mt-1.5 text-[13px] text-ink-dim">
             Встанет в левый верхний угол вместо знака FineCRM и в шапку печатных бланков.
             Картинку уменьшим сами, прозрачность сохраним.
           </p>

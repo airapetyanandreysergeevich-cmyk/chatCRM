@@ -76,6 +76,7 @@ model Tenant {
   devices             Device[]
   orderStatuses       OrderStatus[]
   services            Service[]
+  deviceHints         DeviceHint[]
   orders              Order[]
   orderStatusHistory  OrderStatusHistory[]
   orderWorks          OrderWork[]
@@ -484,6 +485,34 @@ model Service {
 
   @@unique([tenantId, name])
   @@index([tenantId])
+}
+
+/// Что мастерская уже вводила руками в полях техники.
+///
+/// Справочника марок и моделей на свете не существует: у каждой мастерской
+/// свой поток техники, и завести его сверху нельзя — его можно только
+/// накопить. Поэтому строка запоминается в момент приёма и в следующий раз
+/// предлагается с первой буквы.
+///
+/// scope — к чему вариант относится: у модели это марка (чтобы IdeaPad не
+/// подсказывался под ASUS), у марки он пустой. Отдельной таблицы для каждого
+/// поля не делаем: полей два, а разница между ними — одна строка.
+model DeviceHint {
+  id       String @id @default(uuid())
+  tenantId String
+  field    String // brand | model
+  scope    String @default("")
+  value    String
+
+  /// Сколько раз пригодилось — по нему список и выстраивается.
+  uses       Int      @default(1)
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, field, scope, value])
+  @@index([tenantId, field])
 }
 
 model OrderStatusHistory {

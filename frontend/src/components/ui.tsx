@@ -93,19 +93,27 @@ export function Field({
   error,
   hint,
   children,
+  interactive,
 }: {
   label: string;
   error?: string;
   hint?: string;
   children: ReactNode;
+  /**
+   * Внутри поля есть свои кнопки — например, список подсказок с урной.
+   * Тогда обёрткой должен быть div, а не label: клик по любому месту label
+   * браузер переадресует в поле ввода, и кнопка не срабатывает.
+   */
+  interactive?: boolean;
 }) {
+  const Wrap = interactive ? "div" : "label";
   return (
-    <label className="block">
+    <Wrap className="block">
       <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">{label}</span>
       {children}
       {hint && !error && <span className="mt-1.5 block text-[12.5px] text-ink-dim">{hint}</span>}
       {error && <span className="mt-1.5 block text-[12.5px] text-state-off">{error}</span>}
-    </label>
+    </Wrap>
   );
 }
 

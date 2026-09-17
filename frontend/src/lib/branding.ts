@@ -65,6 +65,12 @@ export async function prepareLogo(file: File): Promise<string> {
 export const appearanceApi = {
   get: () => api.get<{ theme: unknown; branding: Branding }>("/settings/appearance"),
   saveBranding: (branding: Branding) => api.put<{ ok: true }>("/settings/branding", branding),
+  /**
+   * Название мастерской лежит не здесь, а в собственном поле арендатора: по
+   * нему мастерскую знает платформа. Правится рядом с логотипом просто
+   * потому, что это одна и та же мысль — «как называется эта мастерская».
+   */
+  rename: (name: string) => api.put<{ ok: true }>("/settings/workshop", { name }),
 };
 
 export function normalizeBranding(raw: unknown): Branding {

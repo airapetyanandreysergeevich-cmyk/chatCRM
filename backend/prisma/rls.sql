@@ -23,7 +23,7 @@ DO $$
 DECLARE
   t text;
   tenant_tables text[] := ARRAY[
-    'Branch','Role','User','Customer','Device','OrderStatus','Service','Order',
+    'Branch','Role','User','Customer','Device','DeviceHint','OrderStatus','Service','Order',
     'OrderStatusHistory','OrderWork','OrderPart','Attachment',
     'PurchaseRequest','PurchaseRequestItem',
     'Warehouse','StockItem','StockBalance','StockMovement',
