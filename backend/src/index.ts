@@ -1,3 +1,4 @@
+import path from "node:path";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
@@ -18,11 +19,12 @@ import { summaryRouter } from "./modules/summary/summary.routes";
 import { notificationsRouter, pushRouter } from "./modules/notifications/notifications.routes";
 import { publicRouter } from "./modules/public/public.routes";
 import { referenceRouter } from "./modules/reference/reference.routes";
+import { filesRouter } from "./modules/files/files.routes";
 import { hintsRouter } from "./modules/hints/hints.routes";
 import { servicesRouter } from "./modules/services/services.routes";
 import { settingsRouter } from "./modules/settings/settings.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
-import { ensureBucket } from "./lib/storage";
+import { ensureBucket, isLocalStorage } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
 
@@ -59,6 +61,9 @@ app.use("/api/stock", stockRouter);
 app.use("/api/purchases", purchasesRouter);
 app.use("/api/finance", financeRouter);
 app.use("/api/reference", referenceRouter);
+// Только в локальной версии: в облаке файлы отдаёт S3, и открытого
+// маршрута к ним быть не должно.
+if (isLocalStorage) app.use("/api/files", filesRouter);
 app.use("/api/hints", hintsRouter);
 app.use("/api/services", servicesRouter);
 app.use("/api/settings", settingsRouter);
@@ -68,6 +73,19 @@ app.use("/api/data", dataRouter);
 app.use("/api", staffRouter);
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не найден" }));
+
+// Интерфейс отдаём сами — только в локальной версии, где нет nginx.
+// Файлы приложения кэшируются надолго: их имена содержат отпечаток сборки.
+// index.html — никогда, иначе после обновления останется старая страница,
+// ссылающаяся на файлы, которых уже нет.
+if (env.staticDir) {
+  app.use(express.static(env.staticDir, { index: false, maxAge: "365d", immutable: true }));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(path.join(env.staticDir, "index.html"));
+  });
+}
+
 app.use(errorHandler);
 
 ensurePlatformOwner().catch((err) => console.error("Не удалось создать собственника платформы:", err));
@@ -78,8 +96,8 @@ ensureBucket().catch((err) => console.error("Не удалось подгото�
 if (pushConfigured) startOverdueWatch();
 else console.warn("Оповещения выключены: не заданы VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY");
 
-const server = app.listen(env.port, () => {
-  console.log(`RepairShop API слушает порт ${env.port}`);
+const server = app.listen(env.port, env.bindHost, () => {
+  console.log(`RepairShop API слушает ${env.bindHost}:${env.port}`);
 });
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

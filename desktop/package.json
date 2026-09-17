@@ -3,7 +3,42 @@
   "version": "0.1.0",
   "private": true,
   "description": "Локальная версия FineCRM для Windows: Основа со встроенной базой, клиент локальной сети, клиент облака",
+  "main": "src/main.js",
   "scripts": {
-    "check-db": "node test/local-db.js"
+    "start": "electron .",
+    "check-db": "node test/local-db.js",
+    "check-backend": "node test/backend-lifecycle.js",
+    "check": "npm run check-backend && npm run check-db",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ru.finecrm.desktop",
+    "productName": "FineCRM",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["src/**/*"],
+    "extraResources": [
+      { "from": "../backend/dist", "to": "backend/dist" },
+      { "from": "../backend/node_modules", "to": "backend/node_modules" },
+      { "from": "../backend/prisma", "to": "backend/prisma" },
+      { "from": "../backend/package.json", "to": "backend/package.json" },
+      { "from": "../frontend/dist", "to": "frontend" },
+      { "from": "vendor/pgsql", "to": "pgsql" }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "FineCRM-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": true,
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": true,
+      "shortcutName": "FineCRM"
+    }
   }
 }

@@ -9,6 +9,11 @@ function required(name: string): string {
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 4000),
+  // Адрес прослушивания. В облаке слушаем всё — снаружи стоит nginx. В
+  // локальной версии по умолчанию только себя, пока раздачу по сети не
+  // включили явно: иначе база мастерской окажется доступна всему кафе,
+  // в чей вайфай воткнули ноутбук.
+  bindHost: process.env.BIND_HOST ?? "0.0.0.0",
   databaseUrl: required("DATABASE_URL"),
 
   jwtAccessSecret: required("JWT_ACCESS_SECRET"),
@@ -16,6 +21,15 @@ export const env = {
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL ?? "15m",
   refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 30),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
+
+  // Куда класть фотографии: "s3" в облаке, "local" в коробочной версии.
+  storageDriver: process.env.STORAGE_DRIVER === "local" ? "local" : "s3",
+  // Папка хранилища для local — задаётся программой рядом с базой мастерской.
+  storageDir: process.env.STORAGE_DIR ?? "./files",
+  // Собранный интерфейс. В облаке его раздаёт nginx и переменная пуста; в
+  // локальной версии его отдаёт сам бэкенд — тогда сотруднику с соседнего
+  // компьютера хватит браузера, без установки программы.
+  staticDir: process.env.STATIC_DIR ?? "",
 
   s3Endpoint: process.env.S3_ENDPOINT ?? "http://minio:9000",
   s3Bucket: process.env.S3_BUCKET ?? "repairshop",

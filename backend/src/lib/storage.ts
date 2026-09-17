@@ -1,36 +1,24 @@
-import { randomUUID } from "node:crypto";
-import {
-  CreateBucketCommand,
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadBucketCommand,
-  PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "./env";
+import * as local from "./storage.local";
+import * as s3 from "./storage.s3";
 
 /**
- * Фотографии техники лежат в приватном бакете и наружу отдаются только
- * по подписанной ссылке с коротким сроком жизни. Прямой раздачи каталога нет:
- * иначе снимки чужой техники доставались бы по угаданному адресу.
+ * Хранилище фотографий — единое лицо для двух устройств.
+ *
+ * В облаке файлы лежат в приватном бакете MinIO, в локальной версии — в папке
+ * рядом с базой мастерской. Остальному коду разница не видна: он кладёт файл,
+ * получает ключ и просит по ключу временную ссылку.
+ *
+ * Выбор делается один раз при старте по настройке, а не по «получилось ли
+ * подключиться к S3»: молчаливое переключение на диск, когда хранилище
+ * недоступно, разложило бы половину снимков в одном месте, половину в другом.
  */
-export const s3 = new S3Client({
-  region: "us-east-1",
-  endpoint: env.s3Endpoint,
-  forcePathStyle: true, // MinIO не умеет адресацию бакета через поддомен
-  credentials: { accessKeyId: env.s3AccessKey, secretAccessKey: env.s3SecretKey },
-});
 
-export async function ensureBucket(): Promise<void> {
-  try {
-    await s3.send(new HeadBucketCommand({ Bucket: env.s3Bucket }));
-  } catch {
-    await s3.send(new CreateBucketCommand({ Bucket: env.s3Bucket }));
-    console.log(`Создан бакет ${env.s3Bucket}`);
-  }
-}
+export const isLocalStorage = env.storageDriver === "local";
 
+const driver = isLocalStorage ? local : s3;
+
+/** Что разрешено загружать. Расширение в ключе берём отсюда же. */
 const EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -39,34 +27,34 @@ const EXT: Record<string, string> = {
   "application/pdf": "pdf",
 };
 
+/** Обратное соответствие — нужно локальной раздаче, чтобы назвать тип файла. */
+const MIME: Record<string, string> = Object.fromEntries(
+  Object.entries(EXT).map(([mime, ext]) => [ext, mime])
+);
+
 export const isAllowedUpload = (mime: string): boolean => mime in EXT;
 
-/** Ключ всегда начинается с tenantId — по одному пути видно, чьё это. */
-export async function putOrderFile(params: {
+export const mimeOfKey = (key: string): string =>
+  MIME[key.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+
+/** Подготовка хранилища при старте: бакет или папка. */
+export const ensureBucket = (): Promise<void> => driver.ensure();
+
+export function putOrderFile(params: {
   tenantId: string;
   orderId: string;
   buffer: Buffer;
   mimeType: string;
 }): Promise<string> {
-  const key = `${params.tenantId}/${params.orderId}/${randomUUID()}.${EXT[params.mimeType] ?? "bin"}`;
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: env.s3Bucket,
-      Key: key,
-      Body: params.buffer,
-      ContentType: params.mimeType,
-    })
-  );
-  return key;
+  const ext = EXT[params.mimeType] ?? "bin";
+  return driver.put({ ...params, ext });
 }
 
-/** Ссылка живёт 15 минут: хватает открыть, мало чтобы разойтись по чужим рукам. */
-export function signedUrl(key: string, seconds = 900): Promise<string> {
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: env.s3Bucket, Key: key }), {
-    expiresIn: seconds,
-  });
-}
+export const signedUrl = (key: string, seconds = 900): Promise<string> =>
+  Promise.resolve(driver.url(key, seconds));
 
-export async function removeFile(key: string): Promise<void> {
-  await s3.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: key }));
-}
+export const removeFile = (key: string): Promise<void> => driver.remove(key);
+
+// Локальной раздаче нужны разбор ключа и проверка подписи; в облаке этим
+// занимается сам S3, и наружу они не нужны.
+export const localFile = { resolveKey: local.resolveKey, verify: local.verify };
