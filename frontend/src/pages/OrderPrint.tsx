@@ -175,7 +175,7 @@ export default function OrderPrint() {
       </div>
 
       {/* Лист A4. Ширина в миллиметрах, чтобы на экране было видно, как ляжет. */}
-      <div className="mx-auto my-6 w-[210mm] max-w-full bg-white p-[14mm] text-black shadow-lg print:my-0 print:w-auto print:p-0 print:shadow-none">
+      <div className="mx-auto my-6 w-[210mm] max-w-full overflow-hidden bg-white p-[14mm] text-black shadow-lg print:my-0 print:w-auto print:max-w-none print:p-[6mm] print:shadow-none">
         <header className="flex items-start justify-between gap-6 border-b-2 border-black pb-3">
           <div className="flex min-w-0 items-center gap-3">
             {branding.logo && (

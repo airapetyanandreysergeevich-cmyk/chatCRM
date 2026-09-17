@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import type { ButtonHTMLAttributes, ComponentType, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import {
+  IconChevronDown,
   IconSearch,
   IconStatusNew,
   IconStatusProgress,
@@ -87,6 +89,62 @@ export function SectionLabel({ children }: { children: ReactNode }) {
     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-ink-dim">{children}</p>
   );
 }
+
+/**
+ * Скрытая часть панели — «Дополнительно».
+ *
+ * У стойки заполняют три-четыре поля, остальные нужны в одном случае из
+ * десяти. Панель из двенадцати полей заставляет искать нужное глазами
+ * каждый раз, поэтому редкое убрано вниз и раскрывается по нажатию.
+ *
+ * Содержимое размонтировано, пока свёрнуто, — это безопасно: значения
+ * полей живут в состоянии формы, а не внутри блока, и набранное не
+ * теряется. Поэтому же показываем, сколько там заполнено: свёрнутый блок
+ * не должен прятать введённое.
+ */
+export function More({
+  children,
+  label = "Дополнительно",
+  filled = 0,
+  /** Открыть принудительно — например, когда внутри поле с ошибкой. */
+  forceOpen = false,
+}: {
+  children: ReactNode;
+  label?: string;
+  filled?: number;
+  forceOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
+
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex min-h-[40px] items-center gap-2 rounded-field px-2 text-[13.5px] font-semibold text-ink-muted transition-colors duration-150 hover:text-ink"
+      >
+        <IconChevronDown
+          className={cx("h-[16px] w-[16px] transition-transform duration-150", open && "rotate-180")}
+        />
+        {label}
+        {!open && filled > 0 && (
+          <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[12px] font-semibold text-ink-soft">
+            заполнено {filled}
+          </span>
+        )}
+      </button>
+      {open && <div className="mt-2 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
+/** Сколько из перечисленного заполнено — для счётчика в свёрнутом блоке. */
+export const countFilled = (...values: Array<string | boolean | undefined | null>) =>
+  values.filter((v) => (typeof v === "boolean" ? v : !!v && String(v).trim() !== "")).length;
 
 export function Field({
   label,
