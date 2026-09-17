@@ -221,7 +221,7 @@ export function applyTheme(theme: Theme, mode: Mode) {
 // ---------------------------------------------------------------------- сервер
 
 export const themeApi = {
-  get: () => api.get<{ theme: Theme }>("/settings/theme"),
+  // Чтение идёт через /settings/appearance вместе с логотипом — см. lib/branding.ts.
   save: (theme: Theme) => api.put<{ ok: true }>("/settings/theme", { theme }),
   reset: () => api.del<{ ok: true }>("/settings/theme"),
 };

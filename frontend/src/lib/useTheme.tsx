@@ -1,6 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "./auth";
 import {
+  appearanceApi,
+  EMPTY_BRANDING,
+  normalizeBranding,
+  type Branding,
+} from "./branding";
+import {
   applyTheme,
   DEFAULT_THEME,
   normalizeTheme,
@@ -34,6 +40,9 @@ interface ThemeState {
   revert: () => void;
   save: (theme: Theme) => Promise<void>;
   reset: () => Promise<void>;
+  /** Логотип и реквизиты мастерской — едут тем же запросом, что и палитра. */
+  branding: Branding;
+  saveBranding: (branding: Branding) => Promise<void>;
 }
 
 const ThemeContext = createContext<ThemeState | null>(null);
@@ -45,6 +54,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [saved, setSaved] = useState<Theme>(DEFAULT_THEME);
   /** То, что показываем сейчас: обычно совпадает с сохранённой. */
   const [shown, setShown] = useState<Theme>(DEFAULT_THEME);
+  const [branding, setBranding] = useState<Branding>(EMPTY_BRANDING);
 
   useEffect(() => {
     applyTheme(shown, mode);
@@ -53,13 +63,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (status !== "ready") return;
     let alive = true;
-    themeApi
+    appearanceApi
       .get()
       .then((r) => {
         if (!alive) return;
         const theme = normalizeTheme(r.theme);
         setSaved(theme);
         setShown(theme);
+        setBranding(normalizeBranding(r.branding));
       })
       // Платформенный пользователь вне мастерской настроек не имеет — и не должен.
       .catch(() => undefined);
@@ -87,6 +98,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setModeState(next);
   }, []);
 
+  const saveBranding = useCallback(async (next: Branding) => {
+    await appearanceApi.saveBranding(next);
+    setBranding(next);
+  }, []);
+
   const save = useCallback(async (theme: Theme) => {
     await themeApi.save(theme);
     setSaved(theme);
@@ -109,8 +125,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       revert,
       save,
       reset,
+      branding,
+      saveBranding,
     }),
-    [mode, shown, saved, setMode, revert, save, reset]
+    [mode, shown, saved, setMode, revert, save, reset, branding, saveBranding]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

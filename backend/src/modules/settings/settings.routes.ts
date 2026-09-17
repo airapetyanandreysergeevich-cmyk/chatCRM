@@ -47,6 +47,29 @@ const palette = z.object({
 /** Палитры раздельные: цвет, читаемый на чёрном, на белом слепнет. */
 const themeSchema = z.object({ dark: palette, light: palette });
 
+/**
+ * Логотип храним прямо в настройках, строкой data:.
+ *
+ * Отдельного файла в хранилище он не стоит: картинка нужна на каждой
+ * странице и в каждом бланке, а подписанная ссылка живёт пятнадцать минут
+ * и в окне печати успевает протухнуть. Размер режет клиент, здесь только
+ * потолок — чтобы никто не положил в настройки фотографию с телефона.
+ *
+ * SVG не принимаем намеренно: внутри него бывает разметка и скрипты, а
+ * растровая картинка — это просто пиксели.
+ */
+const LOGO_LIMIT = 200_000;
+
+const brandingSchema = z.object({
+  logo: z
+    .string()
+    .regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, "Подойдёт PNG, JPEG или WebP")
+    .max(LOGO_LIMIT, "Логотип слишком тяжёлый — уменьшите картинку")
+    .nullable(),
+  /** Строка под названием в бланках: адрес, телефон, часы работы. */
+  printNote: z.string().trim().max(200).nullable(),
+});
+
 async function readSettings(tenantId: string): Promise<Record<string, unknown>> {
   const tenant = await withTenant(tenantId, (tx) =>
     tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } })
@@ -54,12 +77,55 @@ async function readSettings(tenantId: string): Promise<Record<string, unknown>> 
   return ((tenant?.settings as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
 }
 
+/**
+ * Всё оформление одним запросом: и палитра, и логотип нужны при первой же
+ * отрисовке, и разносить их по двум обращениям — значит моргнуть дважды.
+ */
 settingsRouter.get(
-  "/theme",
+  "/appearance",
   ah(async (req, res) => {
     const settings = await readSettings(tenantOf(req));
-    // null значит «ничего не настраивали» — фронтенд подставит стандартную.
-    res.json({ theme: settings.theme ?? null });
+    const branding = (settings.branding ?? {}) as Record<string, unknown>;
+    res.json({
+      // null значит «ничего не настраивали» — фронтенд подставит стандартное.
+      theme: settings.theme ?? null,
+      branding: {
+        logo: typeof branding.logo === "string" ? branding.logo : null,
+        printNote: typeof branding.printNote === "string" ? branding.printNote : null,
+      },
+    });
+  })
+);
+
+settingsRouter.put(
+  "/branding",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const branding = brandingSchema.parse(req.body);
+    const tenantId = tenantOf(req);
+
+    await withTenant(tenantId, async (tx) => {
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { settings: true },
+      });
+      const settings = { ...((tenant?.settings as object) ?? {}), branding };
+      await tx.tenant.update({ where: { id: tenantId }, data: { settings } });
+
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        // Саму картинку в журнал не кладём: она весит больше, чем вся
+        // остальная запись, и читать её там всё равно некому.
+        diff: { logo: branding.logo ? "загружен" : "убран", printNote: branding.printNote },
+        ip: clientIp(req),
+      });
+    });
+
+    res.json({ ok: true });
   })
 );
 

@@ -15,6 +15,7 @@ import NotificationsPage from "./pages/Notifications";
 import SettingsPage from "./pages/Settings";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
+import OrderPrint from "./pages/OrderPrint";
 import Orders from "./pages/Orders";
 import Purchases from "./pages/Purchases";
 import ServicesPage from "./pages/Services";
@@ -48,6 +49,10 @@ export default function App() {
       <Route path="/register" element={status === "ready" ? <Navigate to="/" replace /> : <Register />} />
 
       <Route element={<ProtectedRoute />}>
+        {/* Бланк печатается на бумагу, поэтому идёт мимо Layout: боковое меню
+            и шапка на квитанции клиенту не нужны. */}
+        <Route path="/orders/:id/print" element={<OrderPrint />} />
+
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
           <Route path="/orders" element={<Orders />} />

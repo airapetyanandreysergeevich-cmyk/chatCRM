@@ -401,6 +401,16 @@ export default function OrderCard() {
               ))}
             </Select>
           )}
+          {/* Печать рядом со сменой статуса: квитанцию распечатывают сразу
+              после приёма, акт — при выдаче, оба раза отсюда. */}
+          <Button variant="secondary" onClick={() => navigate(`/orders/${order.id}/print?doc=intake`)}>
+            Квитанция
+          </Button>
+          {order.completedAt && (
+            <Button variant="secondary" onClick={() => navigate(`/orders/${order.id}/print?doc=act`)}>
+              Акт работ
+            </Button>
+          )}
           {canIssue &&
             (order.completedAt ? (
               <Button onClick={() => void run(() => ordersApi.issue(order.id), "Заказ выдан клиенту")} disabled={saving}>

@@ -41,6 +41,30 @@
   --state-off: 224 107 107;
 }
 
+/*
+ * Печать. Поля задаём здесь, а не в разметке: браузер иначе добавляет свои
+ * колонтитулы и отступы, и бланк уезжает со страницы.
+ */
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff;
+  }
+  /* Цветные плашки и заливки должны печататься как на экране, иначе
+     таблица работ приедет без линий. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
 @layer base {
   html,
   body,

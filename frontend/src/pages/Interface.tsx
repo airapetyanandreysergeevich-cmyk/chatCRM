@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconMoon, IconSun } from "../components/icons";
 import { Banner, Button, Card, Field, Input, SectionLabel, PageHeader } from "../components/ui";
+import { LOGO_TYPES, prepareLogo, type Branding } from "../lib/branding";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
@@ -133,12 +134,16 @@ function ColorModal({
 
 export default function Interface() {
   const { can } = useAuth();
-  const { mode, saved, setMode, preview, revert, save, reset } = useTheme();
+  const { mode, saved, setMode, preview, revert, save, reset, branding, saveBranding } = useTheme();
   const [draft, setDraft] = useState<Theme>(saved);
   const [picking, setPicking] = useState<keyof Palette | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [printNote, setPrintNote] = useState(branding.printNote ?? "");
+
+  useEffect(() => setPrintNote(branding.printNote ?? ""), [branding.printNote]);
 
   const mayEdit = can("settings.manage");
 
@@ -195,6 +200,29 @@ export default function Interface() {
     }
   }
 
+  async function putBranding(next: Branding, message: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await saveBranding(next);
+      setNotice(message);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось сохранить");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onLogoPicked(file: File) {
+    setError(null);
+    try {
+      const logo = await prepareLogo(file);
+      await putBranding({ logo, printNote: branding.printNote }, "Логотип загружен");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось прочитать картинку");
+    }
+  }
+
   const stageFields = PALETTE_FIELDS.filter((f) => f.key.startsWith("stage"));
   const baseFields = PALETTE_FIELDS.filter((f) => !f.key.startsWith("stage"));
 
@@ -231,6 +259,89 @@ export default function Interface() {
 
       {notice && <Banner>{notice}</Banner>}
       {error && <Banner tone="error">{error}</Banner>}
+
+      {mayEdit && (
+        <Card>
+          <SectionLabel>Логотип мастерской</SectionLabel>
+          <p className="mt-2 text-[13px] text-ink-dim">
+            Встанет в левый верхний угол вместо знака FineCRM и в шапку печатных бланков.
+            Картинку уменьшим сами, прозрачность сохраним.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            {/* Клетчатая подложка показывает прозрачность: иначе белый логотип
+                на белой панели выглядит как пустое место. */}
+            <div
+              className="flex h-[76px] w-[160px] shrink-0 items-center justify-center rounded-field border border-line p-2"
+              style={{
+                backgroundImage:
+                  "linear-gradient(45deg, rgb(var(--surface-hover)) 25%, transparent 25%, transparent 75%, rgb(var(--surface-hover)) 75%), linear-gradient(45deg, rgb(var(--surface-hover)) 25%, transparent 25%, transparent 75%, rgb(var(--surface-hover)) 75%)",
+                backgroundSize: "14px 14px",
+                backgroundPosition: "0 0, 7px 7px",
+              }}
+            >
+              {branding.logo ? (
+                <img src={branding.logo} alt="Логотип мастерской" className="max-h-full max-w-full object-contain" />
+              ) : (
+                <span className="text-[12.5px] text-ink-dim">Пока не загружен</span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={fileInput}
+                type="file"
+                accept={LOGO_TYPES}
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  // Сбрасываем значение: иначе повторный выбор того же файла
+                  // не вызовет событие, и человек решит, что кнопка сломалась.
+                  e.target.value = "";
+                  if (file) void onLogoPicked(file);
+                }}
+              />
+              <Button variant="secondary" disabled={busy} onClick={() => fileInput.current?.click()}>
+                {branding.logo ? "Заменить" : "Загрузить"}
+              </Button>
+              {branding.logo && (
+                <Button
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => void putBranding({ logo: null, printNote: branding.printNote }, "Логотип убран")}
+                >
+                  Убрать
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Field
+              label="Строка в бланках"
+              hint="Адрес, телефон, часы работы — печатается под названием мастерской"
+            >
+              <Input
+                value={printNote}
+                onChange={(e) => setPrintNote(e.target.value)}
+                placeholder="г. Москва, ул. Ленина 5 · +7 495 000-00-00"
+              />
+            </Field>
+            <Button
+              variant="secondary"
+              disabled={busy || printNote.trim() === (branding.printNote ?? "")}
+              onClick={() =>
+                void putBranding(
+                  { logo: branding.logo, printNote: printNote.trim() || null },
+                  "Реквизиты сохранены"
+                )
+              }
+            >
+              Сохранить
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <SectionLabel>Тема</SectionLabel>
