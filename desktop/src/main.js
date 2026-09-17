@@ -11,6 +11,7 @@ const { ensureLayout } = require("./paths");
 const { prepareMain, backendEnv, backendDir } = require("./bootstrap");
 const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
+const { Backups } = require("./backup");
 
 /**
  * Оболочка локальной версии.
@@ -24,6 +25,7 @@ let win = null;
 let tray = null;
 let postgres = null;
 let backend = null;
+let backups = null;
 let state = { step: "старт", error: null };
 
 const userData = () => app.getPath("userData");
@@ -149,7 +151,22 @@ async function startMain(dataDir) {
 
   await backend.start();
 
-  if (tray) tray.setToolTip(`FineCRM — Основа, порт ${port}`);
+  // Копии заводим только у Основы и только после того, как база поднялась:
+  // это единственный компьютер, где данные действительно лежат.
+  backups = new Backups({ layout: l, config: cfg, binDir: postgres.binDir });
+  backups.start((report) => {
+    if (!report.ok) {
+      dialog.showMessageBox(win, {
+        type: "warning",
+        title: "Резервная копия не сделана",
+        message: report.error,
+        detail: "Данные в порядке, но копии за сегодня нет. Проверьте, доступна ли папка для копий.",
+      });
+    }
+    refreshTray();
+  });
+  refreshTray();
+
   await win.loadURL(`http://127.0.0.1:${port}/`);
 }
 
@@ -188,16 +205,52 @@ function createTray() {
   if (!fs.existsSync(icon)) return null;
 
   tray = new Tray(icon);
-  tray.setToolTip("FineCRM");
+  tray.on("double-click", () => win.show());
+  refreshTray();
+  return tray;
+}
+
+/** Когда была последняя копия — человеческими словами. */
+function lastBackupLabel() {
+  const b = backups && backups.config.backup;
+  if (!b || !b.lastAt) return "Копий ещё не было";
+  const when = new Date(b.lastAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+  return b.lastOk ? `Последняя копия: ${when}` : `Копия не удалась: ${when}`;
+}
+
+/**
+ * Меню в трее. Пересобираем целиком, а не правим пункты: Electron не даёт
+ * менять готовое меню, и «обновлённый» пункт остался бы прежним.
+ */
+function refreshTray() {
+  if (!tray) return;
+
+  tray.setToolTip("FineCRM — Основа");
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Открыть", click: () => (win.isVisible() ? win.focus() : win.show()) },
       { type: "separator" },
+      { label: lastBackupLabel(), enabled: false },
+      {
+        label: "Сделать копию сейчас",
+        enabled: !!backups,
+        click: async () => {
+          const report = await backups.run("вручную");
+          refreshTray();
+          dialog.showMessageBox(win, {
+            type: report.ok ? "info" : "error",
+            title: report.ok ? "Копия готова" : "Копию сделать не удалось",
+            message: report.ok
+              ? `${Math.round(report.bytes / 1024)} КБ, таблиц: ${report.tables}`
+              : report.error,
+            detail: report.ok ? report.file : "Проверьте, доступна ли папка для копий.",
+          });
+        },
+      },
+      { type: "separator" },
       { label: "Выйти", click: () => app.quit() },
     ])
   );
-  tray.on("double-click", () => win.show());
-  return tray;
 }
 
 // -------------------------------------------------------------- обмен с окном
@@ -267,6 +320,7 @@ app.on("window-all-closed", () => {
 // пожаловаться на пропавшую базу и напишет в журнал десяток ошибок на пустом месте.
 app.on("quit", async () => {
   try {
+    if (backups) backups.stop();
     if (backend) await backend.stop();
     if (postgres) await postgres.stop();
   } catch {

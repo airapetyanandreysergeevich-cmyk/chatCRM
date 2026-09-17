@@ -8,7 +8,8 @@
     "start": "electron .",
     "check-db": "node test/local-db.js",
     "check-backend": "node test/backend-lifecycle.js",
-    "check": "npm run check-backend && npm run check-db",
+    "check-backup": "node test/backup.js",
+    "check": "npm run check-backend && npm run check-db && npm run check-backup",
     "dist": "electron-builder --win"
   },
   "devDependencies": {
