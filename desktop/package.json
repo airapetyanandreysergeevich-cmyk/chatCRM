@@ -1,0 +1,9 @@
+{
+  "name": "finecrm-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Локальная версия FineCRM для Windows: Основа со встроенной базой, клиент локальной сети, клиент облака",
+  "scripts": {
+    "check-db": "node test/local-db.js"
+  }
+}
