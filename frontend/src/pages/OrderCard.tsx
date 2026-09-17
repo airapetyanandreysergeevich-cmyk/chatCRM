@@ -170,7 +170,7 @@ function ServiceNameInput({
               onMouseEnter={() => setHighlight(i)}
               className={
                 "flex w-full items-center gap-3 border-b border-line px-3 py-2 text-left text-[13.5px] last:border-b-0 " +
-                (i === highlight ? "bg-[#242936] text-ink" : "text-ink-soft")
+                (i === highlight ? "bg-surface-hover text-ink" : "text-ink-soft")
               }
             >
               <span className="min-w-0 flex-1 truncate">{s.name}</span>
@@ -373,7 +373,7 @@ export default function OrderCard() {
             <h1 className="font-mono text-[26px] font-extrabold tracking-tight">{order.number}</h1>
             <StatusChip tone={statusTone(order.status.group)}>{order.status.name}</StatusChip>
             {order.isUrgent && (
-              <span className="rounded-pill bg-[#2D1A1D] px-2.5 py-1 text-[12px] font-bold text-[#EE9494]">срочный</span>
+              <span className="rounded-pill bg-state-off/10 px-2.5 py-1 text-[12px] font-bold text-state-off">срочный</span>
             )}
             {order.kind !== "REPAIR" && (
               <span className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12px] font-semibold text-ink-muted">
@@ -447,7 +447,7 @@ export default function OrderCard() {
       {error && <Banner tone="error">{error}</Banner>}
 
       {order.previousRepair && (
-        <Card className="border-[#3A3320] bg-[#1C1913]">
+        <Card className="border-state-waiting/30 bg-state-waiting/[0.07]">
           <SectionLabel>Гарантийный возврат — что делали в прошлый раз</SectionLabel>
           <div className="mt-3">
             <Rows
@@ -742,7 +742,7 @@ export default function OrderCard() {
       {/* Удаление внизу и в два шага: это не то действие, которое должно
           случаться от промаха по соседней кнопке. */}
       {can("orders.delete") && (
-        <Card className="border-[#40252B]">
+        <Card className="border-state-off/25">
           <SectionLabel>Удаление заказа</SectionLabel>
           {deleteReason === null ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">

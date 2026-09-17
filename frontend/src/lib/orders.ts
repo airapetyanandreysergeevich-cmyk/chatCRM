@@ -178,12 +178,12 @@ export const statusGlyphTone = (group: StatusGroup) =>
  */
 export const statusTextClass = (group: StatusGroup) =>
   ({
-    NEW: "text-[#FFF993]",
-    IN_PROGRESS: "text-[#FE3E7D]",
-    WAITING: "text-[#FC7E68]",
-    DONE: "text-[#A5F88B]",
+    NEW: "text-stage-new",
+    IN_PROGRESS: "text-stage-progress",
+    WAITING: "text-stage-waiting",
+    DONE: "text-stage-done",
     CLOSED: "text-ink-muted",
-    CANCELLED: "text-[#EE9494]",
+    CANCELLED: "text-state-off",
   })[group];
 
 /** Найденный клиент в подсказках на приёме техники. */

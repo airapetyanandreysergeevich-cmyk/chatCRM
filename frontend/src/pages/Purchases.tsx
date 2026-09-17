@@ -52,11 +52,11 @@ const TONE: Record<PurchaseStatus, GlyphTone> = {
 
 const TEXT_TONE: Record<PurchaseStatus, string> = {
   DRAFT: "text-ink-muted",
-  PENDING: "text-[#EFC079]",
-  APPROVED: "text-[#79D2E2]",
-  ORDERED: "text-[#79D2E2]",
-  RECEIVED: "text-[#72D6A6]",
-  REJECTED: "text-[#EE9494]",
+  PENDING: "text-state-waiting",
+  APPROVED: "text-state-progress",
+  ORDERED: "text-state-progress",
+  RECEIVED: "text-state-done",
+  REJECTED: "text-state-off",
 };
 
 export default function Purchases() {

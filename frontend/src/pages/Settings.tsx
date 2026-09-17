@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconServices } from "../components/icons";
+import { IconBell, IconDatabase, IconPalette, IconServices } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 
@@ -18,6 +18,12 @@ const SECTIONS: Section[] = [
     title: "Оповещения",
     text: "Что приходит на телефон, кому и о чём. Здесь же включается приложение на этом устройстве.",
     icon: <IconBell />,
+  },
+  {
+    to: "/settings/interface",
+    title: "Интерфейс",
+    text: "Светлая или тёмная тема и цвета мастерской: стадии заказа, фон, панели, кнопки.",
+    icon: <IconPalette />,
   },
   {
     to: "/settings/services",

@@ -26,6 +26,32 @@
       rel="stylesheet"
     />
     <title>FineCRM — CRM для мастерских</title>
+
+    <!--
+      Цвета из прошлого сеанса применяем до первой отрисовки. Иначе экран
+      успевает моргнуть тёмным по пути к светлой теме — и наоборот. Скрипт
+      намеренно крошечный и без зависимостей: всё, что он делает, — достаёт
+      готовый набор переменных из localStorage и кладёт его на <html>.
+    -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem("theme:mode");
+          if (mode !== "light" && mode !== "dark") mode = "dark";
+          document.documentElement.dataset.theme = mode;
+          document.documentElement.style.colorScheme = mode;
+
+          var raw = localStorage.getItem("theme:tokens");
+          if (!raw) return;
+          var tokens = JSON.parse(raw);
+          for (var name in tokens) {
+            if (name.indexOf("--") === 0) document.documentElement.style.setProperty(name, tokens[name]);
+          }
+        } catch (e) {
+          /* нет localStorage или мусор в нём — останутся цвета из файла стилей */
+        }
+      })();
+    </script>
   </head>
   <body class="bg-bg text-ink font-sans antialiased">
     <div id="root"></div>

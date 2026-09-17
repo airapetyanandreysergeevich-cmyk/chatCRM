@@ -263,6 +263,31 @@ export const IconCash = (p: IconProps) => (
   </Icon>
 );
 
+/** Интерфейс: палитра художника. */
+export const IconPalette = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .9-1.9 1.9-1.9h1.8a3.9 3.9 0 0 0 3.9-3.9c0-3.8-3.8-6.9-8.5-6.9Z" />
+    <circle cx="7.7" cy="11.7" r="1.15" />
+    <circle cx="10.6" cy="7.7" r="1.15" />
+    <circle cx="15.4" cy="8.3" r="1.15" />
+  </Icon>
+);
+
+/** Светлая тема. */
+export const IconSun = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="4.2" />
+    <path d="M12 2.8v2.1M12 19.1v2.1M4.5 4.5l1.5 1.5M18 18l1.5 1.5M2.8 12h2.1M19.1 12h2.1M4.5 19.5 6 18M18 6l1.5-1.5" />
+  </Icon>
+);
+
+/** Тёмная тема. */
+export const IconMoon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20 14.2A8.4 8.4 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2Z" />
+  </Icon>
+);
+
 /** Услуги: ценник. Прайс — это про «что и почём», а не про инструмент. */
 export const IconServices = (p: IconProps) => (
   <Icon {...p}>

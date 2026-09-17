@@ -19,6 +19,7 @@ import { notificationsRouter, pushRouter } from "./modules/notifications/notific
 import { publicRouter } from "./modules/public/public.routes";
 import { referenceRouter } from "./modules/reference/reference.routes";
 import { servicesRouter } from "./modules/services/services.routes";
+import { settingsRouter } from "./modules/settings/settings.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
@@ -58,6 +59,7 @@ app.use("/api/purchases", purchasesRouter);
 app.use("/api/finance", financeRouter);
 app.use("/api/reference", referenceRouter);
 app.use("/api/services", servicesRouter);
+app.use("/api/settings", settingsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/push", pushRouter);
 app.use("/api/data", dataRouter);

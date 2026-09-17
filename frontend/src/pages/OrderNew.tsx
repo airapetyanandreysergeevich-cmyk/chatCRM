@@ -40,7 +40,7 @@ function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: Cust
           key={c.id}
           type="button"
           onClick={() => onPick(c)}
-          className="flex w-full items-center gap-3 border-b border-line px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 hover:bg-[#242936]"
+          className="flex w-full items-center gap-3 border-b border-line px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 hover:bg-surface-hover"
         >
           <span className="text-ink-dim [&>svg]:h-[18px] [&>svg]:w-[18px]">
             {c.type === "COMPANY" ? <IconCompany /> : <IconPerson />}

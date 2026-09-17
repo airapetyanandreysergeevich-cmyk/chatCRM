@@ -17,8 +17,6 @@ export type StageKey = Extract<StatusGroup, "NEW" | "WAITING" | "IN_PROGRESS" | 
 export interface Stage {
   key: StageKey;
   label: string;
-  /** Чистый цвет: заголовок панели и обводка. */
-  color: string;
   /** Панель: едва заметная заливка и тонкий яркий контур. */
   panel: string;
   /** Плашка статуса: та же заливка, тот же цвет текста. */
@@ -29,50 +27,46 @@ export interface Stage {
 }
 
 /**
- * Цвета заданы владельцем мастерской. Заливка взята почти прозрачной
- * намеренно: четыре насыщенных прямоугольника рядом друг с другом
- * невозможно читать дольше минуты, а смотреть на эту страницу приходится
- * весь день.
+ * Сами цвета здесь не хранятся: они живут в CSS-переменных --stage-*, которые
+ * выставляет lib/theme.ts по настройкам мастерской. Здесь только классы —
+ * иначе цвет пришлось бы держать в двух местах, и они разошлись бы в первый
+ * же день.
+ *
+ * Заливка взята почти прозрачной намеренно: четыре насыщенных прямоугольника
+ * рядом друг с другом невозможно читать дольше минуты, а смотреть на эту
+ * страницу приходится весь день.
  */
 export const STAGES: Stage[] = [
   {
     key: "NEW",
     label: "Диагностика",
-    color: "#FFF993",
-    panel: "border-[#FFF993]/40 bg-[#FFF993]/[0.04]",
-    chip: "bg-[#FFF993]/10 text-[#FFF993]",
-    pill: "border-[#FFF993]/50 bg-[#FFF993]/[0.14] text-[#FFF993]",
-    text: "text-[#FFF993]",
+    panel: "border-stage-new/40 bg-stage-new/[0.04]",
+    chip: "bg-stage-new/10 text-stage-new",
+    pill: "border-stage-new/50 bg-stage-new/[0.14] text-stage-new",
+    text: "text-stage-new",
   },
   {
     key: "WAITING",
     label: "Согласование",
-    color: "#FC7E68",
-    panel: "border-[#FC7E68]/40 bg-[#FC7E68]/[0.04]",
-    chip: "bg-[#FC7E68]/10 text-[#FC7E68]",
-    pill: "border-[#FC7E68]/50 bg-[#FC7E68]/[0.14] text-[#FC7E68]",
-    text: "text-[#FC7E68]",
+    panel: "border-stage-waiting/40 bg-stage-waiting/[0.04]",
+    chip: "bg-stage-waiting/10 text-stage-waiting",
+    pill: "border-stage-waiting/50 bg-stage-waiting/[0.14] text-stage-waiting",
+    text: "text-stage-waiting",
   },
   {
     key: "IN_PROGRESS",
     label: "Ремонт",
-    color: "#FE3E7D",
-    panel: "border-[#FE3E7D]/40 bg-[#FE3E7D]/[0.045]",
-    chip: "bg-[#FE3E7D]/[0.12] text-[#FE3E7D]",
-    pill: "border-[#FE3E7D]/50 bg-[#FE3E7D]/[0.14] text-[#FE3E7D]",
-    text: "text-[#FE3E7D]",
+    panel: "border-stage-progress/40 bg-stage-progress/[0.045]",
+    chip: "bg-stage-progress/[0.12] text-stage-progress",
+    pill: "border-stage-progress/50 bg-stage-progress/[0.14] text-stage-progress",
+    text: "text-stage-progress",
   },
   {
     key: "DONE",
     label: "Выдача",
-    color: "#A5F88B",
-    panel: "border-[#A5F88B]/40 bg-[#A5F88B]/[0.04]",
-    chip: "bg-[#A5F88B]/10 text-[#A5F88B]",
-    pill: "border-[#A5F88B]/50 bg-[#A5F88B]/[0.14] text-[#A5F88B]",
-    text: "text-[#A5F88B]",
+    panel: "border-stage-done/40 bg-stage-done/[0.04]",
+    chip: "bg-stage-done/10 text-stage-done",
+    pill: "border-stage-done/50 bg-stage-done/[0.14] text-stage-done",
+    text: "text-stage-done",
   },
 ];
-
-export const STAGE_BY_KEY: Record<StageKey, Stage> = Object.fromEntries(
-  STAGES.map((s) => [s.key, s])
-) as Record<StageKey, Stage>;

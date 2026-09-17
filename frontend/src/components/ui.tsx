@@ -25,9 +25,9 @@ export function Button({
     "disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100";
   const variants = {
     primary: "bg-brand text-white hover:bg-brand-press",
-    secondary: "bg-surface-raised text-ink border border-line hover:border-line-strong hover:bg-[#242936]",
+    secondary: "bg-surface-raised text-ink border border-line hover:border-line-strong hover:bg-surface-hover",
     ghost: "text-ink-muted hover:bg-surface-raised hover:text-ink",
-    danger: "bg-surface-raised text-state-off border border-[#40252B] hover:bg-[#2A1B20] hover:border-state-off",
+    danger: "bg-surface-raised text-state-off border border-state-off/25 hover:bg-state-off/10 hover:border-state-off",
   } as const;
   return (
     <button className={cx(base, variants[variant], className)} {...props}>
@@ -203,11 +203,11 @@ export function StatusChip({
 }) {
   // Цвета рабочих стадий совпадают с колонками на главной — см. lib/stages.ts.
   const map = {
-    new: ["bg-[#FFF993]/10", "text-[#FFF993]", "bg-[#FFF993]"],
-    waiting: ["bg-[#FC7E68]/10", "text-[#FC7E68]", "bg-[#FC7E68]"],
-    progress: ["bg-[#FE3E7D]/10", "text-[#FE3E7D]", "bg-[#FE3E7D]"],
-    done: ["bg-[#A5F88B]/10", "text-[#A5F88B]", "bg-[#A5F88B]"],
-    cancelled: ["bg-[#2D1A1D]", "text-[#EE9494]", "bg-state-off"],
+    new: ["bg-stage-new/10", "text-stage-new", "bg-stage-new"],
+    waiting: ["bg-stage-waiting/10", "text-stage-waiting", "bg-stage-waiting"],
+    progress: ["bg-stage-progress/10", "text-stage-progress", "bg-stage-progress"],
+    done: ["bg-stage-done/10", "text-stage-done", "bg-stage-done"],
+    cancelled: ["bg-state-off/10", "text-state-off", "bg-state-off"],
   } as const;
   const [bg, fg, dot] = map[tone];
   return (
@@ -226,12 +226,12 @@ export function StatusChip({
 export type GlyphTone = "new" | "progress" | "waiting" | "done" | "closed" | "cancelled" | "neutral";
 
 const GLYPH: Record<GlyphTone, [ComponentType<{ className?: string }>, string]> = {
-  new: [IconStatusNew, "bg-[#FFF993]/10 text-[#FFF993]"],
-  progress: [IconStatusProgress, "bg-[#FE3E7D]/10 text-[#FE3E7D]"],
-  waiting: [IconStatusWaiting, "bg-[#FC7E68]/10 text-[#FC7E68]"],
-  done: [IconStatusDone, "bg-[#A5F88B]/10 text-[#A5F88B]"],
-  closed: [IconStatusClosed, "bg-[#1E222C] text-[#9AA2B4]"],
-  cancelled: [IconStatusCancelled, "bg-[#2D1A1D] text-[#EE9494]"],
+  new: [IconStatusNew, "bg-stage-new/10 text-stage-new"],
+  progress: [IconStatusProgress, "bg-stage-progress/10 text-stage-progress"],
+  waiting: [IconStatusWaiting, "bg-stage-waiting/10 text-stage-waiting"],
+  done: [IconStatusDone, "bg-stage-done/10 text-stage-done"],
+  closed: [IconStatusClosed, "bg-surface-raised text-ink-muted"],
+  cancelled: [IconStatusCancelled, "bg-state-off/10 text-state-off"],
   neutral: [IconStatusClosed, "bg-surface-raised text-ink-muted"],
 };
 
@@ -277,10 +277,10 @@ export function Badge({
 }) {
   const map = {
     neutral: "bg-surface-raised text-ink-muted",
-    danger: "bg-[#2D1A1D] text-[#EE9494]",
-    warning: "bg-[#2B2416] text-[#EFC079]",
+    danger: "bg-state-off/10 text-state-off",
+    warning: "bg-state-waiting/10 text-state-waiting",
     brand: "bg-brand-tint text-brand-ink",
-    done: "bg-[#152A22] text-[#72D6A6]",
+    done: "bg-state-done/10 text-state-done",
   } as const;
   return (
     <span
@@ -378,9 +378,9 @@ export function ListGroupLabel({ children, right }: { children: ReactNode; right
 
 export function Banner({ tone = "info", children }: { tone?: "info" | "warning" | "error"; children: ReactNode }) {
   const map = {
-    info: "border-[#1E3550] bg-[#111E2C] text-[#9CC9F0]",
-    warning: "border-[#3A3320] bg-[#221E12] text-[#E4BE7C]",
-    error: "border-[#3E2529] bg-[#241619] text-[#EE9494]",
+    info: "border-state-new/30 bg-state-new/10 text-state-new",
+    warning: "border-state-waiting/30 bg-state-waiting/10 text-state-waiting",
+    error: "border-state-off/30 bg-state-off/10 text-state-off",
   } as const;
   return <div className={cx("rounded-card border px-4 py-3 text-[13.5px] leading-relaxed", map[tone])}>{children}</div>;
 }

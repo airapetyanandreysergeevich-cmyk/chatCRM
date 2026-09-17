@@ -2,6 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Значения по умолчанию — тёмная тема.
+ *
+ * Их перебивает lib/theme.ts, выставляя те же переменные инлайном на <html>.
+ * Здесь они нужны на те доли секунды, пока скрипт не отработал, и на случай,
+ * если он не отработает вовсе: без них страница осталась бы бесцветной.
+ */
+:root {
+  --bg: 15 17 23;
+  --surface: 23 26 34;
+  --surface-raised: 32 35 44;
+  --surface-hover: 40 44 53;
+  --surface-input: 18 21 28;
+
+  --line: 44 48 58;
+  --line-strong: 68 73 84;
+
+  --ink: 231 234 242;
+  --ink-soft: 185 190 201;
+  --ink-muted: 144 150 163;
+  --ink-dim: 110 116 130;
+
+  --brand: 47 143 224;
+  --brand-press: 39 120 188;
+  --brand-tint: 27 42 58;
+  --brand-ink: 135 183 233;
+
+  --stage-new: 255 249 147;
+  --stage-waiting: 252 126 104;
+  --stage-progress: 254 62 125;
+  --stage-done: 165 248 139;
+
+  --state-new: 76 141 255;
+  --state-waiting: 232 169 75;
+  --state-progress: 70 185 206;
+  --state-done: 69 192 138;
+  --state-off: 224 107 107;
+}
+
 @layer base {
   html,
   body,
@@ -11,9 +50,10 @@
   body {
     -webkit-tap-highlight-color: transparent;
   }
-  /* Полосы прокрутки в тон теме — светлые выглядят заплаткой на тёмном. */
+  /* Полосы прокрутки в тон теме — светлые выглядят заплаткой на тёмном,
+     а тёмные на светлом. Поэтому тоже через переменные. */
   * {
-    scrollbar-color: #333a4a #0f1117;
+    scrollbar-color: rgb(var(--line-strong)) rgb(var(--bg));
     scrollbar-width: thin;
   }
   *::-webkit-scrollbar {
@@ -21,11 +61,11 @@
     height: 10px;
   }
   *::-webkit-scrollbar-thumb {
-    background: #2b3140;
-    border: 2px solid #0f1117;
+    background: rgb(var(--line-strong));
+    border: 2px solid rgb(var(--bg));
     border-radius: 999px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #3a4152;
+    background: rgb(var(--ink-dim));
   }
 }

@@ -10,6 +10,7 @@ import Clients from "./pages/Clients";
 import Dashboard from "./pages/Dashboard";
 import DataPage from "./pages/Data";
 import Finance from "./pages/Finance";
+import InterfacePage from "./pages/Interface";
 import NotificationsPage from "./pages/Notifications";
 import SettingsPage from "./pages/Settings";
 import OrderCard from "./pages/OrderCard";
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/settings/notifications" element={<NotificationsPage />} />
           <Route path="/settings/data" element={<DataPage />} />
           <Route path="/settings/services" element={<ServicesPage />} />
+          <Route path="/settings/interface" element={<InterfacePage />} />
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}
           <Route path="/notifications" element={<Navigate to="/settings/notifications" replace />} />

@@ -72,9 +72,11 @@ function OrderCardTile({ card }: { card: BoardCard }) {
           «что чинить дальше», а колонка уже сказала, на какой это стадии.
           Всё остальное — на карточке заказа, в одном нажатии отсюда. */}
       <div className="mt-2 flex items-center justify-between gap-2 text-[12px]">
+        {/* Срок не обрезаем никогда: в узкой колонке уступает имя мастера —
+            «просрочен 5 дн.» важнее, чем чья это работа. */}
         <span
           className={
-            "truncate " +
+            "shrink-0 whitespace-nowrap " +
             (due?.overdue
               ? "font-semibold text-state-off"
               : due?.soon
@@ -85,7 +87,9 @@ function OrderCardTile({ card }: { card: BoardCard }) {
           {due ? due.text : ""}
         </span>
         {card.master && (
-          <span className="shrink-0 truncate text-ink-dim">{shortName(card.master.fullName)}</span>
+          <span className="min-w-0 truncate text-right text-ink-dim">
+            {shortName(card.master.fullName)}
+          </span>
         )}
       </div>
     </Link>
