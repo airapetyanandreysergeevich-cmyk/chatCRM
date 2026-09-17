@@ -6,8 +6,10 @@ import {
   Button,
   Card,
   Checkbox,
+  countFilled,
   Field,
   Input,
+  More,
   PageHeader,
   SectionLabel,
   Select,
@@ -295,23 +297,6 @@ export default function OrderNew() {
             {/* Подсказки лежат рядом с полем, а не внутри него: Field — это
                 <label>, и кнопка внутри неё спорила бы с фокусом ввода. */}
             <div>
-              <Field
-                label="Телефон"
-                error={fieldError("customer.phone")}
-                hint="Начните набирать — покажем, обращались ли уже"
-              >
-                <Input
-                  type="tel"
-                  value={customer.phone}
-                  onChange={(e) => setCustomer({ ...customer, phone: e.target.value, id: "" })}
-                  placeholder="+7 900 000-00-00"
-                  invalid={!!fieldError("customer.phone")}
-                />
-              </Field>
-              {!picked && <CustomerHints hits={phoneHits} onPick={pickCustomer} />}
-            </div>
-
-            <div>
               <Field label="Имя или название" error={fieldError("customer.name")}>
                 <Input
                   value={customer.name}
@@ -329,6 +314,38 @@ export default function OrderNew() {
                 />
               )}
             </div>
+
+            <div>
+              <Field
+                label="Телефон"
+                error={fieldError("customer.phone")}
+                hint="Начните набирать — покажем, обращались ли уже"
+              >
+                <Input
+                  type="tel"
+                  value={customer.phone}
+                  onChange={(e) => setCustomer({ ...customer, phone: e.target.value, id: "" })}
+                  placeholder="+7 900 000-00-00"
+                  invalid={!!fieldError("customer.phone")}
+                />
+              </Field>
+              {!picked && <CustomerHints hits={phoneHits} onPick={pickCustomer} />}
+            </div>
+          </div>
+
+          <More
+            filled={countFilled(
+              customer.type === "COMPANY",
+              customer.phone2,
+              customer.email,
+              customer.source,
+              customer.address
+            )}
+            // Ошибка в спрятанном поле — единственный случай, когда блок
+            // обязан раскрыться сам: иначе человек видит красную рамку
+            // формы и не понимает, где именно.
+            forceOpen={!!fieldError("customer.email")}
+          >
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Тип">
                 <Select value={customer.type} onChange={(e) => setCustomer({ ...customer, type: e.target.value })}>
@@ -360,7 +377,7 @@ export default function OrderNew() {
             <Field label="Адрес">
               <Input value={customer.address} onChange={(e) => setCustomer({ ...customer, address: e.target.value })} />
             </Field>
-          </div>
+          </More>
         </Card>
 
         <Card>
@@ -389,22 +406,23 @@ export default function OrderNew() {
                 />
               </Field>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Модель" interactive>
-                <SuggestInput
-                  value={device.model}
-                  // Модели показываем только для выбранной марки: IdeaPad
-                  // незачем подсказывать, когда в бренде стоит ASUS.
-                  onChange={(model) => setDevice({ ...device, model })}
-                  items={matchHints(hints.model, device.model, device.brand)}
-                  onForget={forget}
-                  placeholder="IdeaPad 5, VivoBook 15…"
-                />
-              </Field>
-              <Field label="Серийный номер">
-                <Input value={device.serial} onChange={(e) => setDevice({ ...device, serial: e.target.value })} />
-              </Field>
-            </div>
+            <Field label="Модель" interactive>
+              <SuggestInput
+                value={device.model}
+                // Модели показываем только для выбранной марки: IdeaPad
+                // незачем подсказывать, когда в бренде стоит ASUS.
+                onChange={(model) => setDevice({ ...device, model })}
+                items={matchHints(hints.model, device.model, device.brand)}
+                onForget={forget}
+                placeholder="IdeaPad 5, VivoBook 15…"
+              />
+            </Field>
+          </div>
+
+          <More filled={countFilled(device.serial, form.devicePasscode, form.storageLocation)}>
+            <Field label="Серийный номер">
+              <Input value={device.serial} onChange={(e) => setDevice({ ...device, serial: e.target.value })} />
+            </Field>
             <Field label="Пароль, PIN или графический ключ" hint="Без него мастер не сможет проверить работу">
               <Input
                 value={form.devicePasscode}
@@ -417,7 +435,7 @@ export default function OrderNew() {
                 onChange={(e) => setForm({ ...form, storageLocation: e.target.value })}
               />
             </Field>
-          </div>
+          </More>
         </Card>
 
         <Card>
@@ -475,7 +493,7 @@ export default function OrderNew() {
 
       <Card>
         <SectionLabel>Заявка</SectionLabel>
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="mt-4">
           <Field
             label="Неисправность со слов клиента"
             error={fieldError("complaint")}
@@ -488,15 +506,34 @@ export default function OrderNew() {
               invalid={!!fieldError("complaint")}
             />
           </Field>
-          <Field label="Примечания приёмщика" hint="Техническая часть: что заметили при осмотре">
-            <Textarea
-              value={form.receptionNote}
-              onChange={(e) => setForm({ ...form, receptionNote: e.target.value })}
-            />
-          </Field>
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <More
+          filled={countFilled(
+            form.receptionNote,
+            form.kind !== "REPAIR",
+            form.assignedMasterId,
+            form.dueAt,
+            form.isUrgent,
+            form.estimatedCost,
+            form.approvedLimit,
+            form.prepayment
+          )}
+          forceOpen={
+            !!fieldError("dueAt") ||
+            !!fieldError("estimatedCost") ||
+            !!fieldError("approvedLimit") ||
+            !!fieldError("prepayment")
+          }
+        >
+        <Field label="Примечания приёмщика" hint="Техническая часть: что заметили при осмотре">
+          <Textarea
+            value={form.receptionNote}
+            onChange={(e) => setForm({ ...form, receptionNote: e.target.value })}
+          />
+        </Field>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Field label="Тип обращения">
             <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
               {ref.orderKinds.map((k) => (
@@ -527,7 +564,7 @@ export default function OrderNew() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Предварительная стоимость, ₽">
             <Input
               inputMode="decimal"
@@ -550,6 +587,7 @@ export default function OrderNew() {
             />
           </Field>
         </div>
+        </More>
 
         <Banner>
           Фотографии приложите на карточке заказа сразу после сохранения — там они привязываются
