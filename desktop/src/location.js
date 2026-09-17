@@ -27,17 +27,64 @@ function readLocation(userDataDir) {
   }
 }
 
+/**
+ * Тот же путь, но отдельной строкой и без JSON.
+ *
+ * Читать его будет деинсталлятор, чтобы спросить, удалять ли данные
+ * мастерской. Разбирать JSON в NSIS нечем, а спрашивать «где ваша база?» у
+ * человека, который уже нажал «Удалить», — значит не спросить вовсе.
+ */
+function plainFile(userDataDir) {
+  return path.join(userDataDir, "datadir.txt");
+}
+
 function writeLocation(userDataDir, location) {
   fs.mkdirSync(userDataDir, { recursive: true });
   const file = pointerFile(userDataDir);
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(location, null, 2), "utf8");
   fs.renameSync(tmp, file);
+
+  // Без перевода строки в конце: деинсталлятор читает файл целиком, и лишний
+  // символ превратил бы путь в несуществующий.
+  if (location.dataDir) fs.writeFileSync(plainFile(userDataDir), location.dataDir, "utf8");
+  else fs.rmSync(plainFile(userDataDir), { force: true });
+
   return location;
 }
 
 function forgetLocation(userDataDir) {
   fs.rmSync(pointerFile(userDataDir), { force: true });
+  fs.rmSync(plainFile(userDataDir), { force: true });
+}
+
+/**
+ * Синхронизируется ли папка с облаком, и с каким.
+ *
+ * Кластер PostgreSQL — это тысячи мелких файлов, которые переписываются
+ * постоянно. Облачный клиент честно вмешивается в каждый: создание базы
+ * растягивается с полуминуты до бесконечности, а живая база рискует быть
+ * испорченной — облако не знает, что файлы базы нельзя трогать по одному.
+ *
+ * Самое подлое здесь в том, что человек об этом не догадывается: Windows
+ * перенаправляет «Документы» в OneDrive сама, и путь выглядит обычным. На
+ * такой папке initdb завис молча — ни одного файла, ни одной строки в
+ * журнале, потому что застрял он в самой файловой системе.
+ *
+ * Отдельной функцией, а не внутри проверки: тот же ответ нужен до создания
+ * чего бы то ни было — чтобы не предлагать человеку негодную папку.
+ */
+function cloudSync(dir) {
+  const full = path.resolve(dir);
+  const known = [
+    [/[\\/]OneDrive/i, "OneDrive"],
+    [/[\\/]Dropbox/i, "Dropbox"],
+    [/[\\/]Google ?Drive/i, "Google Drive"],
+    [/[\\/](\u042f\u043d\u0434\u0435\u043a\u0441\.?\u0414\u0438\u0441\u043a|YandexDisk)/i, "\u042f\u043d\u0434\u0435\u043a\u0441.\u0414\u0438\u0441\u043a"],
+    [/[\\/]iCloudDrive/i, "iCloud"],
+  ];
+  for (const [rule, name] of known) if (rule.test(full)) return name;
+  return null;
 }
 
 /**
@@ -58,6 +105,16 @@ function checkDataDir(dir) {
     return { ok: false, reason: "В Program Files Windows не даёт писать — выберите другую папку" };
   }
 
+  const cloud = cloudSync(full);
+  if (cloud) {
+    return {
+      ok: false,
+      reason:
+        `Эта папка синхронизируется с ${cloud}. База данных из тысяч файлов там не заработает: ` +
+        "выберите папку вне облачной синхронизации, а резервные копии настройте отдельно.",
+    };
+  }
+
   try {
     fs.mkdirSync(full, { recursive: true });
     const probe = path.join(full, ".finecrm-probe");
@@ -73,4 +130,45 @@ function checkDataDir(dir) {
   return { ok: true, existing: used, path: full };
 }
 
-module.exports = { readLocation, writeLocation, forgetLocation, checkDataDir };
+
+/** Можно ли что-нибудь создать в этой папке. Без следов: пробу сразу убираем. */
+function canCreate(dir) {
+  const probe = path.join(dir, `.finecrm-проба-${process.pid}`);
+  try {
+    fs.mkdirSync(probe);
+    fs.rmdirSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Что предложить в качестве папки данных.
+ *
+ * Корень системного диска, а не «Документы». Так короче путь, который
+ * мастерская однажды будет диктовать по телефону, и — главное — туда не
+ * дотягивается облачная синхронизация. Windows нередко перенаправляет
+ * «Документы» в OneDrive, ничего об этом не сказав, а в облачной папке база
+ * не создаётся вовсе: initdb молча виснет на первом же файле. Предлагать
+ * папку, в которой программа откажется работать, нельзя — человек выбирает её
+ * один раз и обычно не глядя.
+ *
+ * Запасные варианты на случай, если в корень писать не дают: «Документы»,
+ * если они не в облаке, и затем профиль пользователя — туда пускают всегда.
+ *
+ * Пути передаются снаружи, а не берутся из Electron, а проверка на запись —
+ * отдельным доводом: иначе запасные варианты нельзя было бы проверить вовсе,
+ * а именно они и понадобятся на чужой машине.
+ */
+function suggestDataDir({ home, documents }, mayCreate = canCreate) {
+  const root = path.parse(path.resolve(home)).root;
+  if (root && mayCreate(root)) return path.join(root, "FineCRMdata");
+
+  const inDocuments = path.join(documents, "FineCRM");
+  if (!cloudSync(inDocuments)) return inDocuments;
+
+  return path.join(home, "FineCRM");
+}
+
+module.exports = { readLocation, writeLocation, forgetLocation, checkDataDir, cloudSync, suggestDataDir };

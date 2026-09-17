@@ -41,6 +41,16 @@ const DEFAULTS = {
     appPassword: null,
   },
 
+  /**
+   * Ключи подписи входа. В облаке они лежат в deploy/.env, здесь их некому
+   * задать — генерируем при первом запуске. Смена ключей разлогинивает всех,
+   * поэтому созданные однажды они не меняются никогда.
+   */
+  auth: {
+    accessSecret: null,
+    refreshSecret: null,
+  },
+
   /** Раздача базы другим компьютерам локальной сети. */
   share: {
     enabled: false,
@@ -78,11 +88,18 @@ function read(configPath) {
       ...DEFAULTS,
       ...raw,
       db: { ...DEFAULTS.db, ...(raw.db ?? {}) },
+      auth: { ...DEFAULTS.auth, ...(raw.auth ?? {}) },
       share: { ...DEFAULTS.share, ...(raw.share ?? {}) },
       backup: { ...DEFAULTS.backup, ...(raw.backup ?? {}) },
     };
   } catch {
-    return { ...DEFAULTS, db: { ...DEFAULTS.db }, share: { ...DEFAULTS.share }, backup: { ...DEFAULTS.backup } };
+    return {
+      ...DEFAULTS,
+      db: { ...DEFAULTS.db },
+      auth: { ...DEFAULTS.auth },
+      share: { ...DEFAULTS.share },
+      backup: { ...DEFAULTS.backup },
+    };
   }
 }
 
@@ -110,6 +127,8 @@ function write(configPath, config) {
 function ensureSecrets(config) {
   if (!config.db.ownerPassword) config.db.ownerPassword = secret();
   if (!config.db.appPassword) config.db.appPassword = secret();
+  if (!config.auth.accessSecret) config.auth.accessSecret = secret();
+  if (!config.auth.refreshSecret) config.auth.refreshSecret = secret();
   return config;
 }
 

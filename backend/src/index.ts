@@ -2,11 +2,11 @@ import path from "node:path";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { prisma } from "./lib/db";
 import { env, pushConfigured } from "./lib/env";
 import { errorHandler } from "./lib/errors";
+import { securityHeaders } from "./lib/security";
 import { authRouter } from "./modules/auth/auth.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
 import { customersRouter } from "./modules/customers/customers.routes";
@@ -33,7 +33,7 @@ const app = express();
 // За nginx: без этого в лог и в счётчик попыток входа попадёт IP прокси, а не клиента.
 app.set("trust proxy", 1);
 
-app.use(helmet());
+app.use(securityHeaders());
 app.use(
   cors({
     origin: env.corsOrigin === "*" ? true : env.corsOrigin.split(","),

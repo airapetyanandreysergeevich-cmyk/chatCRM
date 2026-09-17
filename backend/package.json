@@ -19,7 +19,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "exceljs": "^4.4.0",
+    "exceljs": "^3.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
@@ -41,5 +41,11 @@
     "prisma": "^6.2.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "esbuild@0.28.2": true
   }
 }

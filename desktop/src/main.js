@@ -1,17 +1,19 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, shell } = require("electron");
 const fs = require("fs");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 
 const config = require("./config");
 const location = require("./location");
-const { ensureLayout } = require("./paths");
-const { prepareMain, backendEnv, backendDir } = require("./bootstrap");
+const { ensureLayout, backendDir, frontendDir } = require("./paths");
+const { prepareMain, backendEnv } = require("./bootstrap");
 const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
 const { Backups } = require("./backup");
+const network = require("./network");
 
 /**
  * Оболочка локальной версии.
@@ -26,10 +28,13 @@ let tray = null;
 let postgres = null;
 let backend = null;
 let backups = null;
+/** Что сейчас поднято: настройки, раскладка папки, порт сервера. */
+let running = null;
+/** Пока сервер перезапускают намеренно, его уход — не повод пугать человека. */
+let restartingBackend = false;
 let state = { step: "старт", error: null };
 
 const userData = () => app.getPath("userData");
-const staticDir = () => path.join(process.resourcesPath || path.join(__dirname, ".."), "frontend");
 
 // Две копии на одном компьютере подрались бы за базу: вторая не поднимется, а
 // первая покажет своё окно.
@@ -85,8 +90,8 @@ function createWindow() {
 const showSetup = (hash) =>
   win.loadFile(path.join(__dirname, "setup.html"), hash ? { hash } : undefined);
 
-function showError(title, message, logDir) {
-  state.error = { title, message, logDir };
+function showError(title, message, logDir, extra = {}) {
+  state.error = { title, message, logDir, ...extra };
   win.loadFile(path.join(__dirname, "setup.html"), { hash: "error" });
 }
 
@@ -119,37 +124,19 @@ async function choosePort(cfg) {
 }
 
 /** Запуск в роли Основы: база, миграции, сервер, окно. */
-async function startMain(dataDir) {
+async function startMain(dataDir, owner = null) {
   const say = (step) => {
     state.step = step;
     if (win && !win.isDestroyed()) win.webContents.send("setup:progress", step);
   };
 
-  const prepared = await prepareMain(dataDir, say);
+  const prepared = await prepareMain(dataDir, say, owner);
   const cfg = prepared.config;
   postgres = prepared.postgres;
 
   say("Запускаю сервер");
-  const port = await choosePort(cfg);
   const l = ensureLayout(dataDir);
-
-  backend = new Backend({
-    dir: backendDir(),
-    port,
-    logDir: l.logs,
-    env: { ...backendEnv(cfg, l), PORT: String(port), STATIC_DIR: staticDir() },
-  });
-
-  backend.onExit = (code) => {
-    if (app.isQuitting) return;
-    showError(
-      "Сервер остановился",
-      `Программа завершила работу с кодом ${code}. Перезапустите её; если повторится — пришлите журнал.`,
-      l.logs
-    );
-  };
-
-  await backend.start();
+  const port = await startBackend(cfg, l);
 
   // Копии заводим только у Основы и только после того, как база поднялась:
   // это единственный компьютер, где данные действительно лежат.
@@ -168,11 +155,155 @@ async function startMain(dataDir) {
   refreshTray();
 
   await win.loadURL(`http://127.0.0.1:${port}/`);
+
+  // После окна, а не до: предупреждение о сети не должно задерживать запуск
+  // программы на том компьютере, где она и так работает.
+  void warnIfNetworkBlocks();
+}
+
+/**
+ * Поднимает сервер и запоминает, на чём именно.
+ *
+ * Вынесено отдельно, потому что вызывается дважды: при старте и при включении
+ * раздачи по сети — там сервер приходится поднять заново, уже на другом
+ * адресе прослушивания.
+ */
+async function startBackend(cfg, l) {
+  const port = await choosePort(cfg);
+
+  backend = new Backend({
+    dir: backendDir(),
+    port,
+    logDir: l.logs,
+    env: { ...backendEnv(cfg, l), PORT: String(port), STATIC_DIR: frontendDir() },
+  });
+
+  backend.onExit = (code) => {
+    if (app.isQuitting || restartingBackend) return;
+    showError(
+      "Сервер остановился",
+      `Программа завершила работу с кодом ${code}. Перезапустите её; если повторится — пришлите журнал.`,
+      l.logs
+    );
+  };
+
+  await backend.start();
+  running = { cfg, layout: l, port };
+  return port;
+}
+
+/**
+ * Включает или выключает раздачу базы по локальной сети.
+ *
+ * Пока раздача выключена, сервер слушает только сам компьютер — программа в
+ * мастерской не должна становиться доступной всему кафе оттого, что ноутбук
+ * воткнули в чужой вайфай. Включение — осознанное действие владельца.
+ */
+async function toggleSharing() {
+  if (!running) return;
+  const { cfg, layout: l } = running;
+  const turningOn = !cfg.share.enabled;
+
+  restartingBackend = true;
+  try {
+    await backend.stop();
+    cfg.share.enabled = turningOn;
+    config.write(l.config, cfg);
+    const port = await startBackend(cfg, l);
+
+    refreshTray();
+    await dialog.showMessageBox(win, {
+      type: "info",
+      title: turningOn ? "Раздача включена" : "Раздача выключена",
+      message: turningOn
+        ? `Сотрудники подключаются по адресу ${lanAddress(port)}`
+        : "Программа снова доступна только на этом компьютере.",
+      detail: turningOn
+        ? "Впишите этот адрес на другом компьютере при выборе роли «Клиент». " +
+          "Если он не откроется — брандмауэр Windows не пропускает входящие на этот порт."
+        : undefined,
+    });
+    if (turningOn) await warnIfNetworkBlocks();
+  } catch (err) {
+    // Откатываем настройку: раздача, которую не удалось включить, не должна
+    // остаться записанной как включённая.
+    cfg.share.enabled = !turningOn;
+    config.write(l.config, cfg);
+    dialog.showMessageBox(win, { type: "error", title: "Не получилось", message: err.message });
+  } finally {
+    restartingBackend = false;
+  }
+}
+
+/** Адрес этого компьютера в локальной сети — тот, что вводят сотрудники. */
+function lanAddress(port) {
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const net of list ?? []) {
+      // Только IPv4 и только настоящие сетевые карты: внутренние и виртуальные
+      // адреса сотрудникам ничем не помогут.
+      if (net.family === "IPv4" && !net.internal) return `http://${net.address}:${port}`;
+    }
+  }
+  return `http://127.0.0.1:${port}`;
 }
 
 /** Запуск в роли клиента: ничего не поднимаем, просто открываем адрес. */
 async function startClient(url) {
-  await win.loadURL(url);
+  const address = String(url).replace(/\/+$/, "");
+
+  // Показываем ожидание сразу: пустое окно на время проверки — ровно то, от
+  // чего мы здесь и уходим.
+  await showSetup("working");
+  state.step = "Ищу Основу в сети";
+  if (win && !win.isDestroyed()) win.webContents.send("setup:progress", state.step);
+
+  const answer = await network.reach(address);
+  if (!answer.ok) {
+    showError("Основа не отвечает", answer.why, null, { kind: "client", address });
+    return;
+  }
+
+  await win.loadURL(address);
+}
+
+/**
+ * Предупреждает, когда сеть помечена общедоступной.
+ *
+ * В такой сети брандмауэр не применяет правило, открывающее порт Основы, и
+ * сотрудники получают пустое окно. Ошибки при этом не видит никто: на Основе
+ * всё работает. Поэтому спрашиваем сами — и умеем починить.
+ */
+async function warnIfNetworkBlocks() {
+  if (!running || !running.cfg.share.enabled) return;
+
+  const closed = await network.blocking();
+  if (closed.length === 0) return;
+
+  const names = closed.map((p) => `«${p.name}»`).join(", ");
+  const answer = await dialog.showMessageBox(win, {
+    type: "warning",
+    title: "Сотрудники не увидят Основу",
+    message: `Windows считает сеть ${names} общедоступной.`,
+    detail:
+      "В общедоступной сети брандмауэр не пропускает обращения к Основе, и на других компьютерах программа " +
+      "будет открываться пустым окном. Сеть мастерской нужно пометить частной — это одно действие, Windows " +
+      "спросит права администратора. В кафе и гостинице этого делать не стоит.",
+    buttons: ["Сделать сеть частной", "Не сейчас"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (answer.response !== 0) return;
+
+  try {
+    await network.makePrivate(closed.map((p) => p.index));
+  } catch (err) {
+    await dialog.showMessageBox(win, {
+      type: "error",
+      title: "Не получилось пометить сеть частной",
+      message: err.message,
+      detail: "Это можно сделать вручную: Параметры → Сеть и Интернет → нужная сеть → «Частная сеть».",
+    });
+  }
 }
 
 async function boot() {
@@ -230,6 +361,23 @@ function refreshTray() {
     Menu.buildFromTemplate([
       { label: "Открыть", click: () => (win.isVisible() ? win.focus() : win.show()) },
       { type: "separator" },
+      {
+        label: "Раздавать базу по сети",
+        type: "checkbox",
+        checked: !!(running && running.cfg.share.enabled),
+        enabled: !!running,
+        click: () => void toggleSharing(),
+      },
+      ...(running && running.cfg.share.enabled
+        ? [
+            { label: `Адрес: ${lanAddress(running.port)}`, enabled: false },
+            {
+              label: "Скопировать адрес",
+              click: () => clipboard.writeText(lanAddress(running.port)),
+            },
+          ]
+        : []),
+      { type: "separator" },
       { label: lastBackupLabel(), enabled: false },
       {
         label: "Сделать копию сейчас",
@@ -259,7 +407,10 @@ ipcMain.handle("setup:state", () => ({
   step: state.step,
   error: state.error,
   modes: config.MODE,
-  suggestedDir: path.join(app.getPath("documents"), "FineCRM"),
+  suggestedDir: location.suggestDataDir({
+    home: app.getPath("home"),
+    documents: app.getPath("documents"),
+  }),
 }));
 
 ipcMain.handle("setup:pick-folder", async () => {
@@ -274,6 +425,28 @@ ipcMain.handle("setup:check-folder", (_e, dir) => location.checkDataDir(dir));
 
 ipcMain.handle("setup:open-logs", (_e, dir) => shell.openPath(dir));
 
+/**
+ * Повторить попытку.
+ *
+ * Раньше кнопка «Попробовать снова» просто перезагружала страницу — и человек
+ * видел ту же ошибку, ничего на деле не повторив. Теперь она проходит весь
+ * путь запуска заново: за минуту, что человек читал сообщение, он успел
+ * включить раздачу на Основе или починить сеть.
+ */
+ipcMain.handle("setup:retry", async () => {
+  state.error = null;
+  await boot();
+  return { ok: true };
+});
+
+/** Забыть выбор и вернуться к экрану роли — когда адрес Основы оказался не тот. */
+ipcMain.handle("setup:forget", async () => {
+  location.forgetLocation(userData());
+  state.error = null;
+  await showSetup();
+  return { ok: true };
+});
+
 /** Выбор сделан: запоминаем и поднимаемся. */
 ipcMain.handle("setup:apply", async (_e, choice) => {
   try {
@@ -282,15 +455,13 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
       if (!check.ok) return { ok: false, error: check.reason };
 
       location.writeLocation(userData(), { mode: config.MODE.MAIN, dataDir: check.path });
-      await startMain(check.path);
+      await startMain(check.path, choice.owner ?? null);
     } else {
       // Клиент базу не трогает вовсе. Проверяем, что Основа отвечает, — иначе
       // человек получит пустое окно и не поймёт, кто виноват.
       const url = String(choice.connectTo || "").replace(/\/+$/, "");
-      const res = await fetch(`${url}/api/health`).catch(() => null);
-      if (!res || !res.ok) {
-        return { ok: false, error: `По адресу ${url} никто не отвечает. Проверьте, включена ли Основа.` };
-      }
+      const answer = await network.reach(url);
+      if (!answer.ok) return { ok: false, error: answer.why };
       location.writeLocation(userData(), { mode: choice.mode, connectTo: url });
       await startClient(url);
     }
@@ -308,24 +479,41 @@ app.whenReady().then(async () => {
   await boot();
 });
 
-app.on("before-quit", () => {
+/**
+ * Выключение.
+ *
+ * Обязательно здесь, а не в событии quit: Electron не ждёт асинхронную
+ * работу в quit и завершает процесс раньше, чем успеет остановиться база.
+ * Последствия у этого нехорошие — postgres остаётся жить сиротой, держит
+ * папку и порт, и следующий запуск упирается в собственный вчерашний
+ * процесс. Поэтому перехватываем выход, гасим по-честному и только потом
+ * выходим сами.
+ */
+let shuttingDown = false;
+
+app.on("before-quit", (e) => {
   app.isQuitting = true;
+  if (shuttingDown) return;
+
+  e.preventDefault();
+  shuttingDown = true;
+
+  // Сначала сервер, потом база: наоборот сервер успеет написать десяток
+  // жалоб на пропавшую базу.
+  (async () => {
+    try {
+      if (backups) backups.stop();
+      if (backend) await backend.stop();
+      if (postgres) await postgres.stop();
+    } catch {
+      /* выключаемся в любом случае */
+    }
+    app.exit(0);
+  })();
 });
 
 app.on("window-all-closed", () => {
   if (!tray) app.quit();
-});
-
-// Гасим по порядку: сначала сервер, потом база. Наоборот — сервер успеет
-// пожаловаться на пропавшую базу и напишет в журнал десяток ошибок на пустом месте.
-app.on("quit", async () => {
-  try {
-    if (backups) backups.stop();
-    if (backend) await backend.stop();
-    if (postgres) await postgres.stop();
-  } catch {
-    /* выключаемся в любом случае */
-  }
 });
 
 module.exports = { startMain, startClient };

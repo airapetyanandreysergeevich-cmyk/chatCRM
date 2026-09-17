@@ -77,6 +77,9 @@
       button:disabled { opacity: 0.5; cursor: default; }
 
       .hint { margin-top: 10px; font-size: 13px; color: var(--ink-dim); }
+      .sub { margin: 22px 0 10px; font-size: 13px; font-weight: 600; color: var(--ink); }
+      .two { display: flex; gap: 8px; margin-bottom: 8px; }
+      .two input { flex: 1; min-width: 0; }
       .bad { color: var(--off); }
       .row { display: flex; gap: 10px; margin-top: 22px; }
       .hidden { display: none; }
@@ -122,6 +125,24 @@
           <p class="hint" id="dirHint">
             Эту папку нужно будет включить в резервное копирование — в ней вся история мастерской.
           </p>
+
+          <!-- Первый вход. Спрашиваем здесь, а не после запуска: иначе человек
+               упирается в форму входа, для которой ещё нет ни одной учётки. -->
+          <div id="ownerFields">
+            <p class="sub">Учётная запись владельца</p>
+            <div class="two">
+              <input id="workshop" placeholder="Название мастерской" />
+              <input id="fullName" placeholder="Ваше имя и фамилия" />
+            </div>
+            <div class="two">
+              <input id="email" placeholder="Почта для входа" autocomplete="off" />
+              <input id="password" type="password" placeholder="Пароль, от 8 знаков" autocomplete="new-password" />
+            </div>
+            <p class="hint">
+              Этими данными вы будете входить в программу. Почта может быть любой — она нужна
+              как имя пользователя и никуда не отправляется.
+            </p>
+          </div>
         </div>
 
         <div id="clientFields" class="hidden">
@@ -151,7 +172,8 @@
         <h1 id="failTitle">Не удалось запуститься</h1>
         <p class="lead" id="failText"></p>
         <div class="row">
-          <button class="main" onclick="location.reload()">Попробовать снова</button>
+          <button class="main" id="again">Попробовать снова</button>
+          <button id="another" class="hidden">Изменить адрес</button>
           <button id="logs">Открыть журнал</button>
         </div>
       </section>
@@ -195,10 +217,29 @@
         $("err").classList.add("hidden");
         const choice =
           mode === "main"
-            ? { mode: "main", dataDir: $("dir").value.trim() }
+            ? {
+                mode: "main",
+                dataDir: $("dir").value.trim(),
+                owner: {
+                  workshop: $("workshop").value.trim(),
+                  fullName: $("fullName").value.trim(),
+                  email: $("email").value.trim(),
+                  password: $("password").value,
+                },
+              }
             : { mode, connectTo: $("addr").value.trim() };
 
-        if (mode === "main" && !choice.dataDir) return fail("Выберите папку для базы");
+        if (mode === "main") {
+          const o = choice.owner;
+          if (!choice.dataDir) return fail("Выберите папку для базы");
+          if (o.workshop.length < 2) return fail("Укажите название мастерской");
+          if (o.fullName.length < 2) return fail("Укажите своё имя");
+          if (!/^[^\s@]+@[^\s@]+$/.test(o.email)) return fail("Почта должна быть вида имя@адрес");
+          // Проверяем здесь, а не только на сервере: пароль короче восьми
+          // знаков — единственная причина, по которой создание мастерской
+          // упадёт уже после минуты создания базы.
+          if (o.password.length < 8) return fail("Пароль должен быть не короче 8 знаков");
+        }
         if (mode !== "main" && !choice.connectTo) return fail("Укажите адрес");
 
         show("working");
@@ -222,12 +263,26 @@
 
       $("logs").onclick = () => window.setup.openLogs(logDir);
 
+      // Настоящая повторная попытка, а не перезагрузка страницы: за минуту,
+      // что человек читал сообщение, он успел включить раздачу на Основе.
+      $("again").onclick = () => {
+        show("working");
+        $("step").innerHTML = '<span class="spin"></span> Пробую снова…';
+        window.setup.retry();
+      };
+
+      $("another").onclick = () => window.setup.forget();
+
       window.setup.state().then((s) => {
         if (!$("dir").value) $("dir").value = s.suggestedDir;
         if (s.error) {
           logDir = s.error.logDir || "";
           $("failTitle").textContent = s.error.title;
           $("failText").textContent = s.error.message;
+          // Журнал есть только у Основы: у клиента ничего своего не запускается,
+          // и открывать ему нечего.
+          $("logs").classList.toggle("hidden", !logDir);
+          $("another").classList.toggle("hidden", s.error.kind !== "client");
           show("fail");
         } else if (location.hash === "#working") {
           show("working");

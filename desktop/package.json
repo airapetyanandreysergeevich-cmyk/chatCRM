@@ -1,20 +1,26 @@
 {
   "name": "finecrm-desktop",
+  "//productName": "Имя, под которым программа живёт в системе. Обязано быть здесь, а не только в разделе build: Electron берёт из него папку настроек (%APPDATA%\\<имя>), и без этой строки она называлась бы finecrm-desktop — не тем именем, которое ищет деинсталлятор и человек.",
+  "productName": "FineCRM",
   "version": "0.1.0",
   "private": true,
   "description": "Локальная версия FineCRM для Windows: Основа со встроенной базой, клиент локальной сети, клиент облака",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "check-db": "node test/local-db.js",
+    "check-paths": "node test/paths.js",
+    "check-tool": "node test/run-tool.js",
     "check-backend": "node test/backend-lifecycle.js",
+    "check-network": "node test/network.js",
+    "check-db": "node test/local-db.js",
     "check-backup": "node test/backup.js",
-    "check": "npm run check-backend && npm run check-db && npm run check-backup",
+    "check": "npm run check-paths && npm run check-tool && npm run check-backend && npm run check-network && npm run check-db && npm run check-backup",
+    "predist": "node test/before-dist.js",
     "dist": "electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^44.4.1",
-    "electron-builder": "^26.15.3"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "ru.finecrm.desktop",
@@ -24,16 +30,42 @@
       "buildResources": "build"
     },
     "files": [
-      "src/**/*"
+      "src/**/*",
+      "build/icon.png"
     ],
     "extraResources": [
+      {
+        "from": "vendor/pgsql",
+        "to": "pgsql",
+        "filter": [
+          "bin/**",
+          "lib/**",
+          "share/**",
+          "!share/doc/**",
+          "!bin/stackbuilder.exe",
+          "!bin/wx*.dll"
+        ]
+      },
+      {
+        "from": "build/vc_redist.x64.exe",
+        "to": "vc_redist.x64.exe"
+      },
       {
         "from": "../backend/dist",
         "to": "backend/dist"
       },
       {
         "from": "../backend/node_modules",
-        "to": "backend/node_modules"
+        "to": "backend/node_modules",
+        "filter": [
+          "**/*",
+          "!typescript/**",
+          "!tsx/**",
+          "!esbuild/**",
+          "!@esbuild/**",
+          "!@types/**",
+          "!.bin/**"
+        ]
       },
       {
         "from": "../backend/prisma",
@@ -46,10 +78,6 @@
       {
         "from": "../frontend/dist",
         "to": "frontend"
-      },
-      {
-        "from": "vendor/pgsql",
-        "to": "pgsql"
       }
     ],
     "win": {
@@ -64,10 +92,10 @@
       "perMachine": true,
       "include": "build/installer.nsh",
       "createDesktopShortcut": true,
-      "shortcutName": "FineCRM"
+      "createStartMenuShortcut": true,
+      "shortcutName": "FineCRM",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
     }
-  },
-  "allowScripts": {
-    "electron-winstaller@5.4.0": true
   }
 }

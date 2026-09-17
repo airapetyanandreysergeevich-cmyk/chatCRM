@@ -21,6 +21,17 @@ export const env = {
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL ?? "15m",
   refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 30),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
+  /**
+   * Помечать ли печенье сессии как «только по HTTPS».
+   *
+   * В облаке — да, всегда. В локальной сети мастерской сертификата пока нет,
+   * и с этой пометкой браузер просто не сохранит печенье: сотрудник войдёт и
+   * через пятнадцать минут вылетит, не сумев продлить сессию. Поэтому
+   * локальная версия выключает пометку явно — и знает, что делает.
+   */
+  cookieSecure: process.env.COOKIE_SECURE
+    ? process.env.COOKIE_SECURE === "true"
+    : process.env.NODE_ENV === "production",
 
   // Куда класть фотографии: "s3" в облаке, "local" в коробочной версии.
   storageDriver: process.env.STORAGE_DRIVER === "local" ? "local" : "s3",

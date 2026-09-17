@@ -139,6 +139,16 @@ class Backups {
     return now.getHours() >= this.config.backup.atHour && last.toDateString() !== now.toDateString();
   }
 
+  /**
+   * Снимок базы.
+   *
+   * Читаем под суперпользователем, а не под владельцем схемы, и это не
+   * небрежность. На таблицах стоит FORCE ROW LEVEL SECURITY — изоляция
+   * мастерских действует даже для владельца таблиц, и pg_dump под ним
+   * получает «query would be affected by row-level security policy», то есть
+   * копию без единой строки. Суперпользователь — единственная роль, которая
+   * видит базу целиком, и снимать копию имеет право только он.
+   */
   async dumpDatabase(file) {
     const db = this.config.db;
     await run(
@@ -146,7 +156,7 @@ class Backups {
       [
         "-h", "127.0.0.1",
         "-p", String(db.port),
-        "-U", db.ownerUser,
+        "-U", "postgres",
         "-d", db.name,
         // Формат custom: один файл, сжатый, и из него можно достать как всю
         // базу, так и одну таблицу. Обычный SQL-текст весил бы втрое больше.

@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 /**
  * Мостик между окном первого запуска и программой.
  *
- * Наружу отдаём ровно пять действий и ни одного модуля Node: окно показывает
+ * Наружу отдаём наперечёт действия и ни одного модуля Node: окно показывает
  * веб-страницу, и страница не должна уметь ничего, кроме того, что ей нужно.
  */
 contextBridge.exposeInMainWorld("setup", {
@@ -14,5 +14,7 @@ contextBridge.exposeInMainWorld("setup", {
   checkFolder: (dir) => ipcRenderer.invoke("setup:check-folder", dir),
   apply: (choice) => ipcRenderer.invoke("setup:apply", choice),
   openLogs: (dir) => ipcRenderer.invoke("setup:open-logs", dir),
+  retry: () => ipcRenderer.invoke("setup:retry"),
+  forget: () => ipcRenderer.invoke("setup:forget"),
   onProgress: (fn) => ipcRenderer.on("setup:progress", (_e, step) => fn(step)),
 });

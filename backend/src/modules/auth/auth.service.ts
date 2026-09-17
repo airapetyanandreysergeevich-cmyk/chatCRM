@@ -19,7 +19,7 @@ const WRONG = "Неверный email или пароль";
 export function refreshCookieOptions() {
   return {
     httpOnly: true,
-    secure: env.nodeEnv === "production",
+    secure: env.cookieSecure,
     sameSite: "lax" as const,
     path: "/api/auth",
     maxAge: env.refreshTokenTtlDays * 24 * 60 * 60 * 1000,

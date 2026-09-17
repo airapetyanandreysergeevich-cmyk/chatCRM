@@ -46,10 +46,22 @@ async function main() {
 
   const owner = { database: cfg.db.name, user: cfg.db.ownerUser, password: cfg.db.ownerPassword };
 
-  // Данные, которые должны пережить восстановление
+  // Данные, которые должны пережить восстановление.
+  //
+  // Таблицу закрываем той же построчной изоляцией, что стоит на боевых: без
+  // этого проверка была слепа к главной беде копий — pg_dump под владельцем
+  // схемы получает пустую копию и не жалуется достаточно громко.
   await pg.psql(
     `CREATE TABLE "Order" (id text PRIMARY KEY, number text NOT NULL, "tenantId" text NOT NULL);
-     INSERT INTO "Order" VALUES ('o1','Р-2026-00042','t1'), ('o2','Р-2026-00043','t1');`,
+     INSERT INTO "Order" VALUES ('o1','Р-2026-00042','t1'), ('o2','Р-2026-00043','t1');
+     CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS text AS $$
+       SELECT NULLIF(current_setting('app.tenant_id', true), '');
+     $$ LANGUAGE sql STABLE;
+     ALTER TABLE "Order" ENABLE ROW LEVEL SECURITY;
+     ALTER TABLE "Order" FORCE ROW LEVEL SECURITY;
+     CREATE POLICY tenant_isolation ON "Order"
+       USING ("tenantId" = current_tenant_id())
+       WITH CHECK ("tenantId" = current_tenant_id());`,
     owner
   );
 
@@ -81,10 +93,11 @@ async function main() {
     ["-h", HOST, "-p", String(cfg.db.port), "-U", cfg.db.ownerUser, "-d", restoredDb, first.file],
     { env: { ...process.env, PGPASSWORD: cfg.db.ownerPassword }, maxBuffer: 64 * 1024 * 1024 }
   );
+  // Читаем под суперпользователем: на восстановленной таблице та же изоляция,
+  // и владелец схемы увидел бы ноль строк — как и при снятии копии.
   const rows = (
     await pg.psql('SELECT string_agg(number, \' \' ORDER BY number) FROM "Order"', {
       database: restoredDb,
-      user: cfg.db.ownerUser,
       password: cfg.db.ownerPassword,
     })
   ).trim();

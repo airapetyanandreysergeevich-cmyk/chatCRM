@@ -2,14 +2,11 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
-const { promisify } = require("util");
+const { spawn } = require("child_process");
 
-const { ensureLayout } = require("./paths");
+const { ensureLayout, backendDir } = require("./paths");
 const config = require("./config");
 const { LocalPostgres, freePort } = require("./postgres");
-
-const run = promisify(execFile);
 
 /**
  * Подготовка Основы к работе.
@@ -20,26 +17,92 @@ const run = promisify(execFile);
  * установку в рабочее состояние, а не требовать «переустановить».
  */
 
-/** Где лежит бэкенд: рядом с программой или, в разработке, в репозитории. */
-function backendDir() {
-  if (process.env.FINECRM_BACKEND) return process.env.FINECRM_BACKEND;
-  const base = process.resourcesPath || path.join(__dirname, "..");
-  return path.join(base, "backend");
+/** Последние строки журнала — по ним видно, на чём именно встало. */
+function tail(file, lines = 8) {
+  try {
+    return fs.readFileSync(file, "utf8").trimEnd().split(/\r?\n/).slice(-lines).join(" | ");
+  } catch {
+    return "";
+  }
 }
 
-async function prisma(args, { cwd, env, log }) {
-  const bin = path.join(cwd, "node_modules", ".bin", process.platform === "win32" ? "prisma.cmd" : "prisma");
-  const { stdout, stderr } = await run(bin, args, { cwd, env: { ...process.env, ...env } });
-  if (log) log(stdout || stderr);
-  return stdout;
+/**
+ * Запускает вспомогательный инструмент на Node и ждёт его.
+ *
+ * Три решения, и каждое — из-за Windows:
+ *
+ * 1. Запускаем сам файл инструмента, а не обёртку .cmd из node_modules\.bin.
+ *    Обёртка поднимает cmd.exe, тот держит потоки вывода открытыми, и
+ *    ожидание не заканчивается никогда — программа виснет на ровном месте,
+ *    хотя работа давно сделана.
+ * 2. Вывод отправляем сразу в файл, а не перехватываем: по той же причине, и
+ *    заодно в мастерской остаётся журнал, который можно прислать.
+ * 3. Ставим срок. Инструмент, замерший навсегда, — худшее, что может
+ *    случиться на первом запуске: человек видит крутилку и не знает, ждать
+ *    ему минуту или до завтра.
+ */
+function runTool(script, args, { cwd, env, logFile, what, input, timeoutMs = 5 * 60_000 }) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    const out = fs.openSync(logFile, "a");
+    fs.writeSync(out, `\n=== ${new Date().toISOString()} ${what} ===\n`);
+
+    const child = spawn(process.execPath, [script, ...args], {
+      cwd,
+      // ELECTRON_RUN_AS_NODE: в собранной программе отдельного node нет, его
+      // роль играет сам Electron.
+      env: { ...process.env, ...env, ELECTRON_RUN_AS_NODE: "1" },
+      // Пароль передаём через стандартный ввод, а не аргументом: аргументы
+      // видны в списке процессов любому, кто откроет диспетчер задач.
+      stdio: [input === undefined ? "ignore" : "pipe", out, out],
+      windowsHide: true,
+    });
+
+    if (input !== undefined) {
+      child.stdin.on("error", () => {});
+      child.stdin.end(input);
+    }
+
+    let done = false;
+    const finish = (fn, arg) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        fs.closeSync(out);
+      } catch {
+        /* уже закрыт */
+      }
+      fn(arg);
+    };
+
+    const timer = setTimeout(() => {
+      child.kill();
+      const limit = timeoutMs >= 60_000 ? `${Math.round(timeoutMs / 60_000)} мин` : `${Math.round(timeoutMs / 1000)} с`;
+      finish(reject, new Error(`${what}: не уложилось в ${limit}. ${tail(logFile)}`));
+    }, timeoutMs);
+
+    child.once("error", (err) => finish(reject, new Error(`${what}: ${err.message}`)));
+    child.once("exit", (code) => {
+      if (code === 0) return finish(resolve);
+      finish(reject, new Error(`${what}: код ${code}. ${tail(logFile)}`));
+    });
+  });
+}
+
+/** Командная строка Prisma — обычный файл на Node, запускаем его напрямую. */
+function prismaCli(backend) {
+  return path.join(backend, "node_modules", "prisma", "build", "index.js");
 }
 
 /**
  * @param {string} dataDir папка данных мастерской
  * @param {(step: string) => void} [say] куда сообщать о ходе — на первом
  *        запуске это единственное, что человек видит минуту-другую
+ * @param {{workshop, fullName, email, password}|null} [owner] данные первого
+ *        входа; передаются только на первом запуске, дальше мастерская уже есть
  */
-async function prepareMain(dataDir, say = () => {}) {
+async function prepareMain(dataDir, say = () => {}, owner = null) {
   const l = ensureLayout(dataDir);
 
   say("Читаю настройки");
@@ -67,9 +130,11 @@ async function prepareMain(dataDir, say = () => {}) {
 
     const be = backendDir();
     say("Обновляю структуру базы");
-    await prisma(["migrate", "deploy"], {
+    await runTool(prismaCli(be), ["migrate", "deploy"], {
       cwd: be,
       env: { DATABASE_URL: config.databaseUrl(cfg, "owner") },
+      logFile: path.join(l.logs, "prisma.log"),
+      what: "Обновление структуры базы",
     });
 
     // Построчную защиту миграции не ставят — она живёт отдельным файлом и
@@ -82,6 +147,24 @@ async function prepareMain(dataDir, say = () => {}) {
       user: cfg.db.ownerUser,
       password: cfg.db.ownerPassword,
     });
+
+    if (owner) {
+      say("Завожу мастерскую");
+      await runTool(
+        path.join(be, "dist", "cli", "create-workshop.js"),
+        [owner.workshop, owner.fullName, owner.email],
+        {
+          cwd: be,
+          env: { DATABASE_URL: config.databaseUrl(cfg, "owner") },
+          logFile: path.join(l.logs, "prisma.log"),
+          what: "Создание мастерской",
+          input: owner.password,
+          timeoutMs: 60_000,
+        }
+      );
+      cfg.workshopName = owner.workshop;
+      config.write(l.config, cfg);
+    }
 
     return { config: cfg, layout: l, postgres: pg };
   } catch (err) {
@@ -96,9 +179,17 @@ function backendEnv(cfg, l) {
     NODE_ENV: "production",
     DATABASE_URL: config.databaseUrl(cfg, "app"),
     MIGRATE_DATABASE_URL: config.databaseUrl(cfg, "owner"),
+    // Без них сервер не стартует вовсе — и правильно делает: это ключи,
+    // которыми подписан вход сотрудников.
+    JWT_ACCESS_SECRET: cfg.auth.accessSecret,
+    JWT_REFRESH_SECRET: cfg.auth.refreshSecret,
     PORT: String(cfg.share.port),
     // В локальном режиме слушаем только себя, пока раздача не включена явно.
     BIND_HOST: cfg.share.enabled ? "0.0.0.0" : "127.0.0.1",
+    // Внутри мастерской ходим по обычному HTTP, без сертификата. С пометкой
+    // «только по HTTPS» браузер не сохранил бы печенье сессии, и сотрудник
+    // вылетал бы каждые пятнадцать минут.
+    COOKIE_SECURE: "false",
     // Файлы вместо S3.
     STORAGE_DRIVER: "local",
     STORAGE_DIR: l.files,
@@ -106,4 +197,4 @@ function backendEnv(cfg, l) {
   };
 }
 
-module.exports = { prepareMain, backendEnv, backendDir };
+module.exports = { prepareMain, backendEnv, runTool };

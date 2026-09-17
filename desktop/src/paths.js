@@ -39,20 +39,85 @@ function ensureLayout(dataDir) {
   return l;
 }
 
+// ------------------------------------------------- где лежит то, что едет с нами
+
+/** Папка программы: desktop/ в репозитории. */
+const appDir = () => path.join(__dirname, "..");
+/** Корень репозитория — на один уровень выше. */
+const repoDir = () => path.join(appDir(), "..");
+
 /**
- * Где лежат бинарники PostgreSQL.
+ * Где искать ресурс — бинарники базы, собранный сервер, собранный интерфейс.
  *
- * В собранной программе они едут рядом, в resources. В разработке путь
- * задаётся переменной окружения — на Linux это системный постгрес, и так
- * механизм проверяется, не собирая установщик под Windows.
+ * Хитрость в том, что `process.resourcesPath` существует ВСЕГДА, когда работает
+ * Electron: при запуске командой `electron .` он указывает внутрь самого
+ * Electron, в его собственные ресурсы. Проверять его на наличие бесполезно —
+ * программа честно шла искать initdb.exe в гости к Electron и не находила.
+ *
+ * Поэтому смотрим не «собраны мы или нет», а что реально лежит на диске:
+ * сначала папку разработки, потом ресурсы собранной программы. Первая
+ * существующая и выигрывает.
+ */
+function findDir(candidates, missing, hint) {
+  for (const dir of candidates) {
+    if (dir && fs.existsSync(dir)) return dir;
+  }
+  throw new Error(`${missing} ${hint}`);
+}
+
+/**
+ * Бинарники PostgreSQL.
+ *
+ * На Linux при проверках сюда подставляется системный постгрес переменной
+ * окружения — так механизм проверяется, не собирая установщик под Windows.
  */
 function postgresBinDir() {
   if (process.env.FINECRM_PG_BIN) return process.env.FINECRM_PG_BIN;
-  const base = process.resourcesPath || path.join(__dirname, "..");
-  return path.join(base, "pgsql", "bin");
+  return findDir(
+    [
+      path.join(appDir(), "vendor", "pgsql", "bin"),
+      process.resourcesPath && path.join(process.resourcesPath, "pgsql", "bin"),
+    ],
+    "Бинарники PostgreSQL не найдены.",
+    "Распакуйте архив с сайта EnterpriseDB в desktop\\vendor — нужна папка desktop\\vendor\\pgsql\\bin."
+  );
+}
+
+/**
+ * Собранный сервер.
+ *
+ * Проверяем не папку, а сам dist/index.js: папка backend существует и в
+ * репозитории, где сервер ещё не собран, и «нашли» её было бы обманом —
+ * ошибка всплыла бы на шаг позже и непонятнее.
+ */
+function backendDir() {
+  if (process.env.FINECRM_BACKEND) return process.env.FINECRM_BACKEND;
+
+  const roots = [
+    process.resourcesPath && path.join(process.resourcesPath, "backend"),
+    path.join(repoDir(), "backend"),
+  ];
+  return findDir(
+    roots.map((r) => (r && fs.existsSync(path.join(r, "dist", "index.js")) ? r : null)),
+    "Собранный сервер не найден.",
+    "Соберите его: cd backend, npm install, npm run build."
+  );
+}
+
+/** Собранный интерфейс: папка с index.html. */
+function frontendDir() {
+  if (process.env.FINECRM_FRONTEND) return process.env.FINECRM_FRONTEND;
+  return findDir(
+    [
+      process.resourcesPath && path.join(process.resourcesPath, "frontend"),
+      path.join(repoDir(), "frontend", "dist"),
+    ],
+    "Собранный интерфейс не найден.",
+    "Соберите его: cd frontend, npm install, npm run build."
+  );
 }
 
 /** Имя исполняемого файла с учётом системы. */
 const exe = (name) => (process.platform === "win32" ? `${name}.exe` : name);
 
-module.exports = { layout, ensureLayout, postgresBinDir, exe };
+module.exports = { layout, ensureLayout, postgresBinDir, backendDir, frontendDir, exe };
