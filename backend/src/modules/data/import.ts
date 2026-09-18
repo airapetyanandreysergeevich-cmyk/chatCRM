@@ -28,6 +28,8 @@ export interface RowIssue {
   /** Номер строки в файле, как его видит человек в Excel: шапка — первая. */
   row: number;
   message: string;
+  /** Из-за какой колонки строка не прошла — по ним видно систематическую беду. */
+  column?: string;
 }
 
 export interface ParsedRow {
@@ -47,10 +49,27 @@ export interface ImportPreview {
   toCreate: number;
   toUpdate: number;
   issues: RowIssue[];
+  /**
+   * Сколько строк не прошло всего.
+   *
+   * Список замечаний обрезан двумя сотнями, и показывать его длину как число
+   * непрошедших строк — прямая неправда: на файле в пять тысяч строк человек
+   * читал «замечаний 200» и не понимал, куда делись четыре тысячи.
+   */
+  issuesTotal: number;
   /** Колонки файла, которые мы не узнали, — они будут пропущены. */
   ignoredColumns: string[];
   /** Обязательные колонки, которых в файле нет. */
   missingColumns: string[];
+  /**
+   * Замечания обо всём файле сразу, а не о строке.
+   *
+   * Двести одинаковых строчек «не число» человек читает как «программа
+   * капризничает», хотя на деле у него съехала шапка и под одним заголовком
+   * лежит чужая колонка. Сказать это словами один раз полезнее, чем двести
+   * раз назвать симптом.
+   */
+  hints: string[];
   /** Первые несколько строк — чтобы человек глазами убедился, что понял файл верно. */
   sample: Array<Record<string, string>>;
 }
@@ -113,8 +132,10 @@ export async function parseRows(
         toCreate: 0,
         toUpdate: 0,
         issues,
+        issuesTotal: issues.length,
         ignoredColumns,
         missingColumns,
+        hints: [],
         sample: [],
       },
     };
@@ -123,6 +144,8 @@ export async function parseRows(
   // Ключи уже разобранных строк: дубликат внутри одного файла — частая беда
   // выгрузок из старых программ, и молча схлопывать его нельзя.
   const seen = new Map<string, number>();
+  /** Сколько строк споткнулось о каждую колонку — по этому и виден съехавший заголовок. */
+  const byColumn = new Map<string, number>();
 
   for (let i = 0; i < body.length && rows.length < MAX_IMPORT_ROWS; i += 1) {
     const line = body[i].cells;
@@ -138,6 +161,7 @@ export async function parseRows(
     const rowIssues = validateRow(def, values, rowNo);
     if (rowIssues.length) {
       issues.push(...rowIssues);
+      for (const bad of rowIssues) if (bad.column) byColumn.set(bad.column, (byColumn.get(bad.column) ?? 0) + 1);
       continue;
     }
 
@@ -175,11 +199,34 @@ export async function parseRows(
       toCreate: rows.filter((r) => r.action === "create").length,
       toUpdate: rows.filter((r) => r.action === "update").length,
       issues: issues.slice(0, 200),
+      issuesTotal: issues.length,
       ignoredColumns,
       missingColumns,
+      hints: hintsFor(byColumn, body.length),
       sample: rows.slice(0, 5).map((r) => r.values),
     },
   };
+}
+
+/**
+ * Одна колонка подвела сразу много строк — это не данные, это шапка.
+ *
+ * Порог в пятую часть файла и не меньше десяти строк: случайный мусор в паре
+ * ячеек бывает у всех, а вот двести строк подряд с одной и той же бедой
+ * означают, что под заголовком лежит не то, что он обещает. Так выглядит
+ * выгрузка, шапку которой подписывали руками и сбились в середине.
+ */
+function hintsFor(byColumn: Map<string, number>, total: number): string[] {
+  const out: string[] = [];
+  for (const [column, n] of byColumn) {
+    if (n < 10 || n * 5 < total) continue;
+    out.push(
+      `В колонке «${column}» не то, что ожидалось, — у ${n} строк из ${total}. ` +
+        "Похоже, заголовки в файле сдвинуты относительно данных: проверьте, что под каждым " +
+        "заголовком лежит именно то, что он обещает."
+    );
+  }
+  return out;
 }
 
 function validateRow(def: DatasetDef, values: Record<string, string>, row: number): RowIssue[] {
@@ -196,16 +243,16 @@ function validateRow(def: DatasetDef, values: Record<string, string>, row: numbe
   for (const col of def.columns) {
     const raw = values[col.title] ?? "";
     if (col.required && !raw) {
-      out.push({ row, message: `не заполнена обязательная колонка «${col.title}»` });
+      out.push({ row, message: `не заполнена обязательная колонка «${col.title}»`, column: col.title });
       continue;
     }
     if (!raw) continue;
 
     if (col.kind === "phone" && phoneKey(raw).length < 10) {
-      out.push({ row, message: `телефон «${raw}» не похож на номер` });
+      out.push({ row, message: `телефон «${raw}» не похож на номер`, column: col.title });
     }
     if (col.kind === "number" && parseNumber(raw) === null) {
-      out.push({ row, message: `в колонке «${col.title}» не число: «${raw}»` });
+      out.push({ row, message: `в колонке «${col.title}» не число: «${raw}»`, column: col.title });
     }
   }
   return out;

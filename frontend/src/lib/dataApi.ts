@@ -28,6 +28,7 @@ export interface DataReference {
 export interface RowIssue {
   row: number;
   message: string;
+  column?: string;
 }
 
 export interface ImportPreview {
@@ -37,8 +38,12 @@ export interface ImportPreview {
   toCreate: number;
   toUpdate: number;
   issues: RowIssue[];
+  /** Сколько строк не прошло всего — список замечаний обрезан. */
+  issuesTotal: number;
   ignoredColumns: string[];
   missingColumns: string[];
+  /** Беды всего файла: съехавшая шапка и прочее, что не про отдельную строку. */
+  hints: string[];
   sample: Array<Record<string, string>>;
 }
 

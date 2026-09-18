@@ -120,11 +120,24 @@ function PreviewBlock({
           <span>
             Обновится <span className="font-bold">{preview.toUpdate}</span>
           </span>
-          {preview.issues.length > 0 && (
+          {preview.issuesTotal > 0 && (
             <span className="text-state-off">
-              Строк с замечаниями <span className="font-bold">{preview.issues.length}</span>
+              Строк с замечаниями <span className="font-bold">{preview.issuesTotal}</span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* Беда всего файла важнее списка отдельных строк: пока человек не
+          поймёт, что у него съехала шапка, двести строчек «не число» он будет
+          читать как придирки программы. */}
+      {preview.hints.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {preview.hints.map((h) => (
+            <Banner key={h} tone="warning">
+              {h}
+            </Banner>
+          ))}
         </div>
       )}
 
@@ -138,6 +151,8 @@ function PreviewBlock({
         <div className="mt-4">
           <p className="text-[13px] font-semibold text-ink-muted">
             Эти строки загружены не будут — номера как в вашем файле
+            {preview.issuesTotal > preview.issues.length &&
+              `. Показаны первые ${preview.issues.length} из ${preview.issuesTotal}`}
           </p>
           <div className="mt-2 max-h-[260px] overflow-auto rounded-card border border-line">
             <table className="w-full text-[13px]">
