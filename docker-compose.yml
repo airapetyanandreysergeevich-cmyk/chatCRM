@@ -82,6 +82,7 @@ services:
       - ./deploy/nginx:/etc/nginx/templates-src:ro
       - ./deploy/certbot/conf:/etc/letsencrypt:ro
       - ./deploy/certbot/www:/var/www/certbot:ro
+      - ./deploy/downloads:/srv/downloads:ro
       - nginx-conf:/etc/nginx/conf.d
     # Скрипт запускаем через sh, а не напрямую: проект редактируется в том числе
     # на Windows, где признак «исполняемый» не сохраняется, и файл приезжает с правами 644.

@@ -5,6 +5,21 @@ server {
 
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
 
+    # Установщик для Windows и всё, что раздаётся файлом.
+    #
+    # Отдельной папкой на диске, а не внутри образа фронтенда: установщик
+    # весит около 400 МБ, и, попади он в сборку, каждая пересборка тащила бы
+    # эти мегабайты в контекст, в слои и в репозиторий. Здесь же он просто
+    # лежит, обновляется копированием и переживает любые пересборки.
+    #
+    # Отдельный location ещё и потому, что иначе отсутствующий файл вернул бы
+    # страницу сайта под именем .exe — ровно та поломка, что уже была с APK.
+    location /download/ {
+        alias /srv/downloads/;
+        autoindex off;
+        add_header Cache-Control "public, max-age=3600";
+    }
+
     location /api/ {
         proxy_pass http://backend:4000;
         proxy_set_header Host $host;

@@ -130,6 +130,43 @@ export const IconBell = (p: IconProps) => (
   </Icon>
 );
 
+/**
+ * Значки платформ на странице входа.
+ *
+ * Силуэты устройств, а не фирменные знаки Google, Apple и Microsoft: чужие
+ * логотипы — их собственность, и рисовать их по памяти на своей странице
+ * нельзя. Названия рядом написаны словами, и этого достаточно: «Android» под
+ * телефоном со стрелкой вниз читается без подсказок.
+ *
+ * Стрелка держит смысл действия: вниз — скачать файл, вверх из корпуса — то
+ * самое «Поделиться», с которого начинается установка на iPhone.
+ */
+export const IconPhoneDownload = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+    <path d="M12 8v6.5" />
+    <path d="M9.5 12 12 14.5 14.5 12" />
+  </Icon>
+);
+
+export const IconPhoneShare = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+    <path d="M12 15V8.5" />
+    <path d="M9.5 11 12 8.5 14.5 11" />
+  </Icon>
+);
+
+export const IconDesktopDownload = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.5" y="4" width="19" height="13" rx="2" />
+    <path d="M9 20.5h6" />
+    <path d="M12 17v3.5" />
+    <path d="M12 7.5v4.5" />
+    <path d="M9.8 10 12 12.2 14.2 10" />
+  </Icon>
+);
+
 export const IconFeedback = (p: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
     <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.6-4.4A8.3 8.3 0 0 1 3.6 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 8.4 8.4Z" />
