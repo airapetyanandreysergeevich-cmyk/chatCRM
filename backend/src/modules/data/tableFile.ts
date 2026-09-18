@@ -237,6 +237,27 @@ export function writeHtml(sheets: SheetData[], title: string): Buffer {
   return Buffer.from(html, "utf8");
 }
 
+/**
+ * Заголовок, которым браузеру передаётся имя файла.
+ *
+ * Имя пишется дважды: в кавычках — для браузеров, не знающих про кодировки,
+ * и в filename* — для всех нынешних, где кириллица переживает пересылку.
+ *
+ * Тонкость, которая стоила нам выгрузки целиком: в значение заголовка Node не
+ * пропускает ни одного символа выше latin1 и бросает ERR_INVALID_CHAR. Имя
+ * «заказы-2026-09-18.xlsx» в кавычках роняло ответ на полпути — файл к этому
+ * моменту был уже собран, поэтому наружу выходила «Внутренняя ошибка» через
+ * сорок миллисекунд, и на таймаут это не походило ничем. Выгрузка сразу
+ * нескольких разделов при этом работала: там имя файла «finecrm», латиницей.
+ *
+ * Поэтому в кавычки идёт только латиница, а русское имя — в filename*, где
+ * оно закодировано процентами и безопасно по определению.
+ */
+export function contentDisposition(fileName: string, asciiFallback: string): string {
+  const ascii = asciiFallback.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
 const pad = (n: number): string => String(n).padStart(2, "0");
 
 export function formatDate(d: Date): string {

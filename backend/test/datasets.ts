@@ -16,12 +16,19 @@
  *   npx tsx test/datasets.ts
  */
 
+import { IncomingMessage, ServerResponse } from "node:http";
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
 import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
 import { parseDate } from "../src/modules/data/apply";
 import { parseRows } from "../src/modules/data/import";
-import { writeCsv, writeHtml, writeXlsx, type TableRow } from "../src/modules/data/tableFile";
+import {
+  contentDisposition,
+  writeCsv,
+  writeHtml,
+  writeXlsx,
+  type TableRow,
+} from "../src/modules/data/tableFile";
 
 let fails = 0;
 const check = (ok: boolean, msg: string) => {
@@ -348,6 +355,25 @@ async function main(): Promise<void> {
 
   const html = writeHtml(all, "проверка").toString("utf8");
   check(html.includes("Заказы") && html.includes("Услуги"), "в html попали все выбранные разделы");
+
+  // 14. Имя файла в заголовке ответа. Русское имя, поставленное в заголовок
+  //     как есть, роняло выгрузку целиком: Node не пропускает в значение
+  //     заголовка ничего выше latin1. Проверяем не глазами, а тем же
+  //     способом, каким это делает сам Node.
+  const cd = contentDisposition("заказы-2026-09-18.xlsx", "orders-2026-09-18.xlsx");
+  const res = new ServerResponse(new IncomingMessage(null as never));
+  let accepted = true;
+  try {
+    res.setHeader("Content-Disposition", cd);
+  } catch {
+    accepted = false;
+  }
+  check(accepted, "заголовок с именем файла принимается Node, а не роняет ответ");
+  check(cd.includes(`filename="orders-2026-09-18.xlsx"`), "в кавычках — латиница, её понимают все");
+  check(
+    cd.includes(`filename*=UTF-8''${encodeURIComponent("заказы-2026-09-18.xlsx")}`),
+    "русское имя едет в filename* — именно его берёт нынешний браузер"
+  );
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;

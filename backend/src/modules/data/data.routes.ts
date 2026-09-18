@@ -18,7 +18,7 @@ import { applyRows } from "./apply";
 import { DATASETS, DATASET_KEYS, isDatasetKey, type DatasetKey } from "./dataset";
 import { buildSheets } from "./export";
 import { MAX_IMPORT_ROWS, parseRows, type ImportPreview, type ParsedRow } from "./import";
-import { formatDate, readTable, writeCsv, writeHtml, writeXlsx } from "./tableFile";
+import { contentDisposition, formatDate, readTable, writeCsv, writeHtml, writeXlsx } from "./tableFile";
 
 /**
  * Выгрузка и загрузка данных мастерской.
@@ -151,7 +151,10 @@ dataRouter.get(
     );
 
     const stamp = new Date().toISOString().slice(0, 10);
+    // Человеку файл достаётся с русским именем, а в заголовок ответа
+    // кириллица не пролезает вовсе — см. contentDisposition.
     const base = keys.length === 1 ? DATASETS[keys[0]].sheet.toLowerCase() : "finecrm";
+    const asciiBase = keys.length === 1 ? keys[0] : "finecrm";
     const fileName = `${base}-${stamp}.${format}`;
 
     let body: Buffer;
@@ -168,12 +171,7 @@ dataRouter.get(
     }
 
     res.setHeader("Content-Type", type);
-    // Имя файла двумя способами: старые браузеры читают первое, все
-    // остальные — второе, где кириллица переживает пересылку.
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${base}-${stamp}.${format}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
-    );
+    res.setHeader("Content-Disposition", contentDisposition(fileName, `${asciiBase}-${stamp}.${format}`));
     res.send(body);
   })
 );
