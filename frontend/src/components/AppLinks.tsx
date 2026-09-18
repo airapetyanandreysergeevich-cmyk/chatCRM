@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Modal } from "./Modal";
 import { IconDesktopDownload, IconPhoneDownload, IconPhoneShare } from "./icons";
 import { APK_URL } from "../lib/androidApp";
@@ -23,11 +23,16 @@ import { APK_URL } from "../lib/androidApp";
  * — **Windows** получает установщик с базой внутри — это уже не окно к сайту,
  *   а отдельная программа, которая умеет работать без интернета.
  *
- * Значки — силуэты устройств, а не фирменные знаки Google, Apple и Microsoft:
- * чужие логотипы принадлежат им, и рисовать их по памяти на своей странице
- * нельзя. Названия написаны словами рядом, и этого хватает. Стрелка держит
- * смысл действия: вниз — скачать файл, вверх из корпуса — то самое
- * «Поделиться», с которого начинается установка на iPhone.
+ * Значки по умолчанию — силуэты устройств из общего набора, а не фирменные
+ * знаки Google, Apple и Microsoft: чужие логотипы принадлежат им, и рисовать
+ * их своей рукой нельзя. Стрелка при этом держит смысл действия: вниз —
+ * скачать файл, вверх из корпуса — то самое «Поделиться», с которого
+ * начинается установка на iPhone.
+ *
+ * Но если положить официальные знаки в `public/brands/` (см. README там же),
+ * плитки подхватят их сами. Файла нет или он не открылся — остаётся силуэт,
+ * и страница не показывает битую картинку. Знак должен приехать от владельца
+ * марки, а не быть нарисован нами; всё остальное здесь к этому готово.
  */
 
 /** Раздаётся сервером из папки, не попадающей в сборку, — см. deploy/nginx. */
@@ -39,6 +44,25 @@ const STEPS = [
   "Пролистайте список и выберите «На экран „Домой“».",
   "Нажмите «Добавить». Значок появится среди приложений.",
 ];
+
+/**
+ * Фирменный знак, если он есть, и силуэт, если его нет.
+ *
+ * Проверять наличие файла заранее было бы лишним запросом на каждую плитку:
+ * браузер и так скажет, если картинка не открылась, — этим и пользуемся.
+ */
+function PlatformMark({ file, fallback }: { file: string; fallback: ReactNode }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <>{fallback}</>;
+  return (
+    <img
+      src={`/brands/${file}`}
+      alt=""
+      className="h-[18px] w-[18px] object-contain"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 function Tile({
   icon,
@@ -98,14 +122,14 @@ export function AppLinks() {
             as="a"
             href={APK_URL}
             download
-            icon={<IconPhoneDownload />}
+            icon={<PlatformMark file="android.svg" fallback={<IconPhoneDownload />} />}
             title="Android"
             text="Скачать приложение"
           />
           <Tile
             as="button"
             onClick={() => setIos(true)}
-            icon={<IconPhoneShare />}
+            icon={<PlatformMark file="ios.svg" fallback={<IconPhoneShare />} />}
             title="iOS"
             text="Как установить"
           />
@@ -114,7 +138,7 @@ export function AppLinks() {
               as="a"
               href={SETUP_URL}
               download
-              icon={<IconDesktopDownload />}
+              icon={<PlatformMark file="windows.svg" fallback={<IconDesktopDownload />} />}
               title="Windows"
               text="Скачать приложение"
             />
