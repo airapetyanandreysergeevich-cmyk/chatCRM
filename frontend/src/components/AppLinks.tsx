@@ -50,6 +50,11 @@ const STEPS = [
  *
  * Проверять наличие файла заранее было бы лишним запросом на каждую плитку:
  * браузер и так скажет, если картинка не открылась, — этим и пользуемся.
+ *
+ * Файлы лежат светлыми: страница входа тёмная, и тёмный знак на ней пропадает.
+ * Менять цвет в разметке мы не пытаемся — фильтром или маской это вышло бы
+ * непредсказуемо и на каждой платформе по-своему; проще и честнее держать в
+ * папке тот вариант, который нужен.
  */
 function PlatformMark({ file, fallback }: { file: string; fallback: ReactNode }) {
   const [failed, setFailed] = useState(false);
@@ -122,14 +127,14 @@ export function AppLinks() {
             as="a"
             href={APK_URL}
             download
-            icon={<PlatformMark file="android.svg" fallback={<IconPhoneDownload />} />}
+            icon={<PlatformMark file="android.png" fallback={<IconPhoneDownload />} />}
             title="Android"
             text="Скачать приложение"
           />
           <Tile
             as="button"
             onClick={() => setIos(true)}
-            icon={<PlatformMark file="ios.svg" fallback={<IconPhoneShare />} />}
+            icon={<PlatformMark file="ios.png" fallback={<IconPhoneShare />} />}
             title="iOS"
             text="Как установить"
           />
@@ -138,7 +143,7 @@ export function AppLinks() {
               as="a"
               href={SETUP_URL}
               download
-              icon={<PlatformMark file="windows.svg" fallback={<IconDesktopDownload />} />}
+              icon={<PlatformMark file="windows.png" fallback={<IconDesktopDownload />} />}
               title="Windows"
               text="Скачать приложение"
             />
