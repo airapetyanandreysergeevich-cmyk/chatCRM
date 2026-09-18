@@ -4,6 +4,7 @@ import { forbidden } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import { permissionsOf } from "../../middleware/auth";
 import { signedUrl } from "../../lib/storage";
+import { discountOnWork, recalcTotals } from "./totals";
 
 /** Prisma отдаёт Decimal объектом. Наружу отдаём число, чтобы фронтенду не разбирать. */
 const num = (v: Prisma.Decimal | number | null | undefined): number | null =>
@@ -186,7 +187,7 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
  * загрузки файла. Здесь — только повторная выдача, чтобы не переписывать
  * два десятка мест, которые уже берут их отсюда.
  */
-export { discountOnWork, recalcTotals } from "./totals";
+export { discountOnWork, recalcTotals };
 
 /**
  * Не вышла ли сумма за то, что согласовал клиент.
