@@ -18,6 +18,7 @@ import {
   StatusGlyph,
 } from "../components/ui";
 import { ApiError, api } from "../lib/api";
+import { DebtPanel } from "../components/DebtPanel";
 import { formatDateShort, plural } from "../lib/format";
 
 interface Client {
@@ -280,6 +281,10 @@ function ClientModal({
     <Modal title={client ? client.name : "Новый клиент"} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error">{error.message}</Banner>}
+
+        {/* Долг — первое, что нужно знать о клиенте, который стоит перед вами:
+            прежде чем править ему телефон, стоит увидеть, что он должен. */}
+        {client && <DebtPanel customerId={client.id} onPaid={onDone} />}
 
         <Field label="Кто это" error={error?.field("type")}>
           <Select value={form.type} onChange={set("type")}>

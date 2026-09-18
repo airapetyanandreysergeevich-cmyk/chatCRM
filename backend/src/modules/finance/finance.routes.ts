@@ -3,7 +3,9 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { ah, badRequest, forbidden, notFound } from "../../lib/errors";
+import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
+import { debts } from "../../lib/debt";
+import { takePayment } from "../../lib/payment";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
   actorUserId,
@@ -338,6 +340,69 @@ financeRouter.post(
     });
 
     res.status(201).json({ id: created.id });
+  })
+);
+
+/**
+ * Погашение долга по заказу.
+ *
+ * Отдельным входом, а не обычным приходом в кассу: приёмщик в этот момент не
+ * оформляет движение денег, а закрывает долг конкретного человека, и ошибиться
+ * суммой здесь легче всего. Поэтому больше долга не принимаем — лишнее ушло бы
+ * в минус по заказу и всплыло бы через месяц как «переплата непонятно чья».
+ */
+financeRouter.post(
+  "/debt/pay",
+  requirePermission(PERMISSIONS.FINANCE_PAYMENT, PERMISSIONS.FINANCE_MANAGE),
+  ah(async (req, res) => {
+    const body = z
+      .object({
+        orderId: z.string().uuid(),
+        /** Пусто — гасим долг целиком. */
+        amount: z.number().positive().optional(),
+        method: z.enum(["CASH", "CARD"]),
+      })
+      .parse(req.body);
+
+    const tenantId = tenantOf(req);
+    const userId = actorUserId(req);
+
+    const result = await withTenant(tenantId, async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: body.orderId, deletedAt: null },
+        select: { id: true, number: true, customerId: true },
+      });
+      if (!order) throw notFound("Заказ не найден");
+
+      const mine = (await debts(tx, { customerId: order.customerId ?? undefined })).find(
+        (d) => d.orderId === order.id
+      );
+      if (!mine) throw conflict("По этому заказу долга нет — возможно, его уже погасили");
+
+      const amount = Math.min(body.amount ?? mine.due, mine.due);
+      const taken = await takePayment(tx, tenantId, {
+        orderId: order.id,
+        customerId: order.customerId ?? null,
+        amount,
+        how: body.method,
+        userId,
+        comment: `Погашение долга по заказу ${order.number}`,
+      });
+
+      await writeAudit(tx, {
+        tenantId,
+        userId,
+        entity: "Order",
+        entityId: order.id,
+        action: "UPDATE",
+        diff: { debtPaid: taken, method: body.method, left: Math.round((mine.due - taken) * 100) / 100 },
+        ip: clientIp(req),
+      });
+
+      return { paid: taken, left: Math.round((mine.due - taken) * 100) / 100 };
+    });
+
+    res.json(result);
   })
 );
 

@@ -171,6 +171,10 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
           workDiscountPercent: Number(order.workDiscountPercent),
           workDiscount: discountOnWork(Number(order.totalWork), order.workDiscountPercent),
           total: num(order.total),
+          // Чем расплатились и когда обещали — часть денежной картины заказа,
+          // поэтому уходят тем же, кому видны суммы.
+          paymentMethod: order.paymentMethod,
+          debtDueAt: order.debtDueAt,
         }
       : {}),
   };

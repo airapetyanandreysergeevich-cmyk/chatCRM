@@ -4,6 +4,7 @@ import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, notFound } from "../../lib/errors";
 import { nextCustomerNumber } from "../../lib/customerNumber";
+import { debts } from "../../lib/debt";
 import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
@@ -195,7 +196,7 @@ customersRouter.get(
       });
       if (!customer) throw notFound("Клиент не найден");
 
-      const [devices, orders] = await Promise.all([
+      const [devices, orders, owed] = await Promise.all([
         tx.device.findMany({ where: { customerId: customer.id }, orderBy: { createdAt: "desc" } }),
         tx.order.findMany({
           where: { customerId: customer.id, deletedAt: null },
@@ -206,10 +207,27 @@ customersRouter.get(
             device: { select: { kind: true, brand: true, model: true } },
           },
         }),
+        debts(tx, { customerId: customer.id }),
       ]);
 
       return {
         customer,
+        // Суммарный долг и его разбивка по заказам. Сумма считается здесь же,
+        // а не складывается на стороне интерфейса: округление до копеек должно
+        // быть одно, иначе итог в карточке и сумма строк разойдутся на копейку,
+        // и объяснять это клиенту придётся приёмщику.
+        debt: {
+          total: Math.round(owed.reduce((sum, d) => sum + d.due, 0) * 100) / 100,
+          orders: owed.map((d) => ({
+            orderId: d.orderId,
+            number: d.number,
+            due: d.due,
+            total: d.total,
+            issuedAt: d.issuedAt,
+            debtDueAt: d.debtDueAt,
+            overdue: d.overdue,
+          })),
+        },
         devices,
         orders: orders.map((o) => ({
           id: o.id,

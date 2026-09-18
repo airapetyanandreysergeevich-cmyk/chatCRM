@@ -14,6 +14,7 @@ import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors"
 import { notifyTenant } from "../../lib/notify";
 import { nextOrderNumber } from "../../lib/orderNumber";
 import { nextCustomerNumber } from "../../lib/customerNumber";
+import { takePayment } from "../../lib/payment";
 import { PERMISSIONS } from "../../lib/permissions";
 import { isAllowedUpload, putOrderFile, removeFile, signedUrl } from "../../lib/storage";
 import {
@@ -686,10 +687,22 @@ ordersRouter.post(
   "/:id/issue",
   requirePermission(PERMISSIONS.ORDERS_ISSUE),
   ah(async (req, res) => {
-    const { discount, reason } = z
+    const { discount, reason, payment } = z
       .object({
         discount: z.number().min(0).default(0),
         reason: z.string().trim().min(3).max(300).optional(),
+        /**
+         * Чем расплатились. Приходит с выдачи, где приёмщик выбирает одно из
+         * трёх. Необязательно: заказ можно выдать и без денег — например,
+         * гарантийный возврат, где платить не за что.
+         */
+        payment: z
+          .object({
+            method: z.enum(["CASH", "CARD", "DEBT"]),
+            /** Когда клиент обещал заплатить. Только для долга. */
+            promisedAt: z.string().datetime().optional().or(z.literal("")),
+          })
+          .optional(),
       })
       .parse(req.body ?? {});
     const tenantId = tenantOf(req);
@@ -712,11 +725,44 @@ ordersRouter.post(
 
       await tx.order.update({ where: { id: order.id }, data: { discount } });
       await recalcTotals(tx, order.id);
+
+      // Считаем остаток уже после пересчёта итогов: скидка, которую только
+      // что дали на выдаче, тоже уменьшает то, что клиент должен заплатить.
+      const fresh = await tx.order.findFirst({
+        where: { id: order.id },
+        select: { total: true },
+      });
+      const already = await tx.transaction.groupBy({
+        by: ["direction"],
+        where: { deletedAt: null, orderId: order.id },
+        _sum: { amount: true },
+      });
+      const paid =
+        Number(already.find((a) => a.direction === "IN")?._sum.amount ?? 0) -
+        Number(already.find((a) => a.direction === "OUT")?._sum.amount ?? 0);
+      const due = Math.round((Number(fresh?.total ?? 0) - paid) * 100) / 100;
+
+      if (payment && payment.method !== "DEBT" && due > 0) {
+        await takePayment(tx, tenantId, {
+          orderId: order.id,
+          customerId: order.customerId ?? null,
+          amount: due,
+          how: payment.method,
+          userId: actorUserId(req),
+          comment: `Оплата при выдаче заказа ${order.number}`,
+        });
+      }
+
       await tx.order.update({
         where: { id: order.id },
         data: {
           issuedAt: new Date(),
           issuedById: actorUserId(req),
+          paymentMethod: payment?.method ?? null,
+          // Обещанную дату держим только у долга: у оплаченного заказа она
+          // означала бы обещание неизвестно чего.
+          debtDueAt:
+            payment?.method === "DEBT" && payment.promisedAt ? new Date(payment.promisedAt) : null,
           ...(closed ? { statusId: closed.id } : {}),
         },
       });
@@ -738,7 +784,12 @@ ordersRouter.post(
         entity: "Order",
         entityId: order.id,
         action: "STATUS",
-        diff: { issued: true, discount, ...(reason ? { withoutRepair: reason } : {}) },
+        diff: {
+          issued: true,
+          discount,
+          ...(payment ? { payment: payment.method, due } : {}),
+          ...(reason ? { withoutRepair: reason } : {}),
+        },
         ip: clientIp(req),
       });
     });

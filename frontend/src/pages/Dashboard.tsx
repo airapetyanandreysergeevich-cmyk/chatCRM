@@ -4,9 +4,16 @@ import { IconOrders } from "../components/icons";
 import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { dueLabel, plural, shortName } from "../lib/format";
+import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
+import { money } from "../lib/orders";
 import { STAGES, type Stage } from "../lib/stages";
-import { summaryApi, type BoardCard, type StageColumn, type Summary } from "../lib/workshop";
+import {
+  summaryApi,
+  type BoardCard,
+  type OverdueDebt,
+  type StageColumn,
+  type Summary,
+} from "../lib/workshop";
 
 /**
  * Главный экран мастерской.
@@ -47,6 +54,54 @@ function Clock() {
       </p>
       <p className="mt-1.5 text-[12px] text-ink-muted first-letter:uppercase sm:text-[13px]">{date}</p>
     </div>
+  );
+}
+
+/**
+ * Просроченные долги.
+ *
+ * Показываем заказ, клиента и телефон: действие здесь одно — позвонить, и оно
+ * должно начинаться в этой же строке, а не в карточке клиента через два
+ * перехода. Номер — ссылка, на телефоне она сразу набирает.
+ */
+function OverduePanel({ rows, total }: { rows: OverdueDebt[]; total: number }) {
+  return (
+    <section className="rounded-panel border border-state-off/45 bg-state-off/[0.06] p-4 sm:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-[15px] font-bold uppercase tracking-wide text-state-off">
+          Просрочка задолженности
+        </h2>
+        <p className="text-[19px] font-extrabold leading-none tracking-tight">{money(total)}</p>
+      </div>
+
+      <ul className="mt-3 space-y-1.5">
+        {rows.map((r) => (
+          <li
+            key={r.orderId}
+            className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-field bg-surface/70 px-3 py-2"
+          >
+            <Link to={`/orders/${r.orderId}`} className="font-mono text-[13px] font-bold hover:underline">
+              {r.number}
+            </Link>
+            <span className="min-w-0 flex-1 truncate text-[14px]">
+              {r.customer?.name ?? "Клиент не указан"}
+            </span>
+            {r.customer?.phone && (
+              <a
+                href={`tel:${r.customer.phone}`}
+                className="whitespace-nowrap text-[13px] font-semibold text-brand-ink hover:underline"
+              >
+                {r.customer.phone}
+              </a>
+            )}
+            <span className="whitespace-nowrap text-[12.5px] text-ink-muted">
+              обещали {formatDateShort(r.debtDueAt)}
+            </span>
+            <span className="whitespace-nowrap text-[14px] font-bold text-state-off">{money(r.due)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -197,11 +252,18 @@ export default function Dashboard() {
   }
 
   const byKey = new Map(data.stages.map((s) => [s.key, s]));
+  const overdue = data.overdue ?? [];
   const empty = data.stages.every((s) => s.total === 0);
 
   return (
     <div className="space-y-6">
       {header}
+
+      {/* Просрочка стоит выше доски: это единственное на главной, что не
+          решится само и требует звонка сегодня. Панели нет, пока нет
+          просроченных, — постоянная панель с нулём перестаёт замечаться, а
+          вместе с ней перестаёт замечаться и непустая. */}
+      {overdue.length > 0 && <OverduePanel rows={overdue} total={data.overdueTotal} />}
 
       {empty ? (
         <EmptyState icon={<IconOrders />} title="Заказов в работе нет">

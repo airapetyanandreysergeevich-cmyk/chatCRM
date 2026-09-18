@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { PaymentMethod } from "./debt";
 import type { Service } from "./services";
 
 export type StatusGroup = "NEW" | "IN_PROGRESS" | "WAITING" | "DONE" | "CLOSED" | "CANCELLED";
@@ -120,6 +121,10 @@ export interface Order {
   prepayment?: number | null;
   discount?: number | null;
   total?: number | null;
+  /** Чем расплатились на выдаче. Пусто, пока заказ не выдан. */
+  paymentMethod?: PaymentMethod | null;
+  /** Когда клиент обещал заплатить — только у выданных в долг. */
+  debtDueAt?: string | null;
 }
 
 export interface Reference {
@@ -214,8 +219,15 @@ export const ordersApi = {
   saveWorks: (id: string, works: OrderWork[]) => api.put(`/orders/${id}/works`, { works }),
   saveParts: (id: string, parts: OrderPart[]) => api.put(`/orders/${id}/parts`, { parts }),
   complete: (id: string, body: unknown) => api.post(`/orders/${id}/complete`, body),
-  issue: (id: string, discount = 0, reason?: string) =>
-    api.post(`/orders/${id}/issue`, { discount, ...(reason ? { reason } : {}) }),
+  issue: (
+    id: string,
+    opts: { discount?: number; reason?: string; payment?: { method: PaymentMethod; promisedAt?: string } } = {}
+  ) =>
+    api.post(`/orders/${id}/issue`, {
+      discount: opts.discount ?? 0,
+      ...(opts.reason ? { reason: opts.reason } : {}),
+      ...(opts.payment ? { payment: opts.payment } : {}),
+    }),
   /** Мягкое удаление: заказ уходит из списков, но остаётся в базе и в журнале. */
   remove: (id: string, reason: string) => api.del(`/orders/${id}?reason=${encodeURIComponent(reason)}`),
   upload: (orderId: string, files: FileList | File[], kind: "INTAKE" | "COMPLETION") => {

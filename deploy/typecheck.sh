@@ -48,6 +48,14 @@ docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
   npx tsx test/datasets.ts
 "
 
+# Долг нигде не хранится — он считается. Ошибка в этом счёте выглядит не как
+# сбой, а как неверная сумма, которую приёмщик называет клиенту вслух.
+echo ">>> Расчёт долга"
+docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/debt.ts
+"
+
 echo ">>> Фронтенд"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL

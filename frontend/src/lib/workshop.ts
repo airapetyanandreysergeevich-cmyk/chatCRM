@@ -27,9 +27,21 @@ export interface StageColumn {
   items: BoardCard[];
 }
 
+/** Просроченный долг на главной: заказ, по которому обещанный срок прошёл. */
+export interface OverdueDebt {
+  orderId: string;
+  number: string;
+  due: number;
+  debtDueAt: string | null;
+  customer: { id: string; number: number; name: string; phone: string } | null;
+}
+
 export interface Summary {
   stages: StageColumn[];
   scope: "mine" | "all";
+  /** Пусто, когда просроченных нет, — и тогда панель не показывается вовсе. */
+  overdue: OverdueDebt[];
+  overdueTotal: number;
 }
 
 // ------------------------------------------------------------------- склад

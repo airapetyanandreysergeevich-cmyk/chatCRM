@@ -471,6 +471,11 @@ model Order {
   issuedAt    DateTime?
   issuedById  String?
 
+  /// Чем расплатились на выдаче. Пусто, пока заказ не выдан.
+  paymentMethod PaymentMethod?
+  /// Когда клиент обещал заплатить. Только для выдачи в долг.
+  debtDueAt     DateTime?
+
   totalWork  Decimal @default(0) @db.Decimal(12, 2)
   totalParts Decimal @default(0) @db.Decimal(12, 2)
   discount   Decimal @default(0) @db.Decimal(12, 2) // разовая скидка при выдаче, в рублях
@@ -816,6 +821,18 @@ model CashRegister {
   transactions Transaction[]
 
   @@index([tenantId])
+}
+
+/// Чем расплатились при выдаче.
+///
+/// Долг здесь — такой же способ закрыть выдачу, как наличные: техника уехала,
+/// деньги остались за клиентом. Отдельным признаком «должен» заказ не метим —
+/// долг считается как итог минус проведённые платежи и потому не может
+/// разойтись с кассой.
+enum PaymentMethod {
+  CASH
+  CARD
+  DEBT
 }
 
 enum TxDirection {

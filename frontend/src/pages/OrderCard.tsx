@@ -28,6 +28,8 @@ import {
   type Reference,
 } from "../lib/orders";
 import { matchServices, PINNED_LIMIT, type Service } from "../lib/services";
+import { IssueDialog } from "../components/IssueDialog";
+import { PAYMENT_LABEL } from "../lib/debt";
 
 /** Ссылка на файл подписанная и живёт недолго, поэтому запрашиваем её при показе. */
 function Photo({ orderId, attachmentId, name }: { orderId: string; attachmentId: string; name: string }) {
@@ -308,6 +310,7 @@ export default function OrderCard() {
   const [parts, setParts] = useState<OrderPart[]>([]);
   const [finish, setFinish] = useState({ diagnosis: "", masterComment: "", recommendation: "", warrantyDays: "" });
   const [returnReason, setReturnReason] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
   /** null — блок удаления свёрнут, строка — набранная причина. */
   const [deleteReason, setDeleteReason] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -413,7 +416,7 @@ export default function OrderCard() {
           )}
           {canIssue &&
             (order.completedAt ? (
-              <Button onClick={() => void run(() => ordersApi.issue(order.id), "Заказ выдан клиенту")} disabled={saving}>
+              <Button onClick={() => setIssuing(true)} disabled={saving}>
                 Выдать клиенту
               </Button>
             ) : (
@@ -442,7 +445,7 @@ export default function OrderCard() {
               disabled={saving || returnReason.trim().length < 3}
               onClick={() =>
                 void run(async () => {
-                  await ordersApi.issue(order.id, 0, returnReason.trim());
+                  await ordersApi.issue(order.id, { reason: returnReason.trim() });
                   setReturnReason(null);
                 }, "Техника возвращена клиенту без ремонта")
               }
@@ -451,6 +454,21 @@ export default function OrderCard() {
             </Button>
           </div>
         </Card>
+      )}
+
+      {/* Выдача — единственное место, где заказ превращается в деньги, и
+          спрашивать про них надо здесь, а не оставлять кассу на потом: «потом»
+          не наступает, и выручка расходится с заказами. */}
+      {issuing && (
+        <IssueDialog
+          orderId={order.id}
+          onClose={() => setIssuing(false)}
+          onIssue={async (payment) => {
+            await ordersApi.issue(order.id, { payment });
+            setIssuing(false);
+            await run(async () => {}, "Заказ выдан клиенту");
+          }}
+        />
       )}
 
       {notice && <Banner>{notice}</Banner>}
@@ -656,6 +674,24 @@ export default function OrderCard() {
                       label: "Итого",
                       value: <span className="text-[17px] font-bold">{money(order.total)}</span>,
                     },
+                    // Чем расплатились — видно только у выданных: до выдачи
+                    // строка «Тип оплаты: —» обещает поле, которого ещё нет.
+                    ...(order.paymentMethod
+                      ? [
+                          {
+                            label: "Тип оплаты",
+                            value:
+                              order.paymentMethod === "DEBT" ? (
+                                <span className="font-semibold text-state-waiting">
+                                  {PAYMENT_LABEL.DEBT}
+                                  {order.debtDueAt ? ` до ${formatDate(order.debtDueAt)}` : ""}
+                                </span>
+                              ) : (
+                                PAYMENT_LABEL[order.paymentMethod]
+                              ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               </div>

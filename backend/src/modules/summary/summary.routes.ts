@@ -10,6 +10,7 @@ import {
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { seesCustomerContacts } from "../orders/orders.service";
+import { debts } from "../../lib/debt";
 
 /**
  * Главный экран мастерской — доска заказов по стадиям.
@@ -102,6 +103,27 @@ summaryRouter.get(
       return out;
     });
 
-    res.json({ stages, scope: onlyMine ? "mine" : "all" });
+    // Просроченные долги. Панель показывается только когда они есть: пустая
+    // панель «Просрочка: 0» приучает не смотреть на это место, а потом её не
+    // замечают и с непустой.
+    //
+    // Мастеру её не показываем вовсе — деньги не его забота, а в его списке
+    // и клиентов-то нет.
+    const overdue = contacts
+      ? await withTenant(tenantOf(req), (tx) => debts(tx, { overdueOnly: true, limit: 50 }))
+      : [];
+
+    res.json({
+      stages,
+      scope: onlyMine ? "mine" : "all",
+      overdue: overdue.map((d) => ({
+        orderId: d.orderId,
+        number: d.number,
+        due: d.due,
+        debtDueAt: d.debtDueAt,
+        customer: d.customer,
+      })),
+      overdueTotal: Math.round(overdue.reduce((sum, d) => sum + d.due, 0) * 100) / 100,
+    });
   })
 );
