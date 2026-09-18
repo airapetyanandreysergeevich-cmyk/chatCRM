@@ -23,6 +23,8 @@ export interface ParsedRow {
   values: Record<string, string>;
   /** Существующая запись, с которой строка совпала. */
   existingId?: string;
+  /** Совпавшая запись помечена удалённой — загрузка вернёт её к жизни. */
+  existingDeleted?: boolean;
   action: "create" | "update";
 }
 
@@ -223,20 +225,30 @@ async function markExisting(
   if (rows.length === 0) return;
 
   if (dataset === "customers") {
-    // Телефоны в базе хранятся как введены, поэтому сличаем по цифрам уже в коде.
+    // Берём и удалённые тоже — в этом весь смысл, и это была настоящая ошибка,
+    // из-за которой загрузка падала на первой же строке. Номер уникален в
+    // базе независимо от удаления: карточка, удалённая при пробах, свой номер
+    // не отдаёт. Не увидев её здесь, загрузка шла заводить нового клиента с
+    // тем же номером и упиралась в уникальный индекс.
+    //
+    // По телефону удалённых не ищем: номер человек назвал нам сам и он наш,
+    // а совпадение телефона — не повод воскрешать того, кого владелец убрал
+    // из базы намеренно.
     const existing = await tx.customer.findMany({
-      where: { deletedAt: null },
-      select: { id: true, phone: true, number: true },
+      select: { id: true, phone: true, number: true, deletedAt: true },
     });
-    const byPhone = new Map(existing.filter((c) => c.phone).map((c) => [phoneKey(c.phone), c.id]));
-    const byNumber = new Map(existing.map((c) => [c.number, c.id]));
+    const byNumber = new Map(existing.map((c) => [c.number, c]));
+    const byPhone = new Map(
+      existing.filter((c) => c.phone && !c.deletedAt).map((c) => [phoneKey(c.phone), c])
+    );
     for (const r of rows) {
       const wanted = Number((r.values["Номер"] ?? "").trim());
-      const id =
+      const found =
         (Number.isInteger(wanted) && wanted > 0 ? byNumber.get(wanted) : undefined) ??
         byPhone.get(phoneKey(r.values["Телефон"] ?? ""));
-      if (id) {
-        r.existingId = id;
+      if (found) {
+        r.existingId = found.id;
+        r.existingDeleted = found.deletedAt !== null;
         r.action = "update";
       }
     }

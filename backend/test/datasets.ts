@@ -206,6 +206,40 @@ async function main(): Promise<void> {
     "разные номера с одним телефоном — это два клиента, номер главнее"
   );
 
+  // 8. Удалённая карточка не отдаёт свой номер.
+  //
+  //    Живая ошибка: в мастерской пробовали завести клиента и удалили его.
+  //    Номер остался занятым — уникальный индекс про удаление не знает, — а
+  //    сличение смотрело только на живые карточки. Загрузка шла заводить
+  //    нового клиента с тем же номером и падала на первой же строке файла.
+  const deletedCard = {
+    findMany: async () => [
+      { id: "c1", phone: "+7 900 111-22-33", number: 1, deletedAt: new Date() },
+      { id: "c2", phone: "+7 900 444-55-66", number: 2, deletedAt: null },
+    ],
+  };
+  const withDeleted = { customer: deletedCard, order: nothing, stockItem: nothing, service: nothing } as never;
+
+  const resurrect = await parseRows(withDeleted, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["1", "Тот же человек", "+7 900 999-88-77"],
+  ]));
+  check(
+    resurrect.rows[0]?.existingId === "c1",
+    "удалённая карточка находится по номеру, а не заводится заново"
+  );
+  check(resurrect.rows[0]?.existingDeleted === true, "и помечена как подлежащая возврату к жизни");
+  check(resurrect.preview.toUpdate === 1 && resurrect.preview.toCreate === 0, "в предпросмотре это обновление");
+
+  const byPhoneDeleted = await parseRows(withDeleted, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["", "Однофамилец", "+7 900 111-22-33"],
+  ]));
+  check(
+    byPhoneDeleted.rows[0]?.existingId === undefined,
+    "по одному лишь телефону удалённый клиент не воскресает — это не повод"
+  );
+
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;
 }

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { nextCustomerNumber, reserveCustomerNumber } from "../../lib/customerNumber";
+import { createWithNumber } from "../../lib/customerNumber";
 import { parseNumber, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
 
@@ -9,15 +9,39 @@ import type { DatasetKey } from "./dataset";
  * Правила, общие для всех таблиц:
  *  — пустая ячейка ничего не затирает. Файл почти всегда неполный, и
  *    «обновить» не должно означать «стереть то, чего в файле не было»;
- *  — строка, упавшая на записи, не отменяет остальные: возвращаем список
- *    неудач, а не одну общую ошибку;
+ *  — строка, упавшая на записи, не отменяет остальные;
  *  — ничего не удаляем. Загрузка добавляет и обновляет, и только.
+ *
+ * Второе правило держится на точке возврата вокруг каждой строки, и без неё
+ * оно было бы обещанием, а не правилом. Вся загрузка идёт одной транзакцией,
+ * а в PostgreSQL первая же упавшая команда помечает транзакцию сбойной:
+ * дальше любая команда отвечает «current transaction is aborted». Поймать
+ * ошибку в try и пойти дальше в такой транзакции нельзя — на 663 строках это
+ * выглядело как 663 ошибки, из которых настоящей была одна, а остальные 662
+ * были её эхом. Точка возврата откатывает только свою строку.
  */
 
 export interface ApplyResult {
   created: number;
   updated: number;
   failed: RowIssue[];
+}
+
+/**
+ * Ошибка базы человеческим языком.
+ *
+ * Prisma на нарушении уникальности говорит «Unique constraint failed on the
+ * (not available)» — по этой строке владелец мастерской не поймёт ничего и
+ * пришлёт снимок экрана. Разбираем хотя бы то, что разобрать можно.
+ */
+function humanMessage(err: unknown): string {
+  const e = err as { code?: string; meta?: { target?: unknown }; message?: string };
+  if (e?.code === "P2002") {
+    const target = Array.isArray(e.meta?.target) ? e.meta?.target.join(", ") : String(e.meta?.target ?? "");
+    return target ? `такая запись уже есть (${target})` : "такая запись уже есть";
+  }
+  if (e?.code === "P2003") return "ссылка на запись, которой нет";
+  return e?.message ?? String(err);
 }
 
 /** Значение из файла или undefined — тогда поле не трогаем. */
@@ -43,16 +67,20 @@ export async function applyRows(
   const result: ApplyResult = { created: 0, updated: 0, failed: [] };
 
   for (const row of rows) {
+    await tx.$executeRawUnsafe("SAVEPOINT import_row");
     try {
       if (dataset === "customers") await applyCustomer(tx, tenantId, row, userId);
       else if (dataset === "stock") await applyStock(tx, tenantId, row);
       else if (dataset === "services") await applyService(tx, tenantId, row);
       else await applyOrder(tx, tenantId, row, userId);
 
+      await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
       if (row.action === "update") result.updated += 1;
       else result.created += 1;
     } catch (err) {
-      result.failed.push({ row: row.row, message: (err as Error).message });
+      await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT import_row");
+      await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
+      result.failed.push({ row: row.row, message: humanMessage(err) });
     }
   }
 
@@ -85,16 +113,30 @@ async function applyCustomer(
   };
 
   // Номер из файла сохраняем как есть — по нему следующая загрузка узнает
-  // карточку. Своего номера в файле нет — выдаём очередной.
+  // карточку. Своего номера в файле нет — выдаём очередной. Счётчик трогаем
+  // только когда карточку заводим: на обновлении номер уже есть, и жечь на
+  // него очередное значение незачем.
   const wanted = Number((v["Номер"] ?? "").trim());
-  const number =
-    Number.isInteger(wanted) && wanted > 0
-      ? await reserveCustomerNumber(tx, tenantId, wanted)
-      : await nextCustomerNumber(tx, tenantId);
 
   const customerId = row.existingId
-    ? (await tx.customer.update({ where: { id: row.existingId }, data })).id
-    : (await tx.customer.create({ data: { ...data, tenantId, number, createdById: userId } })).id;
+    ? (
+        await tx.customer.update({
+          where: { id: row.existingId },
+          // Карточку, удалённую раньше, загрузка возвращает к жизни: файл с
+          // этим клиентом владелец принёс сам, и оставить её удалённой значило
+          // бы принять строку и не показать её нигде, а заказы привязать к
+          // невидимой карточке.
+          data: row.existingDeleted ? { ...data, deletedAt: null } : data,
+        })
+      ).id
+    : (
+        await createWithNumber(
+          tx,
+          tenantId,
+          Number.isInteger(wanted) && wanted > 0 ? wanted : null,
+          (number) => tx.customer.create({ data: { ...data, tenantId, number, createdById: userId } })
+        )
+      ).id;
 
   await applyDevices(tx, tenantId, customerId, v["Техника"] ?? "");
 }
@@ -370,21 +412,18 @@ async function findOrCreateCustomer(
     : null;
   if (found) return found;
 
-  const number =
-    Number.isInteger(wanted) && wanted > 0
-      ? await reserveCustomerNumber(tx, tenantId, wanted)
-      : await nextCustomerNumber(tx, tenantId);
-
-  return tx.customer.create({
-    data: {
-      tenantId,
-      number,
-      name: val(v["Клиент"]) ?? "Без имени",
-      phone,
-      createdById: userId,
-    },
-    select: { id: true },
-  });
+  return createWithNumber(tx, tenantId, Number.isInteger(wanted) && wanted > 0 ? wanted : null, (number) =>
+    tx.customer.create({
+      data: {
+        tenantId,
+        number,
+        name: val(v["Клиент"]) ?? "Без имени",
+        phone,
+        createdById: userId,
+      },
+      select: { id: true },
+    })
+  );
 }
 
 async function findOrCreateDevice(
