@@ -15,7 +15,7 @@ import { APK_URL } from "../lib/androidApp";
  * одинаковы, вредно:
  *
  * — **Android** получает файл, который ставится как обычное приложение.
- * — **iPhone** не получает ничего: поставить что-либо мимо App Store там
+ * — **iOS** не получает ничего: поставить что-либо мимо App Store там
  *   нельзя вовсе. Единственный честный ответ — «добавьте на экран Домой»; это
  *   не обходной путь, а штатный для iOS способ, после которого сайт
  *   открывается своим окном без адресной строки. Поэтому у плитки не
@@ -39,8 +39,6 @@ const STEPS = [
   "Пролистайте список и выберите «На экран „Домой“».",
   "Нажмите «Добавить». Значок появится среди приложений.",
 ];
-
-const mb = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} МБ`;
 
 function Tile({
   icon,
@@ -76,20 +74,15 @@ function Tile({
 
 export function AppLinks() {
   const [ios, setIos] = useState(false);
-  /** null — ещё не спрашивали или файла нет; число — размер в байтах. */
-  const [setupSize, setSetupSize] = useState<number | null>(null);
+  const [hasSetup, setHasSetup] = useState(false);
 
-  // Спрашиваем сервер, лежит ли установщик, и заодно узнаём его размер.
-  // Кнопка, ведущая в «не найдено», хуже отсутствующей кнопки: первая обещает
-  // и обманывает, вторая просто молчит. А размер стоит показать заранее —
-  // четыреста мегабайт на телефонном интернете это не «сейчас скачаю».
+  // Спрашиваем сервер, лежит ли установщик. Кнопка, ведущая в «не найдено»,
+  // хуже отсутствующей: первая обещает и обманывает, вторая просто молчит.
   useEffect(() => {
     let alive = true;
     fetch(SETUP_URL, { method: "HEAD" })
       .then((res) => {
-        if (!alive || !res.ok) return;
-        const length = Number(res.headers.get("content-length") ?? 0);
-        setSetupSize(length > 0 ? length : 0);
+        if (alive && res.ok) setHasSetup(true);
       })
       .catch(() => undefined);
     return () => {
@@ -113,17 +106,17 @@ export function AppLinks() {
             as="button"
             onClick={() => setIos(true)}
             icon={<IconPhoneShare />}
-            title="iPhone"
+            title="iOS"
             text="Как установить"
           />
-          {setupSize !== null && (
+          {hasSetup && (
             <Tile
               as="a"
               href={SETUP_URL}
               download
               icon={<IconDesktopDownload />}
               title="Windows"
-              text={setupSize ? `Скачать, ${mb(setupSize)}` : "Скачать программу"}
+              text="Скачать приложение"
             />
           )}
         </div>
