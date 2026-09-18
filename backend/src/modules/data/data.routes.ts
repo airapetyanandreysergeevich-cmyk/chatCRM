@@ -281,6 +281,7 @@ dataRouter.post(
           file: item.fileName,
           created: result.created,
           updated: result.updated,
+          restored: result.restored,
           failed: result.failed.length,
         },
         ip: clientIp(req),

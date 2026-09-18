@@ -249,7 +249,10 @@ async function main(): Promise<void> {
     "удалённая карточка находится по номеру, а не заводится заново"
   );
   check(resurrect.rows[0]?.existingDeleted === true, "и помечена как подлежащая возврату к жизни");
-  check(resurrect.preview.toUpdate === 1 && resurrect.preview.toCreate === 0, "в предпросмотре это обновление");
+  check(
+    resurrect.preview.toRestore === 1 && resurrect.preview.toUpdate === 0 && resurrect.preview.toCreate === 0,
+    "в предпросмотре это возврат карточки, а не обновление и не заведение новой"
+  );
 
   const byPhoneDeleted = await parseRows(withDeleted, "customers", table([
     ["Номер", "Имя", "Телефон"],
@@ -281,6 +284,23 @@ async function main(): Promise<void> {
   ]));
   check(backFromDead.rows[0]?.existingId === "o1", "удалённый заказ находится по номеру");
   check(backFromDead.rows[0]?.existingDeleted === true, "и помечен как подлежащий возврату — иначе загрузка отчитается и ничего не покажет");
+  check(
+    backFromDead.preview.toRestore === 1 && backFromDead.preview.toUpdate === 0,
+    "в предпросмотре это возврат, а не обновление: «обновится 4» владелец прочитал как «заказы на месте»"
+  );
+
+  const plainUpdate = await parseRows(
+    { ...(withDeletedOrder as object), order: { findMany: async () => [{ id: "o2", number: "Р-2026-00002", deletedAt: null }] } } as never,
+    "orders",
+    table([
+      ["Номер", "Номер клиента", "Неисправность"],
+      ["Р-2026-00002", "596", "не включается"],
+    ])
+  );
+  check(
+    plainUpdate.preview.toUpdate === 1 && plainUpdate.preview.toRestore === 0,
+    "живой заказ по-прежнему считается обновлением"
+  );
 
   // 9. Заказ опознаёт клиента номером, и имени для этого не нужно.
   //

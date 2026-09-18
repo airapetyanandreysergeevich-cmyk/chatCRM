@@ -48,6 +48,15 @@ export interface ImportPreview {
   totalRows: number;
   toCreate: number;
   toUpdate: number;
+  /**
+   * Сколько записей вернётся из удалённых.
+   *
+   * Отдельно от обновления, потому что это разные вещи для человека. Владелец
+   * удалил заказы и загрузил файл обратно: «обновится 4» он прочитал как
+   * «четыре заказа уже есть и будут поправлены», а на деле их предстояло
+   * вернуть. Число, честное по смыслу кода, оказалось неправдой по существу.
+   */
+  toRestore: number;
   issues: RowIssue[];
   /**
    * Сколько строк не прошло всего.
@@ -131,6 +140,7 @@ export async function parseRows(
         totalRows: body.length,
         toCreate: 0,
         toUpdate: 0,
+        toRestore: 0,
         issues,
         issuesTotal: issues.length,
         ignoredColumns,
@@ -197,7 +207,8 @@ export async function parseRows(
       fileName: "",
       totalRows: body.length,
       toCreate: rows.filter((r) => r.action === "create").length,
-      toUpdate: rows.filter((r) => r.action === "update").length,
+      toUpdate: rows.filter((r) => r.action === "update" && !r.existingDeleted).length,
+      toRestore: rows.filter((r) => r.existingDeleted).length,
       issues: issues.slice(0, 200),
       issuesTotal: issues.length,
       ignoredColumns,

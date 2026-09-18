@@ -37,6 +37,8 @@ export interface ImportPreview {
   totalRows: number;
   toCreate: number;
   toUpdate: number;
+  /** Сколько вернётся из удалённых — это не обновление, и называть так нечестно. */
+  toRestore: number;
   issues: RowIssue[];
   /** Сколько строк не прошло всего — список замечаний обрезан. */
   issuesTotal: number;
@@ -50,6 +52,7 @@ export interface ImportPreview {
 export interface ImportResult {
   created: number;
   updated: number;
+  restored: number;
   failed: RowIssue[];
   dataset: DatasetKey;
   fileName: string;

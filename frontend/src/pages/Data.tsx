@@ -98,7 +98,8 @@ function PreviewBlock({
   busy: boolean;
 }) {
   const blocked = preview.missingColumns.length > 0;
-  const nothing = !blocked && preview.toCreate + preview.toUpdate === 0;
+  const willDo = preview.toCreate + preview.toUpdate + preview.toRestore;
+  const nothing = !blocked && willDo === 0;
 
   return (
     <div className="mt-5 border-t border-line pt-4">
@@ -120,6 +121,11 @@ function PreviewBlock({
           <span>
             Обновится <span className="font-bold">{preview.toUpdate}</span>
           </span>
+          {preview.toRestore > 0 && (
+            <span>
+              Вернётся из удалённых <span className="font-bold text-brand">{preview.toRestore}</span>
+            </span>
+          )}
           {preview.issuesTotal > 0 && (
             <span className="text-state-off">
               Строк с замечаниями <span className="font-bold">{preview.issuesTotal}</span>
@@ -204,7 +210,7 @@ function PreviewBlock({
       <div className="mt-4 flex flex-wrap gap-2">
         {!blocked && !nothing && (
           <Button disabled={busy} onClick={onApply}>
-            {busy ? "Загружаем…" : `Загрузить ${preview.toCreate + preview.toUpdate} строк`}
+            {busy ? "Загружаем…" : `Загрузить ${willDo} строк`}
           </Button>
         )}
         <Button variant="ghost" disabled={busy} onClick={onCancel}>
@@ -349,6 +355,7 @@ function ImportCard({ reference }: { reference: DataReference }) {
         <div className="mt-4">
           <Banner>
             {result.fileName}: добавлено {result.created}, обновлено {result.updated}
+            {result.restored > 0 && `, вернулось из удалённых ${result.restored}`}
             {result.failed.length > 0 && `, не удалось ${result.failed.length}`}
           </Banner>
           {result.failed.length > 0 && (

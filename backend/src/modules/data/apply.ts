@@ -25,6 +25,8 @@ import type { DatasetKey } from "./dataset";
 export interface ApplyResult {
   created: number;
   updated: number;
+  /** Вернулось из удалённых. Считаем отдельно: это не обновление, а возврат. */
+  restored: number;
   failed: RowIssue[];
 }
 
@@ -120,7 +122,7 @@ export async function applyRows(
   rows: ParsedRow[],
   userId: string | null
 ): Promise<ApplyResult> {
-  const result: ApplyResult = { created: 0, updated: 0, failed: [] };
+  const result: ApplyResult = { created: 0, updated: 0, restored: 0, failed: [] };
   const lookups = await readLookups(tx);
 
   for (const row of rows) {
@@ -139,8 +141,9 @@ export async function applyRows(
 
       await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
       for (const remember of staged) remember();
-      if (row.action === "update") result.updated += 1;
-      else result.created += 1;
+      if (row.action !== "update") result.created += 1;
+      else if (row.existingDeleted) result.restored += 1;
+      else result.updated += 1;
     } catch (err) {
       await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT import_row");
       await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
