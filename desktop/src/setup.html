@@ -152,6 +152,12 @@
           <p class="hint">Адрес показывает Основа в своих настройках.</p>
         </div>
 
+        <!-- У облака адрес один и тот же. Спрашивать его значит предлагать
+             ошибиться в букве там, где ошибиться нечем. -->
+        <div id="cloudFields" class="hidden">
+          <p class="hint">Подключимся к <b id="cloudUrl">finecrm.ru</b> — вход тот же, что в браузере.</p>
+        </div>
+
         <div class="row">
           <button class="main" id="go">Продолжить</button>
         </div>
@@ -194,8 +200,8 @@
           card.classList.add("on");
           mode = card.dataset.mode;
           $("mainFields").classList.toggle("hidden", mode !== "main");
-          $("clientFields").classList.toggle("hidden", mode === "main");
-          $("addr").placeholder = mode === "online" ? "https://ваш-адрес.ру" : "http://192.168.1.40:7373";
+          $("clientFields").classList.toggle("hidden", mode !== "client");
+          $("cloudFields").classList.toggle("hidden", mode !== "online");
         };
       }
 
@@ -227,7 +233,7 @@
                   password: $("password").value,
                 },
               }
-            : { mode, connectTo: $("addr").value.trim() };
+            : { mode, connectTo: mode === "online" ? "" : $("addr").value.trim() };
 
         if (mode === "main") {
           const o = choice.owner;
@@ -240,7 +246,9 @@
           // упадёт уже после минуты создания базы.
           if (o.password.length < 8) return fail("Пароль должен быть не короче 8 знаков");
         }
-        if (mode !== "main" && !choice.connectTo) return fail("Укажите адрес");
+        // Адрес спрашиваем только у клиента локальной сети: у облака он свой
+        // и подставляется программой.
+        if (mode === "client" && !choice.connectTo) return fail("Укажите адрес Основы");
 
         show("working");
         const res = await window.setup.apply(choice);
@@ -275,6 +283,7 @@
 
       window.setup.state().then((s) => {
         if (!$("dir").value) $("dir").value = s.suggestedDir;
+        if (s.cloudUrl) $("cloudUrl").textContent = s.cloudUrl.replace(/^https?:\/\//, "");
         if (s.error) {
           logDir = s.error.logDir || "";
           $("failTitle").textContent = s.error.title;
@@ -282,7 +291,11 @@
           // Журнал есть только у Основы: у клиента ничего своего не запускается,
           // и открывать ему нечего.
           $("logs").classList.toggle("hidden", !logDir);
-          $("another").classList.toggle("hidden", s.error.kind !== "client");
+          // У клиента адрес свой и его можно поправить; у облака менять
+          // нечего — там путь один: выбрать другой режим.
+          const canChange = s.error.kind === "client" || s.error.kind === "online";
+          $("another").textContent = s.error.kind === "online" ? "Выбрать другой режим" : "Изменить адрес";
+          $("another").classList.toggle("hidden", !canChange);
           show("fail");
         } else if (location.hash === "#working") {
           show("working");

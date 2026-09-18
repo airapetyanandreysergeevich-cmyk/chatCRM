@@ -19,6 +19,7 @@ import { summaryRouter } from "./modules/summary/summary.routes";
 import { notificationsRouter, pushRouter } from "./modules/notifications/notifications.routes";
 import { publicRouter } from "./modules/public/public.routes";
 import { referenceRouter } from "./modules/reference/reference.routes";
+import { feedbackRouter } from "./modules/feedback/feedback.routes";
 import { filesRouter } from "./modules/files/files.routes";
 import { hintsRouter } from "./modules/hints/hints.routes";
 import { servicesRouter } from "./modules/services/services.routes";
@@ -64,6 +65,7 @@ app.use("/api/reference", referenceRouter);
 // Только в локальной версии: в облаке файлы отдаёт S3, и открытого
 // маршрута к ним быть не должно.
 if (isLocalStorage) app.use("/api/files", filesRouter);
+app.use("/api/feedback", feedbackRouter);
 app.use("/api/hints", hintsRouter);
 app.use("/api/services", servicesRouter);
 app.use("/api/settings", settingsRouter);

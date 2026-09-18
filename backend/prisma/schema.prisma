@@ -95,6 +95,7 @@ model Tenant {
   notifications       Notification[]
   pushSubscriptions   PushSubscription[]
   impersonations      Impersonation[]
+  feedback            Feedback[]
   sessions            Session[]
   application         TenantApplication[]
 }
@@ -281,8 +282,43 @@ model User {
   auditLogs         AuditLog[]
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
+  feedback          Feedback[]
 
   @@index([tenantId])
+}
+
+/// О чём обращение. Не «категория» ради порядка, а разные вещи по сути:
+/// баг чинят, пожелание обдумывают, замечание читают.
+enum FeedbackKind {
+  REMARK /// замечание
+  WISH /// пожелание
+  BUG /// баг
+}
+
+/// Обращение владельца мастерской к владельцу платформы.
+///
+/// Единственная таблица мастерской, которую читает не мастерская: владелец
+/// платформы видит обращения всех сразу. Изоляция при этом обычная — та же,
+/// что у заказов: мастерская пишет только своё и видит только своё, а
+/// платформа читает всё через withPlatform. Заводить ради этого таблицу вне
+/// изоляции было бы ошибкой: у обращения есть автор и мастерская, и они
+/// обязаны жить по общим правилам.
+model Feedback {
+  id       String       @id @default(uuid())
+  tenantId String
+  authorId String?
+  kind     FeedbackKind
+  text     String
+
+  /// Когда владелец платформы пометил обращение разобранным. Пусто — новое.
+  handledAt DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  author User?  @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([handledAt, createdAt])
 }
 
 enum CustomerType {

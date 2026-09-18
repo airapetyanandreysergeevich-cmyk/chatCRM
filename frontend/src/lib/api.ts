@@ -127,6 +127,11 @@ export const api = {
 
     return { blob: await res.blob(), fileName: fileNameFrom(res.headers) };
   },
-  del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
+  /**
+   * Удаление. Тело необязательно и нужно там, где удаление требует
+   * подтверждения — например, ввести название удаляемой мастерской.
+   */
+  del: <T,>(path: string, body?: unknown) =>
+    request<T>(path, { method: "DELETE", body: body === undefined ? undefined : JSON.stringify(body) }),
   refresh: refreshOnce,
 };

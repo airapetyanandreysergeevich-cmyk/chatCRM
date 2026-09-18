@@ -247,19 +247,37 @@ function lanAddress(port) {
   return `http://127.0.0.1:${port}`;
 }
 
-/** Запуск в роли клиента: ничего не поднимаем, просто открываем адрес. */
-async function startClient(url) {
-  const address = String(url).replace(/\/+$/, "");
+/**
+ * Запуск без своей базы: ничего не поднимаем, просто открываем адрес.
+ *
+ * Два случая, и различать их надо не ради слов. У клиента локальной сети
+ * молчание почти всегда означает брандмауэр или выключенную раздачу, и адрес
+ * человек вводил сам — значит, его можно изменить. У облака адрес наш, менять
+ * его нечего, а молчание означает интернет. Один и тот же совет в обоих
+ * случаях был бы в одном из них заведомо неверным.
+ */
+async function startClient(url, online = false) {
+  const address = online ? config.CLOUD_URL : String(url).replace(/\/+$/, "");
 
   // Показываем ожидание сразу: пустое окно на время проверки — ровно то, от
   // чего мы здесь и уходим.
   await showSetup("working");
-  state.step = "Ищу Основу в сети";
+  state.step = online ? "Соединяюсь с облаком" : "Ищу Основу в сети";
   if (win && !win.isDestroyed()) win.webContents.send("setup:progress", state.step);
 
   const answer = await network.reach(address);
   if (!answer.ok) {
-    showError("Основа не отвечает", answer.why, null, { kind: "client", address });
+    if (online) {
+      showError(
+        "Облако не отвечает",
+        `Не удалось соединиться с ${config.CLOUD_URL}. Проверьте интернет на этом компьютере: ` +
+          "адрес облака программа знает сама, ошибиться в нём нельзя.",
+        null,
+        { kind: "online", address }
+      );
+    } else {
+      showError("Основа не отвечает", answer.why, null, { kind: "client", address });
+    }
     return;
   }
 
@@ -321,7 +339,7 @@ async function boot() {
       await showSetup("working");
       await startMain(where.dataDir);
     } else {
-      await startClient(where.connectTo);
+      await startClient(where.connectTo, where.mode === config.MODE.ONLINE);
     }
   } catch (err) {
     const logs = where.dataDir ? ensureLayout(where.dataDir).logs : userData();
@@ -407,6 +425,7 @@ ipcMain.handle("setup:state", () => ({
   step: state.step,
   error: state.error,
   modes: config.MODE,
+  cloudUrl: config.CLOUD_URL,
   suggestedDir: location.suggestDataDir({
     home: app.getPath("home"),
     documents: app.getPath("documents"),
@@ -459,11 +478,17 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
     } else {
       // Клиент базу не трогает вовсе. Проверяем, что Основа отвечает, — иначе
       // человек получит пустое окно и не поймёт, кто виноват.
-      const url = String(choice.connectTo || "").replace(/\/+$/, "");
+      // У облака адрес один и тот же, и берём мы его у себя, а не из окна:
+      // пришедшее оттуда значение здесь нечему проверять, а ошибиться в
+      // букве — есть чему.
+      const url =
+        choice.mode === config.MODE.ONLINE
+          ? config.CLOUD_URL
+          : String(choice.connectTo || "").replace(/\/+$/, "");
       const answer = await network.reach(url);
       if (!answer.ok) return { ok: false, error: answer.why };
       location.writeLocation(userData(), { mode: choice.mode, connectTo: url });
-      await startClient(url);
+      await startClient(url, choice.mode === config.MODE.ONLINE);
     }
     return { ok: true };
   } catch (err) {

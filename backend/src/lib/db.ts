@@ -9,7 +9,7 @@ const TENANT_DELEGATES = new Set([
   "purchaseRequest", "purchaseRequestItem",
   "warehouse", "stockItem", "stockBalance", "stockMovement",
   "cashRegister", "transactionCategory", "transaction",
-  "auditLog", "notification", "pushSubscription",
+  "auditLog", "notification", "pushSubscription", "feedback",
 ]);
 
 const WHERE_OPS = new Set([

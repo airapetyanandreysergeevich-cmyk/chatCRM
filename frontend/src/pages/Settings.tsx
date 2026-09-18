@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconPalette, IconServices } from "../components/icons";
+import { IconBell, IconDatabase, IconFeedback, IconPalette, IconServices } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 
@@ -10,6 +10,12 @@ interface Section {
   icon: React.ReactNode;
   /** Пусто — доступно всем. */
   need?: string;
+  /**
+   * Только владельцу мастерской. Это не право, которое можно выдать: адресат
+   * обращения один, и разбирать он должен то, за чем кто-то стоит. Сотрудник
+   * со своим замечанием идёт к владельцу.
+   */
+  ownerOnly?: boolean;
 }
 
 const SECTIONS: Section[] = [
@@ -39,14 +45,22 @@ const SECTIONS: Section[] = [
     icon: <IconDatabase />,
     need: "settings.manage",
   },
+  {
+    to: "/settings/feedback",
+    title: "Обратная связь",
+    text: "Написать разработчику: что мешает, чего не хватает, что сломалось. Ответа в программе не будет.",
+    icon: <IconFeedback />,
+    ownerOnly: true,
+  },
 ];
 
 export default function Settings() {
-  const { can } = useAuth();
+  const { can, me } = useAuth();
+  const isOwner = me?.kind === "tenant" && me.user.isOwner;
   // Раздел виден всем, но внутри у каждого своё: мастеру — только
   // оповещения, владельцу ещё и базы. Показывать недоступное с замочком
   // бессмысленно: сотрудник всё равно ничего с этим не сделает.
-  const visible = SECTIONS.filter((s) => !s.need || can(s.need));
+  const visible = SECTIONS.filter((s) => (!s.need || can(s.need)) && (!s.ownerOnly || isOwner));
 
   return (
     <div className="space-y-5">

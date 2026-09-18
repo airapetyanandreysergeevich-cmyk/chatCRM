@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { AppLinks } from "../components/AppLinks";
 import { BrandLogo, BrandRow } from "../components/Brand";
 import { Banner, Button, Field, Input, SectionLabel } from "../components/ui";
 import { ApiError } from "../lib/api";
@@ -103,6 +104,8 @@ export default function Login() {
           <p className="mt-2.5 text-[12.5px] text-ink-dim">
             Забыли пароль — его меняет владелец мастерской в разделе «Сотрудники».
           </p>
+
+          <AppLinks />
         </form>
       </div>
     </div>

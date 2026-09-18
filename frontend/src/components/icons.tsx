@@ -130,6 +130,12 @@ export const IconBell = (p: IconProps) => (
   </Icon>
 );
 
+export const IconFeedback = (p: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.6-4.4A8.3 8.3 0 0 1 3.6 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 8.4 8.4Z" />
+  </svg>
+);
+
 export const IconSettings = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="3" />

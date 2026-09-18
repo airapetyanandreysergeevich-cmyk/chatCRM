@@ -24,6 +24,19 @@ const MODE = {
   ONLINE: "online",
 };
 
+/**
+ * Адрес облака. Один на всех и не спрашивается.
+ *
+ * Раньше при выборе «Online» программа просила ввести адрес — ровно как у
+ * клиента локальной сети. Но адрес у облака один, он никогда не меняется, и
+ * человек не может знать его лучше нас: спрашивать значит предлагать ошибиться
+ * в букве и получить непонятный отказ там, где ошибиться нечем.
+ *
+ * Строкой здесь, а не в настройках: это не выбор мастерской, а свойство
+ * продукта. Понадобится другой адрес — меняется тут, в одном месте.
+ */
+const CLOUD_URL = "https://www.finecrm.ru";
+
 const DEFAULTS = {
   version: 1,
   mode: null, // null значит «первый запуск, ещё не выбрали»
@@ -139,4 +152,4 @@ function databaseUrl(config, role) {
   return `postgresql://${user}:${encodeURIComponent(password)}@127.0.0.1:${port}/${name}?schema=public`;
 }
 
-module.exports = { MODE, DEFAULTS, read, write, ensureSecrets, databaseUrl, secret };
+module.exports = { MODE, CLOUD_URL, DEFAULTS, read, write, ensureSecrets, databaseUrl, secret };

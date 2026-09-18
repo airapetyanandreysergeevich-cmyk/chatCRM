@@ -30,6 +30,15 @@ docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
   npx tsc -p tsconfig.json --noEmit
 " && echo "    типы сходятся"
 
+# Изоляция арендаторов держится на двух списках таблиц плюс порядке очистки
+# при удалении мастерской. Забытая в одном из них таблица не даёт ни ошибки,
+# ни предупреждения — просто изоляция становится наполовину. Сверяем списки.
+echo ">>> Таблицы мастерской"
+docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/tenant-tables.ts
+"
+
 echo ">>> Фронтенд"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL

@@ -28,7 +28,7 @@ DECLARE
     'PurchaseRequest','PurchaseRequestItem',
     'Warehouse','StockItem','StockBalance','StockMovement',
     'CashRegister','TransactionCategory','Transaction',
-    'AuditLog','Notification','PushSubscription'
+    'AuditLog','Notification','PushSubscription','Feedback'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

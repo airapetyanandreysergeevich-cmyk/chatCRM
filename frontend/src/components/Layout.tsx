@@ -7,6 +7,7 @@ import { InstallAppBanner } from "./InstallApp";
 import {
   IconAdmins,
   IconApplications,
+  IconFeedback,
   IconBell,
   IconCash,
   IconChevronLeft,
@@ -43,6 +44,7 @@ function Badge({ count }: { count: number }) {
 export default function Layout() {
   const { me, can, logout, applyToken } = useAuth();
   const [pending, setPending] = useState(0);
+  const [feedback, setFeedback] = useState(0);
   const [unread, setUnread] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
@@ -80,8 +82,12 @@ export default function Layout() {
     let alive = true;
     const load = () =>
       api
-        .get<{ pendingApplications: number }>("/platform/summary")
-        .then((s) => alive && setPending(s.pendingApplications))
+        .get<{ pendingApplications: number; newFeedback: number }>("/platform/summary")
+        .then((s) => {
+          if (!alive) return;
+          setPending(s.pendingApplications);
+          setFeedback(s.newFeedback);
+        })
         .catch(() => undefined);
     void load();
     // Уведомление пока живёт внутри системы, поэтому счётчик обновляем сами.
@@ -142,6 +148,7 @@ export default function Layout() {
   const platformNav: NavItem[] = [
     { to: "/platform/tenants", label: "Мастерские", icon: <IconWorkshops /> },
     { to: "/platform/applications", label: "Заявки", icon: <IconApplications />, badge: pending },
+    { to: "/platform/feedback", label: "Замечания", icon: <IconFeedback />, badge: feedback },
     { to: "/platform/admins", label: "Администраторы", icon: <IconAdmins /> },
     { to: "/platform/audit", label: "Журнал", icon: <IconJournal /> },
     { to: "/settings/notifications", label: "Оповещения", icon: <IconBell /> },

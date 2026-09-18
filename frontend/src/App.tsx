@@ -6,6 +6,8 @@ import { useAuth } from "./lib/auth";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
+import FeedbackPage from "./pages/Feedback";
+import PlatformFeedback from "./pages/platform/Feedback";
 import Clients from "./pages/Clients";
 import Dashboard from "./pages/Dashboard";
 import DataPage from "./pages/Data";
@@ -68,11 +70,13 @@ export default function App() {
           <Route path="/settings/data" element={<DataPage />} />
           <Route path="/settings/services" element={<ServicesPage />} />
           <Route path="/settings/interface" element={<InterfacePage />} />
+          <Route path="/settings/feedback" element={<FeedbackPage />} />
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}
           <Route path="/notifications" element={<Navigate to="/settings/notifications" replace />} />
           <Route path="/platform/tenants" element={<Tenants />} />
           <Route path="/platform/applications" element={<Applications />} />
+          <Route path="/platform/feedback" element={<PlatformFeedback />} />
           <Route path="/platform/admins" element={<Soon title="Администраторы платформы" />} />
           <Route path="/platform/audit" element={<Soon title="Журнал платформы" />} />
           <Route path="*" element={<Soon title="Страница не найдена" />} />

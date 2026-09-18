@@ -10,6 +10,7 @@ import { uniqueSlug } from "../../lib/slug";
 import { authenticate } from "../../middleware/auth";
 import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
+import { removeTenantForever } from "../../services/tenant-remove";
 
 export const platformRouter = Router();
 
@@ -61,10 +62,9 @@ platformRouter.use(authenticate, requirePlatform);
 platformRouter.get(
   "/tenants",
   ah(async (_req, res) => {
-    const tenants = await prisma.tenant.findMany({
-      where: { deletedAt: null },
-      orderBy: { createdAt: "desc" },
-    });
+    // Архивные отдаём вместе с остальными: прятать их от собственника
+    // значит прятать и кнопку «восстановить».
+    const tenants = await prisma.tenant.findMany({ orderBy: { createdAt: "desc" } });
     // Счётчики читаются в режиме платформы — единственное место, где это оправдано.
     const stats = await withPlatform(async (tx) => {
       const users = await tx.user.groupBy({ by: ["tenantId"], _count: { _all: true }, where: { deletedAt: null } });
@@ -87,6 +87,7 @@ platformRouter.get(
         contactPhone: t.contactPhone,
         contactEmail: t.contactEmail,
         createdAt: t.createdAt,
+        archivedAt: t.deletedAt,
         userCount: userBy.get(t.id) ?? 0,
         orderCount: orderBy.get(t.id) ?? 0,
       }))
@@ -146,7 +147,7 @@ platformRouter.get(
   "/tenants/:id",
   ah(async (req, res) => {
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
-    if (!tenant || tenant.deletedAt) throw notFound("Мастерская не найдена");
+    if (!tenant) throw notFound("Мастерская не найдена");
     const impersonations = await prisma.impersonation.findMany({
       where: { tenantId: tenant.id },
       orderBy: { startedAt: "desc" },
@@ -183,6 +184,141 @@ platformRouter.patch(
       data: { ...body, contactEmail: body.contactEmail === "" ? null : body.contactEmail },
     });
     await logPlatform(req, "TENANT_UPDATE", tenant.id, body);
+    res.json(updated);
+  })
+);
+
+// ---------- архив и удаление мастерской ----------
+
+/**
+ * Удаление в два шага, и это не перестраховка.
+ *
+ * Мастерскую удаляют раз в жизни и обычно в спешке — «этот клиент ушёл».
+ * Первый шаг обратим: вход закрыт, мастерская помечена архивной, данные
+ * целы. Второй стирает всё и уже ни в какую сторону не отматывается, поэтому
+ * требует ввести название мастерской целиком: подтверждение, которое нельзя
+ * нажать не глядя.
+ */
+platformRouter.post(
+  "/tenants/:id/archive",
+  requireOwner,
+  ah(async (req, res) => {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant) throw notFound("Мастерская не найдена");
+    if (tenant.deletedAt) throw badRequest("Мастерская уже в архиве");
+
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { deletedAt: new Date(), status: "SUSPENDED" },
+    });
+    // Живые сессии закрываем сразу: иначе сотрудник продолжит работать в
+    // мастерской, которой для платформы больше нет.
+    await prisma.session.updateMany({
+      where: { tenantId: tenant.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    await logPlatform(req, "TENANT_ARCHIVE", tenant.id, { name: tenant.name });
+    res.json({ ok: true });
+  })
+);
+
+platformRouter.post(
+  "/tenants/:id/restore",
+  requireOwner,
+  ah(async (req, res) => {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant) throw notFound("Мастерская не найдена");
+    if (!tenant.deletedAt) throw badRequest("Мастерская и так работает");
+
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { deletedAt: null, status: "ACTIVE" },
+    });
+    await logPlatform(req, "TENANT_RESTORE", tenant.id, { name: tenant.name });
+    res.json({ ok: true });
+  })
+);
+
+platformRouter.delete(
+  "/tenants/:id",
+  requireOwner,
+  ah(async (req, res) => {
+    const { confirm } = z
+      .object({ confirm: z.string().trim().min(1, "Введите название мастерской") })
+      .parse(req.body);
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant) throw notFound("Мастерская не найдена");
+    // Только из архива: между решением и стиранием должен пройти хотя бы
+    // один осознанный шаг.
+    if (!tenant.deletedAt) throw badRequest("Сначала отправьте мастерскую в архив");
+    if (confirm !== tenant.name) throw badRequest("Название не совпадает — удаление отменено");
+
+    // Запись в журнал до удаления: после него мастерской уже не будет, и
+    // след останется единственным свидетельством того, что она была.
+    await logPlatform(req, "TENANT_DELETE", tenant.id, { name: tenant.name, slug: tenant.slug });
+    const removed = await removeTenantForever(tenant.id);
+    await logPlatform(req, "TENANT_DELETE_DONE", null, {
+      name: tenant.name,
+      slug: tenant.slug,
+      files: removed.files,
+      rows: removed.rows,
+    });
+
+    res.json({ ok: true, ...removed });
+  })
+);
+
+// ---------- обращения мастерских ----------
+
+/**
+ * Список обращений — то, ради чего в мастерской появилась кнопка «Отправить».
+ *
+ * Новые сверху и не тускнеют, пока их не разберут: список, в котором нельзя
+ * отличить прочитанное от непрочитанного, через месяц перестают открывать.
+ */
+platformRouter.get(
+  "/feedback",
+  ah(async (req, res) => {
+    const kind = z.enum(["REMARK", "WISH", "BUG", "ALL"]).catch("ALL").parse(req.query.kind);
+    const only = z.enum(["new", "handled", "all"]).catch("all").parse(req.query.status);
+
+    const items = await withPlatform((tx) =>
+      tx.feedback.findMany({
+        where: {
+          ...(kind === "ALL" ? {} : { kind }),
+          ...(only === "new" ? { handledAt: null } : only === "handled" ? { NOT: { handledAt: null } } : {}),
+        },
+        orderBy: { createdAt: "desc" },
+        take: 300,
+        include: {
+          tenant: { select: { id: true, name: true, slug: true } },
+          author: { select: { fullName: true, email: true } },
+        },
+      })
+    );
+
+    res.json(items);
+  })
+);
+
+platformRouter.patch(
+  "/feedback/:id",
+  ah(async (req, res) => {
+    const { handled } = z.object({ handled: z.boolean() }).parse(req.body);
+
+    const updated = await withPlatform(async (tx) => {
+      const item = await tx.feedback.findUnique({ where: { id: req.params.id } });
+      if (!item) throw notFound("Обращение не найдено");
+      return tx.feedback.update({
+        where: { id: item.id },
+        data: { handledAt: handled ? new Date() : null },
+        select: { id: true, handledAt: true },
+      });
+    });
+
+    await logPlatform(req, handled ? "FEEDBACK_HANDLED" : "FEEDBACK_REOPEN", null, { id: updated.id });
     res.json(updated);
   })
 );
@@ -319,11 +455,12 @@ platformRouter.get(
 platformRouter.get(
   "/summary",
   ah(async (_req, res) => {
-    const [pendingApplications, tenants] = await Promise.all([
+    const [pendingApplications, tenants, newFeedback] = await Promise.all([
       prisma.tenantApplication.count({ where: { status: "PENDING" } }),
       prisma.tenant.count({ where: { deletedAt: null } }),
+      withPlatform((tx) => tx.feedback.count({ where: { handledAt: null } })),
     ]);
-    res.json({ pendingApplications, tenants });
+    res.json({ pendingApplications, tenants, newFeedback });
   })
 );
 

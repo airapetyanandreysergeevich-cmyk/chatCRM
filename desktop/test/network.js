@@ -13,8 +13,10 @@
  *   node test/network.js
  */
 
+const fs = require("fs");
 const http = require("http");
 const net = require("net");
+const path = require("path");
 
 const { parseProfiles, reach } = require("../src/network");
 
@@ -84,6 +86,26 @@ async function main() {
   check(many.filter((p) => !p.open).map((p) => p.name).join() === "Кафе", "закрытой названа только общедоступная");
 
   check(parseProfiles("не json вовсе").length === 0, "мусор вместо ответа не роняет программу");
+
+  // 6. Адрес облака. Он один на всех, программа знает его сама, и человека о
+  //    нём не спрашивают: ошибиться в букве там нечем, а получить непонятный
+  //    отказ — есть чем. Проверяем и то, что он записан ровно в одном месте:
+  //    второй экземпляр строки однажды разойдётся с первым.
+  const { CLOUD_URL } = require("../src/config");
+  check(/^https:\/\/[^\s/]+$/.test(CLOUD_URL), `адрес облака — https и без хвостовой косой черты (${CLOUD_URL})`);
+
+  const host = CLOUD_URL.replace(/^https:\/\//, "");
+  const src = path.join(__dirname, "..", "src");
+  const где = fs
+    .readdirSync(src)
+    .filter((f) => fs.readFileSync(path.join(src, f), "utf8").includes(host));
+  check(
+    где.length === 1 && где[0] === "config.js",
+    `адрес облака записан ровно в одном файле (${где.join(", ") || "нигде"})`
+  );
+
+  const setup = fs.readFileSync(path.join(src, "setup.html"), "utf8");
+  check(/id="cloudFields"/.test(setup), "у режима Online свой блок вместо поля адреса");
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exit(fails === 0 ? 0 : 1);
