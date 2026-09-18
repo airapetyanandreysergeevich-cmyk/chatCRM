@@ -17,7 +17,7 @@ import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { applyRows } from "./apply";
 import { DATASETS, DATASET_KEYS, isDatasetKey, type DatasetKey } from "./dataset";
 import { buildSheets } from "./export";
-import { parseRows, type ImportPreview, type ParsedRow } from "./import";
+import { MAX_IMPORT_ROWS, parseRows, type ImportPreview, type ParsedRow } from "./import";
 import { formatDate, readTable, writeCsv, writeHtml, writeXlsx } from "./tableFile";
 
 /**
@@ -99,7 +99,7 @@ dataRouter.get(
         // и обещать загрузку из него было бы нечестно.
         { key: "html", title: "HTML для печати", canImport: false },
       ],
-      maxImportRows: 5000,
+      maxImportRows: MAX_IMPORT_ROWS,
     });
   })
 );

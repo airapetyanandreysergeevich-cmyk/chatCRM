@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { createWithNumber } from "../../lib/customerNumber";
-import { parseNumber, type ParsedRow, type RowIssue } from "./import";
+import { parseNumber, phoneKey, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
 
 /**
@@ -57,6 +57,61 @@ const numOrUndef = (v: string | undefined): number | undefined => {
   return n === null ? undefined : n;
 };
 
+/**
+ * Справочники мастерской, прочитанные один раз на всю загрузку.
+ *
+ * Раньше статус, филиал, мастер и владелец искались заново для каждой строки:
+ * на файле в четыре тысячи заказов это сорок тысяч запросов в одной
+ * транзакции. Она не то чтобы падала — она шла дольше, чем nginx готов ждать
+ * ответа, и человек видел обрыв связи, не зная, записалось хоть что-то.
+ *
+ * Справочники маленькие и за время загрузки не меняются: их читает та же
+ * транзакция, которая пишет.
+ */
+interface Lookups {
+  statusByName: Map<string, string>;
+  defaultStatusId: string | null;
+  branchId: string | null;
+  masterByName: Map<string, string>;
+  ownerId: string | null;
+  /**
+   * Клиенты, уже заведённые в мастерской.
+   *
+   * По номеру — все, включая удалённых: номер удалённой карточки остаётся
+   * занятым, и не увидев её здесь, загрузка пошла бы заводить вторую с тем же
+   * номером. По телефону — только живые: совпадение телефона не повод
+   * возвращать в базу того, кого владелец убрал намеренно.
+   */
+  customerByNumber: Map<number, { id: string; deleted: boolean }>;
+  customerByPhone: Map<string, string>;
+}
+
+const nameKey = (s: string) => s.trim().toLowerCase();
+
+async function readLookups(tx: Prisma.TransactionClient): Promise<Lookups> {
+  const [statuses, branch, users, customers] = await Promise.all([
+    tx.orderStatus.findMany({ orderBy: { sortOrder: "asc" } }),
+    tx.branch.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } }),
+    tx.user.findMany({ where: { deletedAt: null }, select: { id: true, fullName: true, isOwner: true } }),
+    tx.customer.findMany({ select: { id: true, number: true, phone: true, deletedAt: true } }),
+  ]);
+
+  const statusByName = new Map(statuses.map((s) => [nameKey(s.name), s.id]));
+  const initial = statuses.find((s) => s.isInitial) ?? statuses[0];
+
+  return {
+    statusByName,
+    defaultStatusId: initial?.id ?? null,
+    branchId: branch?.id ?? null,
+    masterByName: new Map(users.map((u) => [nameKey(u.fullName), u.id])),
+    ownerId: users.find((u) => u.isOwner)?.id ?? null,
+    customerByNumber: new Map(customers.map((c) => [c.number, { id: c.id, deleted: c.deletedAt !== null }])),
+    customerByPhone: new Map(
+      customers.filter((c) => c.phone && !c.deletedAt).map((c) => [phoneKey(c.phone), c.id])
+    ),
+  };
+}
+
 export async function applyRows(
   tx: Prisma.TransactionClient,
   tenantId: string,
@@ -65,16 +120,24 @@ export async function applyRows(
   userId: string | null
 ): Promise<ApplyResult> {
   const result: ApplyResult = { created: 0, updated: 0, failed: [] };
+  const lookups = await readLookups(tx);
 
   for (const row of rows) {
+    // Заведённое строкой попадает в справочники только после её успеха:
+    // строка, откатившаяся к точке возврата, не оставила в базе ничего, и
+    // запомненный от неё клиент отравил бы все следующие строки ссылкой на
+    // запись, которой нет.
+    const staged: Array<() => void> = [];
+
     await tx.$executeRawUnsafe("SAVEPOINT import_row");
     try {
       if (dataset === "customers") await applyCustomer(tx, tenantId, row, userId);
       else if (dataset === "stock") await applyStock(tx, tenantId, row);
       else if (dataset === "services") await applyService(tx, tenantId, row);
-      else await applyOrder(tx, tenantId, row, userId);
+      else await applyOrder(tx, tenantId, row, userId, lookups, staged);
 
       await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
+      for (const remember of staged) remember();
       if (row.action === "update") result.updated += 1;
       else result.created += 1;
     } catch (err) {
@@ -306,7 +369,9 @@ async function applyOrder(
   tx: Prisma.TransactionClient,
   tenantId: string,
   row: ParsedRow,
-  userId: string | null
+  userId: string | null,
+  lookups: Lookups,
+  staged: Array<() => void>
 ): Promise<void> {
   const v = row.values;
 
@@ -332,53 +397,45 @@ async function applyOrder(
 
   // Новый заказ тянет за собой клиента, технику и статус. Ничего из этого
   // не выдумываем молча: если статуса с таким названием нет, берём начальный.
-  const customer = await findOrCreateCustomer(tx, tenantId, v, userId);
+  const customer = await findOrCreateCustomer(tx, tenantId, v, userId, lookups, staged);
   const device = await findOrCreateDevice(tx, tenantId, customer.id, v);
 
   const statusName = val(v["Статус"]);
-  const status =
-    (statusName ? await tx.orderStatus.findFirst({ where: { name: statusName } }) : null) ??
-    (await tx.orderStatus.findFirst({ where: { isInitial: true } })) ??
-    (await tx.orderStatus.findFirst({ orderBy: { sortOrder: "asc" } }));
-  if (!status) throw new Error("в мастерской нет ни одного статуса заказа");
+  const statusId =
+    (statusName ? lookups.statusByName.get(nameKey(statusName)) : undefined) ?? lookups.defaultStatusId;
+  if (!statusId) throw new Error("в мастерской нет ни одного статуса заказа");
 
-  const branch = await tx.branch.findFirst({ orderBy: { createdAt: "asc" } });
-  if (!branch) throw new Error("в мастерской нет ни одного филиала");
+  if (!lookups.branchId) throw new Error("в мастерской нет ни одного филиала");
 
   const masterName = val(v["Мастер"]);
-  const master = masterName
-    ? await tx.user.findFirst({ where: { fullName: masterName, deletedAt: null } })
-    : null;
+  const masterId = masterName ? lookups.masterByName.get(nameKey(masterName)) : undefined;
 
   const kindLabel = (v["Тип обращения"] ?? "").trim().toLowerCase();
 
   // acceptedById в схеме обязателен: заказ не может быть ничей. Если файл
   // грузит собственник платформы через «войти как», своей учётки внутри
   // мастерской у него нет — записываем приём на владельца.
-  const acceptedById =
-    userId ??
-    (
-      await tx.user.findFirst({
-        where: { isOwner: true, deletedAt: null },
-        select: { id: true },
-      })
-    )?.id;
+  const acceptedById = userId ?? lookups.ownerId;
   if (!acceptedById) throw new Error("в мастерской нет владельца, некому записать приём заказа");
 
   await tx.order.create({
     data: {
       ...common,
       tenantId,
-      branchId: branch.id,
+      branchId: lookups.branchId,
       number: (v["Номер"] ?? "").trim(),
       kind: (ORDER_KIND_BY_LABEL[kindLabel] ?? "REPAIR") as "REPAIR",
       customerId: customer.id,
       deviceId: device?.id ?? null,
-      statusId: status.id,
+      statusId,
       acceptedById,
       acceptedAt: parseDate(v["Принят"]) ?? new Date(),
       completeness: [],
       appearance: [],
+      // Мастер из файла, если такой сотрудник в мастерской есть. Нет — поле
+      // остаётся пустым: заводить сотрудника по строке в чужой выгрузке
+      // значит завести ему учётку и доступ.
+      assignedMasterId: masterId ?? null,
     },
   });
 }
@@ -387,47 +444,70 @@ async function findOrCreateCustomer(
   tx: Prisma.TransactionClient,
   tenantId: string,
   v: Record<string, string>,
-  userId: string | null
+  userId: string | null,
+  lookups: Lookups,
+  staged: Array<() => void>
 ): Promise<{ id: string }> {
   const phone = val(v["Телефон клиента"]) ?? "";
-  const digits = phone.replace(/\D/g, "").slice(-10);
 
   // Сперва по номеру клиента: он не меняется и не бывает выдуманным. Телефон
   // ищем только потом — в файле заказов он может оказаться дежурным, общим на
   // всю мастерскую, и тогда все заказы слиплись бы на одной карточке.
+  //
+  // И то и другое ищется в справочнике, прочитанном один раз: в файле на
+  // четыре тысячи заказов один и тот же клиент встречается десятки раз, и
+  // спрашивать о нём базу каждый раз незачем.
   const wanted = Number(val(v["Номер клиента"]) ?? "");
   if (Number.isInteger(wanted) && wanted > 0) {
-    const byNumber = await tx.customer.findFirst({
-      where: { number: wanted, deletedAt: null },
-      select: { id: true },
-    });
-    if (byNumber) return byNumber;
+    const byNumber = lookups.customerByNumber.get(wanted);
+    if (byNumber) {
+      // Карточка была удалена — возвращаем её: заказ, привязанный к
+      // невидимому клиенту, нельзя ни найти, ни позвонить по нему.
+      if (byNumber.deleted) {
+        await tx.customer.update({ where: { id: byNumber.id }, data: { deletedAt: null } });
+        staged.push(() => {
+          byNumber.deleted = false;
+        });
+      }
+      return { id: byNumber.id };
+    }
   }
 
-  const found = digits
-    ? await tx.customer.findFirst({
-        where: { deletedAt: null, phone: { contains: digits } },
-        select: { id: true },
-      })
-    : null;
-  if (found) return found;
+  const key = phone ? phoneKey(phone) : "";
+  if (key) {
+    const byPhone = lookups.customerByPhone.get(key);
+    if (byPhone) return { id: byPhone };
+  }
 
   // Имени может не быть вовсе — и это не повод отказать заказу. Называем
   // карточку номером: «Клиент №1463» видно в списке, его можно найти поиском
   // по номеру, и сразу понятно, что имя ещё предстоит узнать. «Без имени» на
   // сотне карточек так не работает — они сливаются в одну кашу.
-  return createWithNumber(tx, tenantId, Number.isInteger(wanted) && wanted > 0 ? wanted : null, (number) =>
-    tx.customer.create({
-      data: {
-        tenantId,
-        number,
-        name: val(v["Клиент"]) ?? `Клиент №${number}`,
-        phone,
-        createdById: userId,
-      },
-      select: { id: true },
-    })
+  const made = await createWithNumber(
+    tx,
+    tenantId,
+    Number.isInteger(wanted) && wanted > 0 ? wanted : null,
+    async (number) => {
+      const row = await tx.customer.create({
+        data: {
+          tenantId,
+          number,
+          name: val(v["Клиент"]) ?? `Клиент №${number}`,
+          phone,
+          createdById: userId,
+        },
+        select: { id: true },
+      });
+      // Запоминаем только после успеха строки — этим занимается applyRows.
+      staged.push(() => {
+        lookups.customerByNumber.set(number, { id: row.id, deleted: false });
+        if (key) lookups.customerByPhone.set(key, row.id);
+      });
+      return row;
+    }
   );
+
+  return made;
 }
 
 async function findOrCreateDevice(

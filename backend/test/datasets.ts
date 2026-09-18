@@ -18,7 +18,7 @@
 
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
-import { phoneKey, serviceKey } from "../src/modules/data/import";
+import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
 import { parseDate } from "../src/modules/data/apply";
 import { parseRows } from "../src/modules/data/import";
 import type { TableRow } from "../src/modules/data/tableFile";
@@ -268,6 +268,18 @@ async function main(): Promise<void> {
     DATASETS.orders.columns.find((c) => c.title === "Неисправность")?.required === true,
     "а неисправность обязательна — заказ без неё не заказ"
   );
+
+  // 10. Предел строк называется интерфейсу тем же числом, каким работает
+  //     загрузка. Второй экземпляр этого числа однажды разойдётся с первым, и
+  //     программа будет обещать одно, а делать другое.
+  const routes = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../src/modules/data/data.routes.ts", import.meta.url), "utf8")
+  );
+  check(
+    /maxImportRows:\s*MAX_IMPORT_ROWS/.test(routes),
+    "предел строк берётся из одного места, а не переписан числом"
+  );
+  check(MAX_IMPORT_ROWS >= 5000, `предел строк — ${MAX_IMPORT_ROWS}`);
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;
