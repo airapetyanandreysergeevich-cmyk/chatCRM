@@ -412,12 +412,16 @@ async function findOrCreateCustomer(
     : null;
   if (found) return found;
 
+  // Имени может не быть вовсе — и это не повод отказать заказу. Называем
+  // карточку номером: «Клиент №1463» видно в списке, его можно найти поиском
+  // по номеру, и сразу понятно, что имя ещё предстоит узнать. «Без имени» на
+  // сотне карточек так не работает — они сливаются в одну кашу.
   return createWithNumber(tx, tenantId, Number.isInteger(wanted) && wanted > 0 ? wanted : null, (number) =>
     tx.customer.create({
       data: {
         tenantId,
         number,
-        name: val(v["Клиент"]) ?? "Без имени",
+        name: val(v["Клиент"]) ?? `Клиент №${number}`,
         phone,
         createdById: userId,
       },

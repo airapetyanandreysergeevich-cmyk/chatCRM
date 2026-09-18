@@ -240,6 +240,35 @@ async function main(): Promise<void> {
     "по одному лишь телефону удалённый клиент не воскресает — это не повод"
   );
 
+  // 9. Заказ опознаёт клиента номером, и имени для этого не нужно.
+  //
+  //    Живой случай: в чужой выгрузке имена лежат в отдельной таблице, а в
+  //    заказах стоит только код клиента. Требование имени заворачивало такую
+  //    выгрузку целиком — при том, что клиент по номеру находится точно.
+  const orderTable = (row: string[][]) =>
+    table([["Номер", "Номер клиента", "Телефон клиента", "Клиент", "Неисправность"], ...row]);
+
+  const byNumberOnly = await parseRows(tx, "orders", orderTable([["0412", "1463", "", "", "не включается"]]));
+  check(byNumberOnly.rows.length === 1, "заказ с одним лишь номером клиента проходит");
+
+  const byPhoneOnly = await parseRows(tx, "orders", orderTable([["0413", "", "+7 900 111-22-33", "", "не включается"]]));
+  check(byPhoneOnly.rows.length === 1, "заказ с одним лишь телефоном тоже проходит");
+
+  const nameless = await parseRows(tx, "orders", orderTable([["0414", "", "", "Кузнецов", "не включается"]]));
+  check(
+    nameless.rows.length === 0 && /хотя бы одна/.test(nameless.preview.issues[0]?.message ?? ""),
+    "одного имени мало: по нему клиента не найти и не завести"
+  );
+
+  check(
+    !DATASETS.orders.columns.find((c) => c.title === "Клиент")?.required,
+    "имя клиента в заказе не обязательно"
+  );
+  check(
+    DATASETS.orders.columns.find((c) => c.title === "Неисправность")?.required === true,
+    "а неисправность обязательна — заказ без неё не заказ"
+  );
+
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;
 }
