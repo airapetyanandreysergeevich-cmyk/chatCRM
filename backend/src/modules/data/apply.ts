@@ -392,7 +392,13 @@ async function applyOrder(
   };
 
   if (row.existingId) {
-    await tx.order.update({ where: { id: row.existingId }, data: common });
+    await tx.order.update({
+      where: { id: row.existingId },
+      // Удалённый заказ загрузка возвращает: этот файл принёс владелец, и в
+      // нём заказ есть. Оставить его удалённым значит принять строку и не
+      // показать её нигде.
+      data: row.existingDeleted ? { ...common, deletedAt: null } : common,
+    });
     await applyComposition(tx, tenantId, row.existingId, v, common);
     return;
   }

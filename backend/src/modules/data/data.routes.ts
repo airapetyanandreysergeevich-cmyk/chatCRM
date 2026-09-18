@@ -37,6 +37,26 @@ dataRouter.use(
 
 const tenantOf = (req: Request) => currentTenantId(req)!;
 
+/**
+ * Имя приложенного файла по-человечески.
+ *
+ * В многочастной форме имя едет байтами в utf-8, а разбор формы отдаёт его
+ * побайтово как latin1 — и «Заказы-2026-09-18.csv» превращается в
+ * «Ð—Ð°ÐºÐ°Ð·Ñ‹-2026-09-18.csv». Сам файл при этом цел, испорчено только имя,
+ * но человек видит на экране кракозябры и справедливо решает, что программа
+ * не поняла его файл.
+ *
+ * Чиним только то, что действительно приехало побайтово: в такой строке нет
+ * ни одного символа выше 0xFF, потому что каждый байт стал отдельным
+ * символом. Имя, дошедшее целым, содержит кириллицу настоящими буквами — та
+ * же починка превратила бы его в мусор, и это было бы хуже исходной беды.
+ */
+function originalName(raw: string): string {
+  if (/[^\u0000-\u00ff]/.test(raw)) return raw;
+  const fixed = Buffer.from(raw, "latin1").toString("utf8");
+  return fixed.includes("\ufffd") ? raw : fixed;
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
@@ -187,11 +207,12 @@ dataRouter.post(
 
     const file = req.file;
     if (!file) throw badRequest("Файл не приложен");
-    if (!/\.(xlsx|xlsm|csv|txt|tsv)$/i.test(file.originalname)) {
+    const name = originalName(file.originalname);
+    if (!/\.(xlsx|xlsm|csv|txt|tsv)$/i.test(name)) {
       throw badRequest("Понимаю только xlsx и csv. HTML читается глазами, но не загружается обратно");
     }
 
-    const table = await readTable(file.buffer, file.originalname);
+    const table = await readTable(file.buffer, name);
     if (table.length === 0) throw badRequest("Файл пустой");
 
     const tenantId = tenantOf(req);
@@ -202,7 +223,7 @@ dataRouter.post(
       // в тот же пятисекундный срок — и человек не поймёт, чем провинился файл.
       { timeout: 2 * 60_000, maxWait: 30_000 }
     );
-    preview.fileName = file.originalname;
+    preview.fileName = name;
 
     if (preview.missingColumns.length) {
       // Дальше идти незачем: без обязательных колонок строки не разобрать.
@@ -213,7 +234,7 @@ dataRouter.post(
       tenantId,
       userId: actorUserId(req),
       dataset,
-      fileName: file.originalname,
+      fileName: name,
       rows,
       preview,
     });

@@ -315,16 +315,25 @@ async function markExisting(
   }
 
   if (dataset === "orders") {
+    // Удалённые заказы ищем наравне с живыми, и по той же причине, что и
+    // карточки клиентов: номер заказа уникален независимо от удаления. Не
+    // увидев удалённый заказ здесь, загрузка пошла бы заводить новый с тем же
+    // номером и упёрлась бы в уникальный индекс.
+    //
+    // А раз нашли — надо вернуть: файл с этим заказом владелец принёс сам.
+    // Обновить удалённый заказ и оставить его удалённым значит отчитаться
+    // «обновлено 4» и не показать ни одного — ровно так это и выглядело.
     const numbers = rows.map((r) => (r.values["Номер"] ?? "").trim()).filter(Boolean);
     const existing = await tx.order.findMany({
       where: { number: { in: numbers } },
-      select: { id: true, number: true },
+      select: { id: true, number: true, deletedAt: true },
     });
-    const byNumber = new Map(existing.map((o) => [o.number, o.id]));
+    const byNumber = new Map(existing.map((o) => [o.number, o]));
     for (const r of rows) {
-      const id = byNumber.get((r.values["Номер"] ?? "").trim());
-      if (id) {
-        r.existingId = id;
+      const found = byNumber.get((r.values["Номер"] ?? "").trim());
+      if (found) {
+        r.existingId = found.id;
+        r.existingDeleted = found.deletedAt !== null;
         r.action = "update";
       }
     }
