@@ -187,7 +187,13 @@ dataRouter.post(
     if (table.length === 0) throw badRequest("Файл пустой");
 
     const tenantId = tenantOf(req);
-    const { preview, rows } = await withTenant(tenantId, (tx) => parseRows(tx, dataset, table));
+    const { preview, rows } = await withTenant(
+      tenantId,
+      (tx) => parseRows(tx, dataset, table),
+      // Разбор ничего не пишет, но на десяти тысячах строк успевает упереться
+      // в тот же пятисекундный срок — и человек не поймёт, чем провинился файл.
+      { timeout: 2 * 60_000, maxWait: 30_000 }
+    );
     preview.fileName = file.originalname;
 
     if (preview.missingColumns.length) {
@@ -225,8 +231,14 @@ dataRouter.post(
 
     pending.delete(token);
 
-    const result = await withTenant(item.tenantId, (tx) =>
-      applyRows(tx, item.tenantId, item.dataset, item.rows, item.userId)
+    // Загрузка пишет до десяти тысяч строк одной транзакцией, и пяти секунд,
+    // которые Prisma даёт по умолчанию, ей не хватает даже на сотню. Десять
+    // минут — с запасом к тому, что успевает записаться, пока человек ждёт
+    // ответа; дольше него всё равно ждёт только nginx.
+    const result = await withTenant(
+      item.tenantId,
+      (tx) => applyRows(tx, item.tenantId, item.dataset, item.rows, item.userId),
+      { timeout: 10 * 60_000, maxWait: 30_000 }
     );
 
     await withTenant(item.tenantId, (tx) =>

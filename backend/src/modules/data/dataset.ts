@@ -11,7 +11,15 @@ export type DatasetKey = "customers" | "orders" | "stock" | "services";
 export interface ColumnDef {
   /** Заголовок в файле. По нему же колонка узнаётся при загрузке. */
   title: string;
-  /** Другие написания заголовка, которые встречаются в чужих выгрузках. */
+  /**
+   * Другие написания заголовка, которые встречаются в чужих выгрузках.
+   *
+   * Список растёт от файлов живых мастерских, а не от фантазии: «Брэнд»,
+   * «Итого» без рубля, «Гарантия» без «до» — это не небрежность, это то, как
+   * называются колонки в программах, из которых к нам переезжают. Не узнать
+   * колонку значит молча потерять деньги заказа: файл загрузится, а суммы
+   * будут нулевые, и заметят это не сразу.
+   */
   aliases?: string[];
   width?: number;
   /** Колонка обязательна при загрузке. */
@@ -96,21 +104,21 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
       { title: "Номер клиента", aliases: ["Код клиента"], width: 14, kind: "number" },
       { title: "Телефон клиента", aliases: ["Телефон"], width: 18, kind: "phone" },
       { title: "Техника", aliases: ["Тип техники"], width: 16 },
-      { title: "Бренд", width: 16 },
+      { title: "Бренд", aliases: ["Брэнд", "Марка", "Производитель"], width: 16 },
       { title: "Модель", width: 20 },
       { title: "Серийный номер", aliases: ["S/N", "Серийник"], width: 20 },
       { title: "Неисправность", aliases: ["Жалоба", "Со слов клиента"], width: 40, required: true },
       { title: "Примечание приёмщика", width: 30 },
-      { title: "Диагноз", width: 34 },
-      { title: "Мастер", width: 24 },
+      { title: "Диагноз", aliases: ["Выполненные работы", "Что сделано"], width: 34 },
+      { title: "Мастер", aliases: ["Исполнитель"], width: 24 },
       { title: "Срок готовности", width: 18, kind: "date" },
       { title: "Завершён", width: 18, kind: "date" },
       { title: "Выдан", width: 18, kind: "date" },
-      { title: "Работы, ₽", aliases: ["Сумма работ"], width: 13, kind: "number" },
-      { title: "Запчасти, ₽", aliases: ["Сумма запчастей"], width: 13, kind: "number" },
-      { title: "Скидка, ₽", width: 12, kind: "number" },
-      { title: "Итого, ₽", aliases: ["Сумма"], width: 13, kind: "number" },
-      { title: "Гарантия до", width: 18, kind: "date" },
+      { title: "Работы, ₽", aliases: ["Сумма работ", "Работы", "Стоимость работ"], width: 13, kind: "number" },
+      { title: "Запчасти, ₽", aliases: ["Сумма запчастей", "Запчасти", "Затраты"], width: 13, kind: "number" },
+      { title: "Скидка, ₽", aliases: ["Скидка"], width: 12, kind: "number" },
+      { title: "Итого, ₽", aliases: ["Сумма", "Итого", "Всего", "К оплате"], width: 13, kind: "number" },
+      { title: "Гарантия до", aliases: ["Гарантия"], width: 18, kind: "date" },
     ],
   },
 

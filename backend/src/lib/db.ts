@@ -66,14 +66,34 @@ function scopeToTenant(tx: Prisma.TransactionClient, tenantId: string): Prisma.T
  * Ограничение: во вложенных create (create: { works: { create: [...] } }) прокси до детей
  * не дотягивается. Такие вставки делайте отдельными вызовами — иначе их отклонит RLS.
  */
+/**
+ * Срок транзакции.
+ *
+ * У Prisma по умолчанию пять секунд — и это верно для обычного запроса, где
+ * пять секунд означают, что что-то пошло не так. Но загрузка базы из файла
+ * пишет тысячи строк одной транзакцией и в пять секунд не укладывается
+ * никогда. Обрывалась она при этом не по-человечески: транзакция закрывалась
+ * изнутри, наружу выходила «Внутренняя ошибка», и понять из неё, что дело в
+ * сроке, было нельзя.
+ *
+ * Поэтому срок задаётся тем, кто знает, сколько работы затевает.
+ */
+export interface TxOptions {
+  /** Сколько ждать саму работу. */
+  timeout?: number;
+  /** Сколько ждать свободного соединения в пуле. */
+  maxWait?: number;
+}
+
 export function withTenant<T>(
   tenantId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  opts?: TxOptions
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRawUnsafe("SELECT set_config('app.tenant_id', $1, true)", tenantId);
     return fn(scopeToTenant(tx, tenantId));
-  });
+  }, opts);
 }
 
 /**
