@@ -22,6 +22,8 @@ import { formatDateShort, plural } from "../lib/format";
 
 interface Client {
   id: string;
+  /** Короткий номер внутри мастерской — по нему клиента удобно продиктовать. */
+  number: number;
   type: "INDIVIDUAL" | "COMPANY";
   name: string;
   phone: string;
@@ -105,7 +107,7 @@ export default function Clients() {
 
       <Card className="p-3.5">
         <SearchInput
-          placeholder="Имя, телефон или email"
+          placeholder="Имя, телефон, email или номер"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="sm:max-w-[380px]"
@@ -143,15 +145,26 @@ export default function Clients() {
               }
               subtitle={
                 <>
+                  {/* Номер держим приглушённым: он нужен, когда нужен —
+                      продиктовать по телефону, найти в старой базе, — и не
+                      должен спорить за внимание с именем и телефоном. */}
+                  <span className="font-mono text-[12.5px] text-ink-dim">№{c.number}</span>
+                  <span className="text-ink-dim"> · </span>
                   {/* Позвонить прямо из списка — самое частое действие приёмщика,
                       поэтому телефон здесь ссылка, а не просто текст. */}
-                  <a
-                    href={`tel:${c.phone}`}
-                    onClick={(e) => e.stopPropagation()}
-                    className="font-semibold text-brand-ink hover:underline"
-                  >
-                    {c.phone}
-                  </a>
+                  {c.phone ? (
+                    <a
+                      href={`tel:${c.phone}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-semibold text-brand-ink hover:underline"
+                    >
+                      {c.phone}
+                    </a>
+                  ) : (
+                    // Телефона может не быть у карточки, приехавшей из чужой
+                    // программы. Пустое место здесь выглядело бы как ошибка.
+                    <span className="text-ink-dim">телефон не указан</span>
+                  )}
                   {c.email && <span className="text-ink-dim"> · {c.email}</span>}
                 </>
               }

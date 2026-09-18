@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { DATASETS, matchColumns, type ColumnDef, type DatasetKey } from "./dataset";
+import { DATASETS, matchColumns, type DatasetDef, type DatasetKey } from "./dataset";
 import type { Cell, TableRow } from "./tableFile";
 
 /**
@@ -121,7 +121,7 @@ export async function parseRows(
     const values: Record<string, string> = {};
     for (const [idx, col] of mapping) values[col.title] = asText(line[idx]);
 
-    const rowIssues = validateRow(def.columns, values, rowNo);
+    const rowIssues = validateRow(def, values, rowNo);
     if (rowIssues.length) {
       issues.push(...rowIssues);
       continue;
@@ -168,9 +168,18 @@ export async function parseRows(
   };
 }
 
-function validateRow(columns: ColumnDef[], values: Record<string, string>, row: number): RowIssue[] {
+function validateRow(def: DatasetDef, values: Record<string, string>, row: number): RowIssue[] {
   const out: RowIssue[] = [];
-  for (const col of columns) {
+
+  const oneOf = def.requireOneOf ?? [];
+  if (oneOf.length && !oneOf.some((title) => (values[title] ?? "").trim())) {
+    out.push({
+      row,
+      message: `нужна хотя бы одна из колонок: ${oneOf.map((t) => `«${t}»`).join(" или ")}`,
+    });
+  }
+
+  for (const col of def.columns) {
     const raw = values[col.title] ?? "";
     if (col.required && !raw) {
       out.push({ row, message: `не заполнена обязательная колонка «${col.title}»` });
@@ -192,7 +201,12 @@ function validateRow(columns: ColumnDef[], values: Record<string, string>, row: 
 export const serviceKey = (raw: string): string => raw.trim().replace(/\s+/g, " ").toLowerCase();
 
 function matchKey(dataset: DatasetKey, values: Record<string, string>): string | null {
-  if (dataset === "customers") return phoneKey(values["Телефон"] ?? "") || null;
+  if (dataset === "customers") {
+    // Номер надёжнее телефона: он наш и не меняется. Телефон остаётся
+    // запасным ключом для файлов, где номера нет вовсе.
+    const number = (values["Номер"] ?? "").trim();
+    return number ? `№${number}` : phoneKey(values["Телефон"] ?? "") || null;
+  }
   if (dataset === "orders") return (values["Номер"] ?? "").trim() || null;
   if (dataset === "services") return serviceKey(values["Название"] ?? "") || null;
   // На складе артикул есть не всегда — тогда сличаем по названию.
@@ -212,11 +226,15 @@ async function markExisting(
     // Телефоны в базе хранятся как введены, поэтому сличаем по цифрам уже в коде.
     const existing = await tx.customer.findMany({
       where: { deletedAt: null },
-      select: { id: true, phone: true },
+      select: { id: true, phone: true, number: true },
     });
-    const byKey = new Map(existing.map((c) => [phoneKey(c.phone), c.id]));
+    const byPhone = new Map(existing.filter((c) => c.phone).map((c) => [phoneKey(c.phone), c.id]));
+    const byNumber = new Map(existing.map((c) => [c.number, c.id]));
     for (const r of rows) {
-      const id = byKey.get(phoneKey(r.values["Телефон"] ?? ""));
+      const wanted = Number((r.values["Номер"] ?? "").trim());
+      const id =
+        (Number.isInteger(wanted) && wanted > 0 ? byNumber.get(wanted) : undefined) ??
+        byPhone.get(phoneKey(r.values["Телефон"] ?? ""));
       if (id) {
         r.existingId = id;
         r.action = "update";

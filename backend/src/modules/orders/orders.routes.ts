@@ -13,6 +13,7 @@ import { env } from "../../lib/env";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { notifyTenant } from "../../lib/notify";
 import { nextOrderNumber } from "../../lib/orderNumber";
+import { nextCustomerNumber } from "../../lib/customerNumber";
 import { PERMISSIONS } from "../../lib/permissions";
 import { isAllowedUpload, putOrderFile, removeFile, signedUrl } from "../../lib/storage";
 import {
@@ -220,6 +221,7 @@ ordersRouter.post(
         customer = await tx.customer.create({
           data: {
             tenantId,
+            number: await nextCustomerNumber(tx, tenantId),
             type: body.customer.type,
             name: body.customer.name,
             phone: body.customer.phone,

@@ -19,6 +19,9 @@
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
 import { phoneKey, serviceKey } from "../src/modules/data/import";
+import { parseDate } from "../src/modules/data/apply";
+import { parseRows } from "../src/modules/data/import";
+import type { TableRow } from "../src/modules/data/tableFile";
 
 let fails = 0;
 const check = (ok: boolean, msg: string) => {
@@ -37,6 +40,7 @@ const one = <T>(v: T) => ({ findMany: async () => [v] });
 
 const fakeTx = {
   customer: one({
+    number: 412,
     type: "INDIVIDUAL",
     name: "Кузнецов И.",
     phone: "+7 900 000-00-00",
@@ -57,7 +61,7 @@ const fakeTx = {
     status: { name: "Диагностика" },
     kind: "REPAIR",
     isUrgent: false,
-    customer: { name: "Кузнецов И.", phone: "+7 900 000-00-00" },
+    customer: { name: "Кузнецов И.", number: 412, phone: "+7 900 000-00-00" },
     device: { kind: "ноутбук", brand: "Lenovo", model: "IdeaPad 5", serial: "PF2XK9LM" },
     complaint: "не включается",
     receptionNote: null,
@@ -137,6 +141,70 @@ async function main(): Promise<void> {
   check(serviceKey("  Замена   ЭКРАНА ") === serviceKey("замена экрана"), "услуга узнаётся при другом написании");
   check(serviceKey("Замена экрана") !== serviceKey("Замена стекла"), "разные услуги не схлопываются");
   check(phoneKey("+7 (921) 555-00-11") === phoneKey("89215550011"), "телефон узнаётся в любом написании");
+
+  // 6. Даты. Русский порядок «день-месяц-год» и время, которое раньше терялось:
+  //    заказ, принятый вечером, вставал на полночь и уезжал на день назад в
+  //    любом отчёте по дням.
+  const evening = parseDate("10.03.2022 18:40");
+  check(evening?.getDate() === 10 && evening?.getMonth() === 2, "«10.03.2022» — десятое марта, а не третье октября");
+  check(evening?.getHours() === 18 && evening?.getMinutes() === 40, "время приёма сохраняется");
+  check(parseDate("10-03-2022 14:30")?.getHours() === 14, "дата через дефис тоже читается — так пишут выгрузки");
+  check(parseDate("2022-03-10T14:30:00")?.getHours() === 14, "ISO-дата не сломалась");
+  check(parseDate("   ") === undefined && parseDate(undefined) === undefined, "пустая дата остаётся пустой");
+
+  // 7. Номер клиента. Он появился затем, чтобы человека можно было опознать
+  //    там, где телефон не годится: при переезде из другой программы половина
+  //    номеров выдумана, а один и тот же дежурный стоит у сотен карточек.
+  const [customers] = await buildSheets(fakeTx as never, ["customers"]);
+  check(customers.columns[0].title === "Номер", "номер клиента — первая колонка выгрузки");
+  check(customers.rows[0][0] === 412, "номер попадает в выгрузку числом");
+
+  const [ordersSheet] = await buildSheets(fakeTx as never, ["orders"]);
+  const cnum = ordersSheet.columns.findIndex((c) => c.title === "Номер клиента");
+  check(cnum > 0 && ordersSheet.rows[0][cnum] === 412, "в заказе есть номер его клиента");
+
+  // Пустая база: интересно, что скажет разбор, а не с чем он сольётся.
+  const nothing = { findMany: async () => [] };
+  const tx = { customer: nothing, order: nothing, stockItem: nothing, service: nothing } as never;
+  const table = (rows: string[][]): TableRow[] => rows.map((cells, i) => ({ n: i + 1, cells }));
+
+  const onlyNumber = await parseRows(tx, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["412", "Кузнецов Иван", ""],
+  ]));
+  check(onlyNumber.rows.length === 1, "клиент с номером, но без телефона — проходит");
+
+  const onlyPhone = await parseRows(tx, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["", "Петрова Анна", "+7 900 111-22-33"],
+  ]));
+  check(onlyPhone.rows.length === 1, "клиент с телефоном, но без номера — проходит");
+
+  const neither = await parseRows(tx, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["", "Никто", ""],
+  ]));
+  check(
+    neither.rows.length === 0 && /хотя бы одна/.test(neither.preview.issues[0]?.message ?? ""),
+    "клиент без номера и без телефона отклонён с внятной причиной"
+  );
+
+  const twins = await parseRows(tx, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["412", "Кузнецов", "+7 900 111-22-33"],
+    ["412", "Он же", "+7 900 444-55-66"],
+  ]));
+  check(twins.rows.length === 1, "две строки с одним номером — берётся первая");
+
+  const byNumber = await parseRows(tx, "customers", table([
+    ["Номер", "Имя", "Телефон"],
+    ["412", "Кузнецов", "+7 900 111-22-33"],
+    ["413", "Он же по телефону", "+7 900 111-22-33"],
+  ]));
+  check(
+    byNumber.rows.length === 2,
+    "разные номера с одним телефоном — это два клиента, номер главнее"
+  );
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;

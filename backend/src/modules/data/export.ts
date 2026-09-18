@@ -43,6 +43,7 @@ async function customersSheet(tx: Prisma.TransactionClient): Promise<SheetData> 
     name: def.sheet,
     columns: def.columns.map((c) => ({ title: c.title, width: c.width })),
     rows: rows.map((c) => [
+      c.number,
       CUSTOMER_TYPE_LABEL[c.type] ?? c.type,
       c.name,
       c.phone,
@@ -72,7 +73,7 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
     orderBy: { acceptedAt: "desc" },
     take: MAX_ROWS,
     include: {
-      customer: { select: { name: true, phone: true } },
+      customer: { select: { name: true, number: true, phone: true } },
       device: { select: { kind: true, brand: true, model: true, serial: true } },
       status: { select: { name: true } },
       assignedMaster: { select: { fullName: true } },
@@ -89,6 +90,7 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
       ORDER_KIND_LABEL[o.kind] ?? o.kind,
       o.isUrgent ? "да" : "",
       o.customer?.name ?? "",
+      o.customer?.number ?? "",
       o.customer?.phone ?? "",
       o.device?.kind ?? "",
       o.device?.brand ?? "",

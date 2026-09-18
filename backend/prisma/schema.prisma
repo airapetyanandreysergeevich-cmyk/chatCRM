@@ -60,6 +60,9 @@ model Tenant {
   orderNumberPrefix String @default("Р")
   orderNumberNext   Int    @default(1)
 
+  /// Счётчик номеров клиентов — своя нумерация у каждой мастерской, как и у заказов.
+  customerNumberNext Int @default(1)
+
   contactName  String?
   contactPhone String?
   contactEmail String?
@@ -327,8 +330,17 @@ enum CustomerType {
 }
 
 model Customer {
-  id              String       @id @default(uuid())
-  tenantId        String
+  id       String @id @default(uuid())
+  tenantId String
+
+  /// Короткий номер клиента внутри мастерской.
+  ///
+  /// Нужен там, где телефон не годится в опознавательный знак: при переносе
+  /// из другой программы половина карточек приезжает с выдуманным номером или
+  /// вовсе без него, а повторная загрузка того же файла не должна задваивать
+  /// людей. Заодно им удобно продиктовать клиента по телефону — «номер 412»
+  /// короче одиннадцати цифр.
+  number Int
   type            CustomerType @default(INDIVIDUAL)
   name            String
   phone           String
@@ -351,6 +363,7 @@ model Customer {
   orders       Order[]
   transactions Transaction[]
 
+  @@unique([tenantId, number])
   @@index([tenantId, phone])
   @@index([tenantId, name])
 }

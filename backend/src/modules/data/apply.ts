@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { nextCustomerNumber, reserveCustomerNumber } from "../../lib/customerNumber";
 import { parseNumber, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
 
@@ -83,9 +84,17 @@ async function applyCustomer(
     note: val(v["Примечание"]),
   };
 
+  // Номер из файла сохраняем как есть — по нему следующая загрузка узнает
+  // карточку. Своего номера в файле нет — выдаём очередной.
+  const wanted = Number((v["Номер"] ?? "").trim());
+  const number =
+    Number.isInteger(wanted) && wanted > 0
+      ? await reserveCustomerNumber(tx, tenantId, wanted)
+      : await nextCustomerNumber(tx, tenantId);
+
   const customerId = row.existingId
     ? (await tx.customer.update({ where: { id: row.existingId }, data })).id
-    : (await tx.customer.create({ data: { ...data, tenantId, createdById: userId } })).id;
+    : (await tx.customer.create({ data: { ...data, tenantId, number, createdById: userId } })).id;
 
   await applyDevices(tx, tenantId, customerId, v["Техника"] ?? "");
 }
@@ -227,14 +236,24 @@ const ORDER_KIND_BY_LABEL: Record<string, string> = {
   "повторное обращение": "REPEAT",
 };
 
-function parseDate(raw: string | undefined): Date | undefined {
+export function parseDate(raw: string | undefined): Date | undefined {
   const s = val(raw);
   if (!s) return undefined;
   // Сначала «31.12.2026», потом всё остальное: русский формат даты
   // Date разбирает как месяц-день и молча даёт не ту дату.
-  const ru = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
+  //
+  // Время забираем, если оно есть. Раньше оно отбрасывалось, и все заказы,
+  // перенесённые из другой программы, вставали на полночь — а для заказа,
+  // принятого в 18:40, это уже другой рабочий день.
+  const ru = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})(?:[ T,]+(\d{1,2})[:.-](\d{2}))?/);
   if (ru) {
-    const d = new Date(Number(ru[3]), Number(ru[2]) - 1, Number(ru[1]));
+    const d = new Date(
+      Number(ru[3]),
+      Number(ru[2]) - 1,
+      Number(ru[1]),
+      Number(ru[4] ?? 0),
+      Number(ru[5] ?? 0)
+    );
     return Number.isNaN(d.getTime()) ? undefined : d;
   }
   const d = new Date(s);
@@ -331,6 +350,18 @@ async function findOrCreateCustomer(
   const phone = val(v["Телефон клиента"]) ?? "";
   const digits = phone.replace(/\D/g, "").slice(-10);
 
+  // Сперва по номеру клиента: он не меняется и не бывает выдуманным. Телефон
+  // ищем только потом — в файле заказов он может оказаться дежурным, общим на
+  // всю мастерскую, и тогда все заказы слиплись бы на одной карточке.
+  const wanted = Number(val(v["Номер клиента"]) ?? "");
+  if (Number.isInteger(wanted) && wanted > 0) {
+    const byNumber = await tx.customer.findFirst({
+      where: { number: wanted, deletedAt: null },
+      select: { id: true },
+    });
+    if (byNumber) return byNumber;
+  }
+
   const found = digits
     ? await tx.customer.findFirst({
         where: { deletedAt: null, phone: { contains: digits } },
@@ -339,9 +370,15 @@ async function findOrCreateCustomer(
     : null;
   if (found) return found;
 
+  const number =
+    Number.isInteger(wanted) && wanted > 0
+      ? await reserveCustomerNumber(tx, tenantId, wanted)
+      : await nextCustomerNumber(tx, tenantId);
+
   return tx.customer.create({
     data: {
       tenantId,
+      number,
       name: val(v["Клиент"]) ?? "Без имени",
       phone,
       createdById: userId,

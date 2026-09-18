@@ -29,6 +29,15 @@ export interface DatasetDef {
   hint: string;
   /** По какой колонке узнаём, что запись уже есть. */
   matchBy: string;
+  /**
+   * Колонки, из которых нужна хотя бы одна.
+   *
+   * Клиента опознаёт либо номер, либо телефон. Требовать оба — значит
+   * отказать мастерской, переезжающей из программы, где телефоны половины
+   * карточек выдуманы; не требовать ни одного — значит завести человека,
+   * которого потом не найти и с которым не связать заказ.
+   */
+  requireOneOf?: string[];
   columns: ColumnDef[];
   /** Загрузка этой таблицы пока не поддержана — только выгрузка. */
   exportOnly?: boolean;
@@ -39,12 +48,14 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
     key: "customers",
     title: "Клиенты и их техника",
     sheet: "Клиенты",
-    hint: "Одна строка — один клиент. Техника перечисляется в отдельной колонке через точку с запятой.",
+    hint: "Одна строка — один клиент. Узнаём по номеру, а если его нет — по телефону. Техника перечисляется через точку с запятой.",
     matchBy: "Телефон",
+    requireOneOf: ["Номер", "Телефон"],
     columns: [
+      { title: "Номер", aliases: ["Номер клиента", "Код клиента", "ID"], width: 10, kind: "number" },
       { title: "Тип", aliases: ["Тип клиента"], width: 12, kind: "text" },
       { title: "Имя", aliases: ["ФИО", "Название", "Клиент"], width: 28, required: true },
-      { title: "Телефон", aliases: ["Тел", "Телефон основной"], width: 18, required: true, kind: "phone" },
+      { title: "Телефон", aliases: ["Тел", "Телефон основной"], width: 18, kind: "phone" },
       { title: "Ещё телефон", aliases: ["Телефон 2", "Доп. телефон"], width: 18, kind: "phone" },
       { title: "Email", aliases: ["Почта", "E-mail"], width: 24 },
       { title: "Адрес", width: 32 },
@@ -68,8 +79,9 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
     key: "orders",
     title: "Заказы",
     sheet: "Заказы",
-    hint: "Одна строка — один заказ. Клиент и техника ищутся по телефону и серийному номеру; если их нет, заводятся.",
+    hint: "Одна строка — один заказ. Клиент ищется по своему номеру или телефону, техника — по серийному; если их нет, заводятся.",
     matchBy: "Номер",
+    requireOneOf: ["Номер клиента", "Телефон клиента"],
     columns: [
       { title: "Номер", aliases: ["№", "Номер заказа"], width: 18, required: true },
       { title: "Принят", aliases: ["Дата приёма"], width: 18, kind: "date" },
@@ -77,7 +89,8 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
       { title: "Тип обращения", aliases: ["Тип"], width: 20 },
       { title: "Срочный", width: 10 },
       { title: "Клиент", aliases: ["Имя клиента"], width: 26, required: true },
-      { title: "Телефон клиента", aliases: ["Телефон"], width: 18, required: true, kind: "phone" },
+      { title: "Номер клиента", aliases: ["Код клиента"], width: 14, kind: "number" },
+      { title: "Телефон клиента", aliases: ["Телефон"], width: 18, kind: "phone" },
       { title: "Техника", aliases: ["Тип техники"], width: 16 },
       { title: "Бренд", width: 16 },
       { title: "Модель", width: 20 },

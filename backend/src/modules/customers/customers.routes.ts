@@ -3,6 +3,7 @@ import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, notFound } from "../../lib/errors";
+import { nextCustomerNumber } from "../../lib/customerNumber";
 import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
@@ -33,6 +34,10 @@ customersRouter.get(
                   { name: { contains: q.search, mode: "insensitive" as const } },
                   { phone: { contains: q.search } },
                   { email: { contains: q.search, mode: "insensitive" as const } },
+                  // Номер ищется, только если введено число: иначе каждый
+                  // поиск по имени тащил бы за собой ещё и сравнение с
+                  // номером, а «Анна» номером не бывает.
+                  ...(/^\d+$/.test(q.search) ? [{ number: Number(q.search) }] : []),
                 ],
               }
             : {}),
@@ -46,6 +51,7 @@ customersRouter.get(
     res.json(
       rows.map((c) => ({
         id: c.id,
+        number: c.number,
         type: c.type,
         name: c.name,
         phone: c.phone,
@@ -164,6 +170,7 @@ customersRouter.get(
     res.json(
       rows.map((c) => ({
         id: c.id,
+        number: c.number,
         type: c.type,
         name: c.name,
         phone: c.phone,
@@ -258,6 +265,7 @@ customersRouter.post(
       const customer = await tx.customer.create({
         data: {
           tenantId,
+          number: await nextCustomerNumber(tx, tenantId),
           ...body,
           ...blankToNull(body),
           createdById: actorUserId(req),
