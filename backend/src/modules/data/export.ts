@@ -8,6 +8,11 @@ import type { SheetData } from "./tableFile";
  * Читаем через переданный tx — то есть внутри withTenant, под изоляцией.
  * Ограничение сверху есть у каждой таблицы: выгрузка не должна превращаться
  * в способ положить сервер, случайно или намеренно.
+ *
+ * Берём ровно те поля, которые попадут в файл: include тянет строку целиком,
+ * а в базе мастерской с пятью тысячами заказов это лишние мегабайты и лишние
+ * секунды. Секунды здесь не про красоту — транзакция ограничена по сроку, и
+ * выгрузка, не уложившаяся в него, падает «Внутренней ошибкой».
  */
 
 const MAX_ROWS = 20000;
@@ -33,11 +38,36 @@ async function customersSheet(tx: Prisma.TransactionClient): Promise<SheetData> 
     where: { deletedAt: null },
     orderBy: { name: "asc" },
     take: MAX_ROWS,
-    include: {
+    select: {
+      id: true,
+      number: true,
+      type: true,
+      name: true,
+      phone: true,
+      phone2: true,
+      email: true,
+      address: true,
+      inn: true,
+      source: true,
+      discountPercent: true,
+      note: true,
+      createdAt: true,
       devices: { select: { kind: true, brand: true, model: true, serial: true } },
-      _count: { select: { orders: true } },
     },
   });
+
+  // Число заказов — одним запросом с группировкой, а не счётчиком на каждую
+  // карточку: пять тысяч подсчётов по одному занимают больше времени, чем
+  // отведено всей выгрузке.
+  const counts = new Map<string, number>();
+  if (rows.length) {
+    const grouped = await tx.order.groupBy({
+      by: ["customerId"],
+      where: { deletedAt: null },
+      _count: { _all: true },
+    });
+    for (const g of grouped) counts.set(g.customerId, g._count._all);
+  }
 
   return {
     name: def.sheet,
@@ -60,7 +90,7 @@ async function customersSheet(tx: Prisma.TransactionClient): Promise<SheetData> 
           [d.kind, d.brand, d.model].filter(Boolean).join(" ") + (d.serial ? ` (${d.serial})` : "")
         )
         .join("; "),
-      c._count.orders,
+      counts.get(c.id) ?? 0,
       c.createdAt,
     ]),
   };
@@ -72,7 +102,22 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
     where: { deletedAt: null },
     orderBy: { acceptedAt: "desc" },
     take: MAX_ROWS,
-    include: {
+    select: {
+      number: true,
+      acceptedAt: true,
+      kind: true,
+      isUrgent: true,
+      complaint: true,
+      receptionNote: true,
+      diagnosis: true,
+      dueAt: true,
+      completedAt: true,
+      issuedAt: true,
+      totalWork: true,
+      totalParts: true,
+      discount: true,
+      total: true,
+      warrantyUntil: true,
       customer: { select: { name: true, number: true, phone: true } },
       device: { select: { kind: true, brand: true, model: true, serial: true } },
       status: { select: { name: true } },
@@ -117,8 +162,15 @@ async function stockSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   const items = await tx.stockItem.findMany({
     orderBy: { name: "asc" },
     take: MAX_ROWS,
-    include: {
-      balances: { include: { warehouse: { select: { name: true } } } },
+    select: {
+      sku: true,
+      name: true,
+      category: true,
+      unit: true,
+      minQty: true,
+      balances: {
+        select: { qty: true, avgCost: true, warehouse: { select: { name: true } } },
+      },
     },
   });
 
@@ -147,7 +199,11 @@ async function stockSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
 
 async function servicesSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   const def = DATASETS.services;
-  const items = await tx.service.findMany({ orderBy: { name: "asc" }, take: MAX_ROWS });
+  const items = await tx.service.findMany({
+    orderBy: { name: "asc" },
+    take: MAX_ROWS,
+    select: { name: true, price: true, note: true, isPinned: true },
+  });
 
   return {
     name: def.sheet,

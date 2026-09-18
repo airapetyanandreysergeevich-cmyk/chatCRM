@@ -21,7 +21,7 @@ import { buildSheets } from "../src/modules/data/export";
 import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
 import { parseDate } from "../src/modules/data/apply";
 import { parseRows } from "../src/modules/data/import";
-import type { TableRow } from "../src/modules/data/tableFile";
+import { writeCsv, writeHtml, writeXlsx, type TableRow } from "../src/modules/data/tableFile";
 
 let fails = 0;
 const check = (ok: boolean, msg: string) => {
@@ -40,6 +40,7 @@ const one = <T>(v: T) => ({ findMany: async () => [v] });
 
 const fakeTx = {
   customer: one({
+    id: "c1",
     number: 412,
     type: "INDIVIDUAL",
     name: "Кузнецов И.",
@@ -52,30 +53,34 @@ const fakeTx = {
     discountPercent: 0,
     note: null,
     devices: [{ kind: "ноутбук", brand: "Lenovo", model: "IdeaPad 5", serial: "PF2XK9LM" }],
-    _count: { orders: 3 },
     createdAt: new Date(),
   }),
-  order: one({
-    number: "0412",
-    acceptedAt: new Date(),
-    status: { name: "Диагностика" },
-    kind: "REPAIR",
-    isUrgent: false,
-    customer: { name: "Кузнецов И.", number: 412, phone: "+7 900 000-00-00" },
-    device: { kind: "ноутбук", brand: "Lenovo", model: "IdeaPad 5", serial: "PF2XK9LM" },
-    complaint: "не включается",
-    receptionNote: null,
-    diagnosis: null,
-    assignedMaster: { fullName: "Сергей Панов" },
-    dueAt: null,
-    completedAt: null,
-    issuedAt: null,
-    totalWork: 0,
-    totalParts: 0,
-    discount: 0,
-    total: 0,
-    warrantyUntil: null,
-  }),
+  order: {
+    ...one({
+      number: "0412",
+      acceptedAt: new Date(),
+      status: { name: "Диагностика" },
+      kind: "REPAIR",
+      isUrgent: false,
+      customer: { name: "Кузнецов И.", number: 412, phone: "+7 900 000-00-00" },
+      device: { kind: "ноутбук", brand: "Lenovo", model: "IdeaPad 5", serial: "PF2XK9LM" },
+      complaint: "не включается",
+      receptionNote: null,
+      diagnosis: null,
+      assignedMaster: { fullName: "Сергей Панов" },
+      dueAt: null,
+      completedAt: null,
+      issuedAt: null,
+      totalWork: 0,
+      totalParts: 0,
+      discount: 0,
+      total: 0,
+      warrantyUntil: null,
+    }),
+    // Число заказов на карточку считается одной группировкой, а не отдельным
+    // счётчиком на каждого клиента: заглушка повторяет именно это.
+    groupBy: async () => [{ customerId: "c1", _count: { _all: 3 } }],
+  },
   stockItem: one({
     sku: "SSD-240",
     name: "SSD 240 ГБ",
@@ -158,6 +163,9 @@ async function main(): Promise<void> {
   const [customers] = await buildSheets(fakeTx as never, ["customers"]);
   check(customers.columns[0].title === "Номер", "номер клиента — первая колонка выгрузки");
   check(customers.rows[0][0] === 412, "номер попадает в выгрузку числом");
+
+  const cnt = customers.columns.findIndex((c) => c.title === "Заказов");
+  check(customers.rows[0][cnt] === 3, "число заказов приходит из группировки, а не из счётчика на карточку");
 
   const [ordersSheet] = await buildSheets(fakeTx as never, ["orders"]);
   const cnum = ordersSheet.columns.findIndex((c) => c.title === "Номер клиента");
@@ -325,6 +333,21 @@ async function main(): Promise<void> {
     ])
   );
   check(мусор.preview.hints.length === 0, "две плохие ячейки из шестидесяти — не повод обвинять шапку");
+
+  // 13. Файл собирается до конца. Раньше проверялась только форма строки, а
+  //     падало всё на записи: ячейка неожиданного типа роняет ExcelJS уже
+  //     после того, как данные собраны, и человек видит «Внутреннюю ошибку»
+  //     без единой подсказки, на каком разделе.
+  const all = await buildSheets(fakeTx as never, DATASET_KEYS);
+  const xlsx = await writeXlsx(all);
+  check(xlsx.length > 0 && xlsx.subarray(0, 2).toString("latin1") === "PK", "книга Excel записывается");
+
+  const csv = writeCsv(all[0]);
+  check(csv.subarray(0, 3).toString("hex") === "efbbbf", "csv начинается с метки порядка байтов — иначе Excel покажет кракозябры");
+  check(csv.toString("utf8").split("\r\n")[0].split(";").length === DATASETS.customers.columns.length, "в шапке csv столько же колонок, сколько описано");
+
+  const html = writeHtml(all, "проверка").toString("utf8");
+  check(html.includes("Заказы") && html.includes("Услуги"), "в html попали все выбранные разделы");
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;

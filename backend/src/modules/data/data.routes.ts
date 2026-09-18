@@ -126,7 +126,29 @@ dataRouter.get(
       throw badRequest("CSV — это один лист. Выберите один раздел или возьмите Excel");
     }
 
-    const sheets = await withTenant(tenantOf(req), (tx) => buildSheets(tx, keys));
+    // Срок задаём явно и с запасом — как у загрузки. База мастерской, в
+    // которой несколько тысяч заказов, собирается дольше пяти секунд, а
+    // отведено по умолчанию именно пять: транзакция закрывалась изнутри, и
+    // наружу выходила «Внутренняя ошибка», из которой причину не узнать.
+    const sheets = await withTenant(
+      tenantOf(req),
+      async (tx) => {
+        const built = await buildSheets(tx, keys);
+        // Запись в журнал — в той же транзакции: вторая ради одной строки
+        // означала бы второе соединение и второй набор задержек на ровном месте.
+        await writeAudit(tx, {
+          tenantId: tenantOf(req),
+          userId: actorUserId(req),
+          entity: "Data",
+          entityId: keys.join(","),
+          action: "EXPORT",
+          diff: { format, rows: built.reduce((n, s) => n + s.rows.length, 0) },
+          ip: clientIp(req),
+        });
+        return built;
+      },
+      { timeout: 5 * 60_000, maxWait: 30_000 }
+    );
 
     const stamp = new Date().toISOString().slice(0, 10);
     const base = keys.length === 1 ? DATASETS[keys[0]].sheet.toLowerCase() : "finecrm";
@@ -144,18 +166,6 @@ dataRouter.get(
       body = writeHtml(sheets, "FineCRM — выгрузка данных");
       type = "text/html; charset=utf-8";
     }
-
-    await withTenant(tenantOf(req), (tx) =>
-      writeAudit(tx, {
-        tenantId: tenantOf(req),
-        userId: actorUserId(req),
-        entity: "Data",
-        entityId: keys.join(","),
-        action: "EXPORT",
-        diff: { format, rows: sheets.reduce((n, s) => n + s.rows.length, 0) },
-        ip: clientIp(req),
-      })
-    );
 
     res.setHeader("Content-Type", type);
     // Имя файла двумя способами: старые браузеры читают первое, все
