@@ -32,6 +32,34 @@ const CUSTOMER_TYPE_LABEL: Record<string, string> = {
   COMPANY: "Организация",
 };
 
+/** Число без хвоста из нулей: 3500, а не 3500.00 — файл читает человек. */
+const plain = (v: Prisma.Decimal | number | null | undefined): string => {
+  const n = num(v);
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3)));
+};
+
+/**
+ * Состав работ или запчастей одной строкой: «Замена матрицы — 3500; Чистка ×2 — 500».
+ *
+ * Количество пишем только когда оно не единица: «×1» у каждой строки — это
+ * шум, за которым перестаёт читаться главное. Разбор понимает оба написания.
+ *
+ * Точку с запятой и тире из названия убираем: ими разделены сами позиции, и
+ * работа с названием «Чистка; профилактика» разъехалась бы на две при
+ * следующей загрузке этого же файла. Потеря невелика, а тихая порча состава
+ * обнаружилась бы через полгода и не здесь.
+ */
+const composition = (
+  rows: Array<{ name: string; qty: Prisma.Decimal | number; price: Prisma.Decimal | number }>
+): string =>
+  rows
+    .map((r) => {
+      const name = r.name.replace(/[;\r\n]+/g, ",").replace(/\s[—–-]\s/g, " ").trim();
+      const qty = num(r.qty);
+      return `${name}${qty === 1 ? "" : ` ×${plain(qty)}`} — ${plain(r.price)}`;
+    })
+    .join("; ");
+
 async function customersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   const def = DATASETS.customers;
   const rows = await tx.customer.findMany({
@@ -122,6 +150,10 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
       device: { select: { kind: true, brand: true, model: true, serial: true } },
       status: { select: { name: true } },
       assignedMaster: { select: { fullName: true } },
+      // Себестоимость запчасти не берём намеренно: выгрузку открывают и те,
+      // кому её видеть не положено, а обратно она всё равно не грузится.
+      works: { select: { name: true, qty: true, price: true }, orderBy: { createdAt: "asc" } },
+      parts: { select: { name: true, qty: true, price: true }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -149,7 +181,9 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
       o.completedAt,
       o.issuedAt,
       num(o.totalWork),
+      composition(o.works),
       num(o.totalParts),
+      composition(o.parts),
       num(o.discount),
       num(o.total),
       o.warrantyUntil,

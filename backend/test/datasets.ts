@@ -20,7 +20,7 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
 import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
-import { parseDate } from "../src/modules/data/apply";
+import { parseDate, parseLineItem } from "../src/modules/data/apply";
 import { parseRows } from "../src/modules/data/import";
 import {
   contentDisposition,
@@ -83,6 +83,11 @@ const fakeTx = {
       discount: 0,
       total: 0,
       warrantyUntil: null,
+      works: [
+        { name: "Замена матрицы", qty: 1, price: 3500 },
+        { name: "Чистка; профилактика", qty: 2, price: 500 },
+      ],
+      parts: [{ name: "Матрица 15.6", qty: 1, price: 4200 }],
     }),
     // Число заказов на карточку считается одной группировкой, а не отдельным
     // счётчиком на каждого клиента: заглушка повторяет именно это.
@@ -374,6 +379,43 @@ async function main(): Promise<void> {
     cd.includes(`filename*=UTF-8''${encodeURIComponent("заказы-2026-09-18.xlsx")}`),
     "русское имя едет в filename* — именно его берёт нынешний браузер"
   );
+
+  // 15. Состав работ и запчастей. Одной суммой заказ не объяснить: «Работы,
+  //     ₽ — 4500» не говорит ни клиенту, ни мастерской, что именно сделали.
+  const wcol = ordersSheet.columns.findIndex((c) => c.title === "Состав работ");
+  const pcol = ordersSheet.columns.findIndex((c) => c.title === "Состав запчастей");
+  const wtext = String(ordersSheet.rows[0][wcol]);
+  check(wcol > 0 && pcol > wcol, "состав стоит рядом со своей суммой, а не в конце таблицы");
+  check(wtext.startsWith("Замена матрицы — 3500"), `работа выгружается с ценой (${wtext})`);
+  check(!wtext.includes("×1"), "количество «один» не пишется — это шум в каждой строке");
+  check(wtext.includes("×2"), "количество, отличное от единицы, пишется");
+  check(
+    !wtext.replace("Замена матрицы — 3500; ", "").includes(";"),
+    "точка с запятой из названия убрана — иначе позиция разъедется надвое"
+  );
+  check(String(ordersSheet.rows[0][pcol]) === "Матрица 15.6 — 4200", "запчасти выгружаются тем же порядком");
+
+  // Круговорот: то, что выгрузили, должно разбираться обратно в то же самое.
+  const back = wtext.split(";").map((s) => parseLineItem(s)).filter(Boolean);
+  check(back.length === 2, "обе позиции разбираются обратно");
+  check(
+    back[0]?.name === "Замена матрицы" && back[0]?.price === 3500 && back[0]?.qty === 1,
+    "первая позиция вернулась целиком"
+  );
+  check(back[1]?.qty === 2 && back[1]?.price === 500, "количество и цена второй позиции вернулись");
+
+  // Чужие написания и ловушки, на которых разбор мог бы тихо испортить данные.
+  check(parseLineItem("Чистка 3-х кулеров — 800")?.name === "Чистка 3-х кулеров", "тире внутри названия не путается с ценой");
+  check(parseLineItem("Чистка 3-х кулеров — 800")?.price === 800, "цена берётся за правым тире");
+  check(parseLineItem("Ремонт Lenovo X1 — 1000")?.name === "Ремонт Lenovo X1", "латинская «x» в модели не съедается как количество");
+  check(parseLineItem("Диагностика - 0")?.price === 0, "бесплатная работа — это тоже работа");
+  check(parseLineItem("Пайка — 1 200,50")?.price === 1200.5, "цена с пробелом и запятой читается");
+  check(parseLineItem("Замена кулера")?.price === 0, "позиция без цены не отбрасывается — название важнее");
+  check(parseLineItem("SSD-240 — 2400")?.name === "SSD-240", "дефис внутри артикула не режет название");
+  check(parseLineItem("SSD-240 — 2400")?.price === 2400, "и цена у такой позиции всё равно находится");
+  check(parseLineItem(" — 3500") === null, "цена без названия — это опечатка, а не работа");
+  check(parseLineItem("3500") === null, "одно только число — тоже не работа");
+  check(parseLineItem("   ") === null, "пустая позиция пропускается");
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;

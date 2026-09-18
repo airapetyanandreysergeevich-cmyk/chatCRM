@@ -181,48 +181,12 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
 }
 
 /**
- * Скидка клиента считается только от стоимости работ.
- *
- * Запчасть мастерская покупает за живые деньги, и процент с неё — это процент
- * из своего кармана. Скидывать можно только то, что заработано руками, поэтому
- * запчасти в расчёт не входят вовсе.
+ * Деньги заказа живут в totals.ts — там нет ничего, кроме арифметики, и
+ * поэтому их можно считать откуда угодно: из карточки, со склада, из
+ * загрузки файла. Здесь — только повторная выдача, чтобы не переписывать
+ * два десятка мест, которые уже берут их отсюда.
  */
-export function discountOnWork(
-  totalWork: number,
-  percent: Prisma.Decimal | number | null | undefined
-): number {
-  const p = Number(percent ?? 0);
-  if (!p) return 0;
-  // Округляем до копеек здесь, а не при выводе: иначе в квитанции и в кассе
-  // окажутся суммы, различающиеся на копейку, и сойтись они уже не смогут.
-  return Math.round(totalWork * p) / 100;
-}
-
-/** Пересчёт сумм после любой правки работ или запчастей — источник истины один. */
-export async function recalcTotals(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
-  const order = await tx.order.findFirst({
-    where: { id: orderId },
-    include: { works: true, parts: true },
-  });
-  if (!order) return;
-
-  const sum = (rows: Array<{ qty: Prisma.Decimal; price: Prisma.Decimal }>) =>
-    rows.reduce((acc, r) => acc + Number(r.qty) * Number(r.price), 0);
-
-  const totalWork = sum(order.works);
-  const totalParts = sum(order.parts);
-  const workDiscount = discountOnWork(totalWork, order.workDiscountPercent);
-  const discount = Number(order.discount);
-
-  await tx.order.update({
-    where: { id: orderId },
-    data: {
-      totalWork,
-      totalParts,
-      total: Math.max(0, totalWork - workDiscount + totalParts - discount),
-    },
-  });
-}
+export { discountOnWork, recalcTotals } from "./totals";
 
 /**
  * Не вышла ли сумма за то, что согласовал клиент.

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { createWithNumber } from "../../lib/customerNumber";
+import { recalcTotals } from "../orders/totals";
 import { parseNumber, phoneKey, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
 
@@ -392,6 +393,7 @@ async function applyOrder(
 
   if (row.existingId) {
     await tx.order.update({ where: { id: row.existingId }, data: common });
+    await applyComposition(tx, tenantId, row.existingId, v, common);
     return;
   }
 
@@ -418,7 +420,7 @@ async function applyOrder(
   const acceptedById = userId ?? lookups.ownerId;
   if (!acceptedById) throw new Error("в мастерской нет владельца, некому записать приём заказа");
 
-  await tx.order.create({
+  const created = await tx.order.create({
     data: {
       ...common,
       tenantId,
@@ -438,6 +440,135 @@ async function applyOrder(
       assignedMasterId: masterId ?? null,
     },
   });
+
+  await applyComposition(tx, tenantId, created.id, v, common);
+}
+
+/**
+ * Состав заказа из файла: что именно сделали и за что взяли деньги.
+ *
+ * Суммы заказа отсюда не выводятся. Если файл назвал хоть одну денежную
+ * колонку — «Работы, ₽», «Запчасти, ₽» или «Итого, ₽», — она и остаётся: эти
+ * числа владелец видел, по ним, возможно, уже прошли деньги в кассе, и
+ * пересчитать их по составу значило бы молча изменить сумму выданного заказа.
+ * Состав в этом случае — расшифровка, а не источник истины.
+ *
+ * И только когда файл о деньгах не сказал ничего, суммы считаются из состава
+ * тем же кодом, что и при обычной правке заказа руками.
+ */
+async function applyComposition(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  orderId: string,
+  v: Record<string, string>,
+  common: { totalWork?: number; totalParts?: number; total?: number }
+): Promise<void> {
+  const works = await applyLineItems(tx, tenantId, orderId, v["Состав работ"], "works");
+  const parts = await applyLineItems(tx, tenantId, orderId, v["Состав запчастей"], "parts");
+  if (!works && !parts) return;
+
+  const silentAboutMoney =
+    common.totalWork === undefined && common.totalParts === undefined && common.total === undefined;
+  if (silentAboutMoney) await recalcTotals(tx, orderId);
+}
+
+interface LineItem {
+  name: string;
+  qty: number;
+  price: number;
+}
+
+/**
+ * «Замена матрицы — 3500; Чистка ×2 — 500» — то, что выгружаем сами.
+ *
+ * Цена — последнее число строки за тире, количество — «×N» перед ним, всё
+ * остальное слева — название. Тире ищем правое: «Чистка 3-х кулеров — 800»
+ * должна разобраться правильно, а таких названий в чужих базах полно.
+ */
+export function parseLineItem(raw: string): LineItem | null {
+  const s = raw.trim();
+  if (!s) return null;
+
+  // «— 3500» и просто «3500» — это цена, потерявшая название, а не позиция.
+  // Завести её значило бы оставить в заказе строку, которую никто не может
+  // ни объяснить клиенту, ни убрать со спокойной душой.
+  const headless = s.replace(/^[—–-]\s*/, "").trim();
+  if (/^[\d\s .,]*(?:₽|руб\.?|р\.?)?$/.test(headless)) return null;
+
+  let name = s;
+  let price = 0;
+  // Жадная «.*» отдаёт самое правое тире, за которым ещё стоит число.
+  const withPrice = s.match(/^(.*)\s[—–-]\s*([\d\s .,]+)(?:\s*(?:₽|руб\.?|р\.?))?$/);
+  if (withPrice) {
+    name = withPrice[1].trim();
+    price = parseNumber(withPrice[2]) ?? 0;
+  }
+
+  // Количество — только «×» и «*». Латинскую «x» не трогаем намеренно:
+  // «Ремонт Lenovo X1» превратился бы в «Ремонт Lenovo» в одном экземпляре,
+  // и заметить это в четырёх тысячах строк невозможно. Файл, написанный
+  // руками как «Чистка x2», станет работой с таким названием — видно сразу
+  // и чинится за секунду, в отличие от съеденной модели.
+  let qty = 1;
+  const withQty = name.match(/[×*]\s*([\d.,]+)$/);
+  if (withQty) {
+    qty = parseNumber(withQty[1]) ?? 1;
+    name = name.slice(0, withQty.index ?? name.length).trim();
+  }
+
+  // Без названия позиции нет: «— 3500» это не работа, а опечатка, и заводить
+  // безымянную строку в заказе значит оставить её там навсегда.
+  if (!name) return null;
+  return { name: name.slice(0, 200), qty: qty > 0 ? qty : 1, price };
+}
+
+/**
+ * Записать состав. Пустая ячейка ничего не трогает — как и везде в загрузке.
+ *
+ * Непустая заменяет состав целиком, а не добавляет к нему: файл загружают по
+ * второму разу постоянно — дополнили телефоны, поправили статусы, — и
+ * добавление удваивало бы работы при каждом заходе. Заметили бы это по сумме
+ * заказа, выросшей вдвое, и уже после того, как счёт показали клиенту.
+ */
+async function applyLineItems(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  orderId: string,
+  raw: string | undefined,
+  kind: "works" | "parts"
+): Promise<boolean> {
+  const text = val(raw);
+  if (text === undefined) return false;
+
+  const items = text
+    .split(";")
+    .map(parseLineItem)
+    .filter((i): i is LineItem => i !== null)
+    .slice(0, 100);
+  if (items.length === 0) return false;
+
+  if (kind === "works") {
+    await tx.orderWork.deleteMany({ where: { orderId } });
+    await tx.orderWork.createMany({
+      data: items.map((i) => ({ tenantId, orderId, name: i.name, qty: i.qty, price: i.price })),
+    });
+  } else {
+    await tx.orderPart.deleteMany({ where: { orderId } });
+    await tx.orderPart.createMany({
+      // PURCHASED, а не STOCK: со склада эта запчасть не списывалась и не
+      // спишется. Пометить её складской значило бы соврать про остатки —
+      // инвентаризация потом не сойдётся, и никто не поймёт почему.
+      data: items.map((i) => ({
+        tenantId,
+        orderId,
+        name: i.name,
+        qty: i.qty,
+        price: i.price,
+        source: "PURCHASED" as const,
+      })),
+    });
+  }
+  return true;
 }
 
 async function findOrCreateCustomer(
