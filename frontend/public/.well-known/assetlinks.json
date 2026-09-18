@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ru.finecrm.app",
+      "sha256_cert_fingerprints": ["9F:2F:13:66:2A:BF:E6:73:85:43:D4:17:01:D1:32:E7:70:39:D0:D9:E7:B1:54:52:51:85:86:81:4F:A2:84:19"]
+    }
+  }
+]
