@@ -188,9 +188,13 @@ function validateRow(columns: ColumnDef[], values: Record<string, string>, row: 
   return out;
 }
 
+/** Название услуги без учёта регистра и лишних пробелов — как её узнаёт человек. */
+export const serviceKey = (raw: string): string => raw.trim().replace(/\s+/g, " ").toLowerCase();
+
 function matchKey(dataset: DatasetKey, values: Record<string, string>): string | null {
   if (dataset === "customers") return phoneKey(values["Телефон"] ?? "") || null;
   if (dataset === "orders") return (values["Номер"] ?? "").trim() || null;
+  if (dataset === "services") return serviceKey(values["Название"] ?? "") || null;
   // На складе артикул есть не всегда — тогда сличаем по названию.
   const sku = (values["Артикул"] ?? "").trim();
   return sku || (values["Наименование"] ?? "").trim().toLowerCase() || null;
@@ -230,6 +234,22 @@ async function markExisting(
     const byNumber = new Map(existing.map((o) => [o.number, o.id]));
     for (const r of rows) {
       const id = byNumber.get((r.values["Номер"] ?? "").trim());
+      if (id) {
+        r.existingId = id;
+        r.action = "update";
+      }
+    }
+    return;
+  }
+
+  if (dataset === "services") {
+    // Название в базе уникально в пределах мастерской, но сравнение там
+    // точное, а в чужой выгрузке та же работа приедет с другим регистром и
+    // двойным пробелом. Сличаем так же, как сличает глаз.
+    const existing = await tx.service.findMany({ select: { id: true, name: true } });
+    const byName = new Map(existing.map((s) => [serviceKey(s.name), s.id]));
+    for (const r of rows) {
+      const id = byName.get(serviceKey(r.values["Название"] ?? ""));
       if (id) {
         r.existingId = id;
         r.action = "update";

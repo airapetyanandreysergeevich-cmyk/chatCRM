@@ -45,6 +45,7 @@ export async function applyRows(
     try {
       if (dataset === "customers") await applyCustomer(tx, tenantId, row, userId);
       else if (dataset === "stock") await applyStock(tx, tenantId, row);
+      else if (dataset === "services") await applyService(tx, tenantId, row);
       else await applyOrder(tx, tenantId, row, userId);
 
       if (row.action === "update") result.updated += 1;
@@ -179,6 +180,41 @@ async function applyStock(
       },
     });
   }
+}
+
+// ------------------------------------------------------------------ услуги
+
+async function applyService(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  row: ParsedRow
+): Promise<void> {
+  const v = row.values;
+  // Цену пустой ячейкой не затираем — как и везде. Но у новой услуги цены
+  // может не быть вовсе: в схеме там ноль по умолчанию, и это честно
+  // означает «договорная», а не «бесплатно».
+  const data = {
+    price: numOrUndef(v["Цена, ₽"]),
+    note: val(v["Примечание"]),
+    isPinned: /^(да|1|true|yes|\+)$/i.test((v["В карточке заказа"] ?? "").trim()) || undefined,
+  };
+
+  if (row.existingId) {
+    await tx.service.update({ where: { id: row.existingId }, data });
+    return;
+  }
+
+  // Название берём как в файле, а не приведённым к нижнему регистру: ключ
+  // нужен для сличения, показывать человеку нужно его собственный текст.
+  await tx.service.create({
+    data: {
+      tenantId,
+      name: (val(v["Название"]) ?? "Без названия").replace(/\s+/g, " "),
+      price: data.price ?? 0,
+      note: data.note,
+      isPinned: data.isPinned ?? false,
+    },
+  });
 }
 
 // ------------------------------------------------------------------ заказы

@@ -41,7 +41,7 @@ const SECTIONS: Section[] = [
   {
     to: "/settings/data",
     title: "Базы",
-    text: "Выгрузить клиентов, заказы и склад в Excel или CSV. Загрузить свои данные из файла.",
+    text: "Выгрузить клиентов, заказы, склад и прайс в Excel или CSV. Загрузить свои данные из файла.",
     icon: <IconDatabase />,
     need: "settings.manage",
   },

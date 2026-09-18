@@ -143,6 +143,17 @@ async function stockSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   };
 }
 
+async function servicesSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
+  const def = DATASETS.services;
+  const items = await tx.service.findMany({ orderBy: { name: "asc" }, take: MAX_ROWS });
+
+  return {
+    name: def.sheet,
+    columns: def.columns.map((c) => ({ title: c.title, width: c.width })),
+    rows: items.map((s) => [s.name, num(s.price), s.note, s.isPinned ? "да" : ""]),
+  };
+}
+
 export async function buildSheets(
   tx: Prisma.TransactionClient,
   keys: DatasetKey[]
@@ -152,6 +163,7 @@ export async function buildSheets(
     if (key === "customers") out.push(await customersSheet(tx));
     if (key === "orders") out.push(await ordersSheet(tx));
     if (key === "stock") out.push(await stockSheet(tx));
+    if (key === "services") out.push(await servicesSheet(tx));
   }
   return out;
 }

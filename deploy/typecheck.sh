@@ -39,6 +39,15 @@ docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
   npx tsx test/tenant-tables.ts
 "
 
+# Описание колонки и сборка строки для неё лежат в разных файлах: забыть
+# одно при добавлении другого — дело минуты, а выгруженный файл после этого
+# едет на ячейку вправо с середины, и Excel об этом не скажет.
+echo ">>> Таблицы выгрузки"
+docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/datasets.ts
+"
+
 echo ">>> Фронтенд"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL

@@ -2,7 +2,7 @@ import { api } from "./api";
 
 /** Выгрузка и загрузка данных мастерской. */
 
-export type DatasetKey = "customers" | "orders" | "stock";
+export type DatasetKey = "customers" | "orders" | "stock" | "services";
 export type FormatKey = "xlsx" | "csv" | "html";
 
 export interface DatasetInfo {
