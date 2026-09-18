@@ -44,6 +44,10 @@ Thumbs.db
 # обновление. Держим его только на сервере и в отдельной копии.
 deploy/android/android.keystore
 deploy/android/*.apk
+# Собранный бандл и его подпись — выход сборки, а не исходник: полтора
+# мегабайта двоичного файла в каждом коммите, где его пересобрали.
+deploy/android/*.aab
+deploy/android/*.idsig
 deploy/android/app/
 deploy/android/.gradle/
 deploy/android/build/
@@ -72,3 +76,12 @@ _to_delete/
 # в неё кладут файл прямо на сервере.
 deploy/downloads/*
 !deploy/downloads/.gitkeep
+
+# Зависимости бэкенда, поставленные в корень по ошибке: npm install без
+# перехода в backend/ заводит здесь свой package.json, и он начинает жить
+# своей жизнью рядом с настоящим.
+/package.json
+/package-lock.json
+/node_modules/
+deploy/package.json
+deploy/package-lock.json
