@@ -91,6 +91,10 @@ function Tile({
   const Tag = as as "a";
   return (
     <Tag
+      // Плитки стоят внутри формы входа, а кнопка без type — это кнопка
+      // отправки: клик по «iOS» отправлял форму с пустыми полями и выдавал
+      // ошибку входа вместо инструкции.
+      {...(as === "button" ? { type: "button" as const } : null)}
       {...rest}
       className="flex flex-1 items-center gap-3 rounded-card border border-line bg-surface p-3 text-left transition-colors duration-150 hover:border-line-strong hover:bg-surface-hover"
     >
