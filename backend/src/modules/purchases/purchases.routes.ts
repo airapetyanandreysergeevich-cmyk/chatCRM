@@ -4,6 +4,7 @@ import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, badRequest, notFound } from "../../lib/errors";
+import { pageFields, paged, skipTake } from "../../lib/paging";
 import { notifyTenant } from "../../lib/notify";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
@@ -79,7 +80,7 @@ purchasesRouter.get(
       .object({
         status: z.enum(["DRAFT", "PENDING", "APPROVED", "ORDERED", "RECEIVED", "REJECTED"]).optional(),
         orderId: z.string().uuid().optional(),
-        limit: z.coerce.number().int().min(1).max(200).default(60),
+        ...pageFields,
       })
       .parse(req.query);
 
@@ -87,50 +88,60 @@ purchasesRouter.get(
     // Мастер видит свои заявки. Он их создаёт, но чужие закупки — не его дело.
     const onlyMine = !has(req, PERMISSIONS.PURCHASES_VIEW) && !has(req, PERMISSIONS.PURCHASES_APPROVE);
 
-    const rows = await withTenant(tenantOf(req), (tx) =>
-      tx.purchaseRequest.findMany({
-        where: {
-          ...(q.status ? { status: q.status } : {}),
-          ...(q.orderId ? { orderId: q.orderId } : {}),
-          ...(onlyMine && me ? { createdById: me } : {}),
-        },
-        orderBy: { createdAt: "desc" },
-        take: q.limit,
-        include: {
-          items: true,
-          createdBy: { select: { id: true, fullName: true } },
-          approvedBy: { select: { id: true, fullName: true } },
-          order: { select: { id: true, number: true } },
-        },
-      })
+    // Одно условие на выборку и на подсчёт — иначе «страница 7 из 3».
+    const where = {
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.orderId ? { orderId: q.orderId } : {}),
+      ...(onlyMine && me ? { createdById: me } : {}),
+    };
+
+    const [rows, total] = await withTenant(tenantOf(req), (tx) =>
+      Promise.all([
+        tx.purchaseRequest.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          ...skipTake(q),
+          include: {
+            items: true,
+            createdBy: { select: { id: true, fullName: true } },
+            approvedBy: { select: { id: true, fullName: true } },
+            order: { select: { id: true, number: true } },
+          },
+        }),
+        tx.purchaseRequest.count({ where }),
+      ])
     );
 
     res.json(
-      rows.map((r) => ({
-        id: r.id,
-        number: r.number,
-        status: r.status,
-        statusLabel: STATUS_LABEL[r.status] ?? r.status,
-        comment: r.comment,
-        rejectionReason: r.rejectionReason,
-        createdBy: r.createdBy,
-        approvedBy: r.approvedBy,
-        order: r.order,
-        createdAt: r.createdAt,
-        approvedAt: r.approvedAt,
-        items: r.items.map((i) => ({
-          id: i.id,
-          name: i.name,
-          qty: num(i.qty),
-          unit: i.unit,
-          link: i.link,
-          expectedPrice: i.expectedPrice === null ? null : num(i.expectedPrice),
-          receivedQty: num(i.receivedQty),
-          note: i.note,
-          stockItemId: i.stockItemId,
+      paged(
+        rows.map((r) => ({
+          id: r.id,
+          number: r.number,
+          status: r.status,
+          statusLabel: STATUS_LABEL[r.status] ?? r.status,
+          comment: r.comment,
+          rejectionReason: r.rejectionReason,
+          createdBy: r.createdBy,
+          approvedBy: r.approvedBy,
+          order: r.order,
+          createdAt: r.createdAt,
+          approvedAt: r.approvedAt,
+          items: r.items.map((i) => ({
+            id: i.id,
+            name: i.name,
+            qty: num(i.qty),
+            unit: i.unit,
+            link: i.link,
+            expectedPrice: i.expectedPrice === null ? null : num(i.expectedPrice),
+            receivedQty: num(i.receivedQty),
+            note: i.note,
+            stockItemId: i.stockItemId,
+          })),
+          total: r.items.reduce((n, i) => n + num(i.qty) * num(i.expectedPrice), 0),
         })),
-        total: r.items.reduce((n, i) => n + num(i.qty) * num(i.expectedPrice), 0),
-      }))
+        total,
+        q
+      )
     );
   })
 );

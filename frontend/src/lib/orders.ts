@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, type Page } from "./api";
 import type { PaymentMethod } from "./debt";
 import type { Service } from "./services";
 
@@ -206,7 +206,7 @@ export const money = (v: number | null | undefined) =>
 export const ordersApi = {
   reference: () => api.get<Reference>("/reference"),
   list: (params: Record<string, string>) =>
-    api.get<Order[]>(`/orders?${new URLSearchParams(params).toString()}`),
+    api.get<Page<Order>>(`/orders?${new URLSearchParams(params).toString()}`),
   get: (id: string) => api.get<Order>(`/orders/${id}`),
   create: (body: unknown) => api.post<{ id: string; number: string }>("/orders", body),
   setStatus: (id: string, statusId: string, comment?: string) =>

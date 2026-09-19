@@ -14,7 +14,8 @@ import {
   Spinner,
   StatusGlyph,
 } from "../components/ui";
-import { ApiError, api } from "../lib/api";
+import { Pager } from "../components/Pager";
+import { ApiError, api, type Page } from "../lib/api";
 import { formatDateTime, plural } from "../lib/format";
 
 interface Role {
@@ -39,6 +40,8 @@ interface StaffRow {
 
 export default function Staff() {
   const [rows, setRows] = useState<StaffRow[] | null>(null);
+  const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
+  const [page, setPage] = useState(1);
   const [roles, setRoles] = useState<Role[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -46,13 +49,17 @@ export default function Staff() {
 
   const load = useCallback(async () => {
     try {
-      const [staff, roleList] = await Promise.all([api.get<StaffRow[]>("/staff"), api.get<Role[]>("/roles")]);
-      setRows(staff);
+      const [staff, roleList] = await Promise.all([
+        api.get<Page<StaffRow>>(`/staff?page=${page}`),
+        api.get<Role[]>("/roles"),
+      ]);
+      setRows(staff.rows);
+      setPageInfo({ page: staff.page, pages: staff.pages, total: staff.total, pageSize: staff.pageSize });
       setRoles(roleList);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить сотрудников");
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     void load();
@@ -144,6 +151,14 @@ export default function Staff() {
           />
         ))}
       </List>
+
+      <Pager
+        {...pageInfo}
+        onPage={(n) => {
+          setPage(n);
+          window.scrollTo({ top: 0 });
+        }}
+      />
 
       {creating && (
         <StaffModal

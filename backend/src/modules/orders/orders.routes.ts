@@ -9,6 +9,7 @@ import { env } from "../../lib/env";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { notifyTenant } from "../../lib/notify";
 import { nextOrderNumber } from "../../lib/orderNumber";
+import { pageFields, paged, skipTake } from "../../lib/paging";
 import { nextCustomerNumber } from "../../lib/customerNumber";
 import { takePayment } from "../../lib/payment";
 import { PERMISSIONS } from "../../lib/permissions";
@@ -122,7 +123,7 @@ ordersRouter.get(
         statusId: z.string().uuid().optional(),
         group: z.enum(["NEW", "IN_PROGRESS", "WAITING", "DONE", "CLOSED", "CANCELLED"]).optional(),
         mine: z.enum(["1", "0"]).optional(),
-        limit: z.coerce.number().int().min(1).max(200).default(60),
+        ...pageFields,
       })
       .parse(req.query);
 
@@ -130,24 +131,32 @@ ordersRouter.get(
     // Мастер видит только назначенное ему — фильтр стоит в запросе, а не в интерфейсе.
     const onlyMine = !seesAllOrders(req) || q.mine === "1";
 
-    const rows = await withTenant(tenantOf(req), (tx) =>
-      tx.order.findMany({
-        where: {
-          deletedAt: null,
-          ...(onlyMine && me ? { assignedMasterId: me } : {}),
-          ...(q.statusId ? { statusId: q.statusId } : {}),
-          ...(q.group ? { status: { group: q.group } } : {}),
-          ...(q.search ? { OR: searchWhere(q.search, seesCustomerContacts(req)) } : {}),
-        },
-        orderBy: [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
-        take: q.limit,
-        include: orderInclude,
-      })
+    // Условие выписано отдельно: по нему идут и выборка страницы, и подсчёт
+    // общего числа. Разъехавшись, они дали бы «страница 7 из 3» — и виноватой
+    // выглядела бы навигация, а не забытый фильтр.
+    const where = {
+      deletedAt: null,
+      ...(onlyMine && me ? { assignedMasterId: me } : {}),
+      ...(q.statusId ? { statusId: q.statusId } : {}),
+      ...(q.group ? { status: { group: q.group } } : {}),
+      ...(q.search ? { OR: searchWhere(q.search, seesCustomerContacts(req)) } : {}),
+    };
+
+    const [rows, total] = await withTenant(tenantOf(req), (tx) =>
+      Promise.all([
+        tx.order.findMany({
+          where,
+          orderBy: [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
+          ...skipTake(q),
+          include: orderInclude,
+        }),
+        tx.order.count({ where }),
+      ])
     );
 
     const contacts = seesCustomerContacts(req);
     const money = seesMoney(req);
-    res.json(rows.map((o) => projectOrder(o, { contacts, money })));
+    res.json(paged(rows.map((o) => projectOrder(o, { contacts, money })), total, q));
   })
 );
 

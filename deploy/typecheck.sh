@@ -71,5 +71,14 @@ docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   npx tsx test/chips.ts
 "
 
+# Ряд номеров страниц — это навигация, а не украшение: по нему человек
+# добирается до конца списка. Пропущенная страница выглядит не как ошибка, а
+# как «туда просто нельзя попасть».
+echo ">>> Страницы списков"
+docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/pager.ts
+"
+
 echo
 echo ">>> Всё сходится. Обновить сервер: bash deploy/update.sh"

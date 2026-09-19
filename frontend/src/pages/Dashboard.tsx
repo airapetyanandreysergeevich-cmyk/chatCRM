@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { IconOrders } from "../components/icons";
 import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
@@ -151,8 +151,18 @@ function OrderCardTile({ card }: { card: BoardCard }) {
   );
 }
 
-function StageColumnPanel({ stage, column }: { stage: Stage; column: StageColumn }) {
-  const hidden = column.total - column.items.length;
+function StageColumnPanel({
+  stage,
+  column,
+  fit,
+}: {
+  stage: Stage;
+  column: StageColumn;
+  /** Сколько карточек помещается на экран. Одно число на все колонки. */
+  fit: number;
+}) {
+  const shown = column.items.slice(0, fit);
+  const hidden = column.total - shown.length;
 
   return (
     <section className={"rounded-panel border p-3 sm:p-3.5 " + stage.panel}>
@@ -176,11 +186,11 @@ function StageColumnPanel({ stage, column }: { stage: Stage; column: StageColumn
         </span>
       </Link>
 
-      {column.items.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Пусто</p>
       ) : (
-        <div className="space-y-2">
-          {column.items.map((card) => (
+        <div className="space-y-2" data-cards>
+          {shown.map((card) => (
             <OrderCardTile key={card.id} card={card} />
           ))}
         </div>
@@ -198,10 +208,69 @@ function StageColumnPanel({ stage, column }: { stage: Stage; column: StageColumn
   );
 }
 
+/**
+ * Сколько карточек помещается на видимую часть экрана.
+ *
+ * Доска — рабочее место, а не список: на неё смотрят, а не листают её. Пока
+ * в колонку падало всё подряд, главная растягивалась на три экрана, и по
+ * высоте столбцов, ради которой доска и сделана, ничего сравнить было
+ * нельзя — второй колонки просто не видно, когда первая уехала вниз.
+ *
+ * Высоту карточки не задаём числом, а меряем: шрифт зависит от темы и от
+ * настроек человека, а «86 пикселей» в коде расходятся с правдой в первый
+ * же день. Меряем первую отрисованную карточку и от неё считаем остальные.
+ *
+ * Число одно на все четыре колонки. Считать каждой своё значило бы, что на
+ * узком экране, где колонки идут одна под другой, нижние получают по одной
+ * карточке — они и правда начинаются ниже края экрана, но выглядит это как
+ * поломка, а не как забота.
+ */
+function useFit(ready: boolean): [number, (el: HTMLDivElement | null) => void] {
+  const board = useRef<HTMLDivElement | null>(null);
+  // Шесть — столько, чтобы было что померить, и не столько, чтобы экран
+  // дёрнулся, если поместится меньше.
+  const [fit, setFit] = useState(6);
+
+  const measure = useCallback(() => {
+    const el = board.current;
+    if (!el) return;
+
+    // Узкий экран: колонки идут одна под другой, и «влезает» теряет смысл —
+    // ниже первой не видно ничего. Показываем немного и одинаково.
+    if (!window.matchMedia("(min-width: 768px)").matches) return setFit(4);
+
+    const cards = el.querySelector<HTMLElement>("[data-cards]");
+    const card = cards?.firstElementChild?.getBoundingClientRect().height ?? 86;
+    const top = (cards ?? el).getBoundingClientRect().top;
+    const gap = 8;
+    // Запас под строку «ещё N заказов» и воздух под доской: без него
+    // последняя карточка в колонке всегда оказывается наполовину срезанной.
+    const reserve = 64;
+
+    const n = Math.floor((window.innerHeight - top - reserve + gap) / (card + gap));
+    setFit(Math.max(1, Math.min(n, 60)));
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [ready, measure]);
+
+  return [
+    fit,
+    (el) => {
+      board.current = el;
+    },
+  ];
+}
+
 export default function Dashboard() {
   const { me } = useAuth();
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fit, boardRef] = useFit(data !== null);
 
   useEffect(() => {
     summaryApi
@@ -273,12 +342,13 @@ export default function Dashboard() {
       ) : (
         // items-start: колонки не тянутся до высоты самой длинной, а растут
         // каждая на свою высоту — по ней и видно, где скопилась работа.
-        <div className="grid items-start gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div ref={boardRef} className="grid items-start gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
           {STAGES.map((stage) => (
             <StageColumnPanel
               key={stage.key}
               stage={stage}
               column={byKey.get(stage.key) ?? { key: stage.key, total: 0, items: [] }}
+              fit={fit}
             />
           ))}
         </div>

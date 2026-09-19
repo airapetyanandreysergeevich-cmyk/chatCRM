@@ -18,6 +18,7 @@ import {
   type GlyphTone,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
+import { Pager } from "../components/Pager";
 import { useAuth } from "../lib/auth";
 import { formatDateShort, plural } from "../lib/format";
 import { money } from "../lib/orders";
@@ -63,6 +64,7 @@ export default function Purchases() {
   const { can } = useAuth();
   const [params, setParams] = useSearchParams();
   const [rows, setRows] = useState<Purchase[] | null>(null);
+  const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [rejecting, setRejecting] = useState<Purchase | null>(null);
@@ -76,16 +78,30 @@ export default function Purchases() {
     const p = new URLSearchParams(params);
     if (next) p.set("status", next);
     else p.delete("status");
+    // Сменили фильтр — страница снова первая, иначе список окажется пустым
+    // не потому, что заявок нет, а потому, что их столько не набралось.
+    p.delete("page");
     setParams(p, { replace: true });
+  };
+
+  const page = Math.max(1, Number(params.get("page") ?? 1) || 1);
+  const setPage = (next: number) => {
+    const p = new URLSearchParams(params);
+    if (next > 1) p.set("page", String(next));
+    else p.delete("page");
+    setParams(p, { replace: true });
+    window.scrollTo({ top: 0 });
   };
 
   const load = useCallback(async () => {
     try {
-      setRows(await purchasesApi.list(status ? { status } : {}));
+      const data = await purchasesApi.list({ ...(status ? { status } : {}), page });
+      setRows(data.rows);
+      setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заявки");
     }
-  }, [status]);
+  }, [status, page]);
 
   useEffect(() => {
     void load();
@@ -234,6 +250,8 @@ export default function Purchases() {
           ))}
         </List>
       )}
+
+      {rows && <Pager {...pageInfo} onPage={setPage} />}
 
       {creating && (
         <CreateModal

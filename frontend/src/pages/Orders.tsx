@@ -16,6 +16,7 @@ import {
 } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { Pager } from "../components/Pager";
 import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
 import {
   money,
@@ -44,6 +45,7 @@ export default function Orders() {
   const { can } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState<Order[] | null>(null);
+  const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
   // Группа берётся из адреса: со сводки сюда приходят по ссылке
   // «3 просрочено», и фильтр должен уже стоять, а не сбрасываться.
   const [params, setParams] = useSearchParams();
@@ -52,6 +54,10 @@ export default function Orders() {
     const p = new URLSearchParams(params);
     if (next) p.set("group", next);
     else p.delete("group");
+    // Сменили фильтр — страница снова первая. Иначе человек, стоявший на
+    // седьмой странице «Всех», нажимает «Ремонт» и видит пустоту: ремонтов
+    // столько не набралось, а выглядит это как поломка.
+    p.delete("page");
     setParams(p, { replace: true });
   };
   const [search, setSearch] = useState("");
@@ -60,17 +66,30 @@ export default function Orders() {
   const canCreate = can("orders.create");
   const onlyAssigned = !can("orders.view.all") && can("orders.view.assigned");
 
+  // Страница живёт в адресе вместе с фильтром: вернувшись из заказа
+  // «назад», человек должен попасть туда же, откуда ушёл, а не на первую.
+  const page = Math.max(1, Number(params.get("page") ?? 1) || 1);
+  const setPage = (next: number) => {
+    const p = new URLSearchParams(params);
+    if (next > 1) p.set("page", String(next));
+    else p.delete("page");
+    setParams(p, { replace: true });
+    window.scrollTo({ top: 0 });
+  };
+
   const load = useCallback(async () => {
     setRows(null);
     try {
-      const params: Record<string, string> = {};
-      if (group) params.group = group;
-      if (search.trim()) params.search = search.trim();
-      setRows(await ordersApi.list(params));
+      const query: Record<string, string> = { page: String(page) };
+      if (group) query.group = group;
+      if (search.trim()) query.search = search.trim();
+      const data = await ordersApi.list(query);
+      setRows(data.rows);
+      setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [group, search]);
+  }, [group, search, page]);
 
   useEffect(() => {
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
@@ -106,7 +125,10 @@ export default function Orders() {
           <SearchInput
             placeholder="Номер, техника, серийный номер, неисправность или комментарий"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              if (page > 1) setPage(1);
+            }}
             className="lg:max-w-[380px]"
           />
           <div className="flex flex-wrap gap-1.5">
@@ -231,11 +253,7 @@ export default function Orders() {
         </List>
       )}
 
-      {rows && rows.length > 0 && (
-        <p className="text-[12.5px] text-ink-dim">
-          {plural(rows.length, "заказ", "заказа", "заказов")} в списке.
-        </p>
-      )}
+      {rows && <Pager {...pageInfo} onPage={setPage} />}
     </div>
   );
 }

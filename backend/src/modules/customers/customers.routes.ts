@@ -3,6 +3,7 @@ import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, notFound } from "../../lib/errors";
+import { pageFields, paged, skipTake } from "../../lib/paging";
 import { nextCustomerNumber } from "../../lib/customerNumber";
 import { debts } from "../../lib/debt";
 import { PERMISSIONS } from "../../lib/permissions";
@@ -21,51 +22,62 @@ customersRouter.get(
     const q = z
       .object({
         search: z.string().trim().max(120).optional(),
-        limit: z.coerce.number().int().min(1).max(200).default(60),
+        ...pageFields,
       })
       .parse(req.query);
 
-    const rows = await withTenant(tenantOf(req), (tx) =>
-      tx.customer.findMany({
-        where: {
-          deletedAt: null,
-          ...(q.search
-            ? {
-                OR: [
-                  { name: { contains: q.search, mode: "insensitive" as const } },
-                  { phone: { contains: q.search } },
-                  { email: { contains: q.search, mode: "insensitive" as const } },
-                  // Номер ищется, только если введено число: иначе каждый
-                  // поиск по имени тащил бы за собой ещё и сравнение с
-                  // номером, а «Анна» номером не бывает.
-                  ...(/^\d+$/.test(q.search) ? [{ number: Number(q.search) }] : []),
-                ],
-              }
-            : {}),
-        },
-        orderBy: { createdAt: "desc" },
-        take: q.limit,
-        include: { _count: { select: { orders: true, devices: true } } },
-      })
+    // Условие одно на выборку и на подсчёт: разъехавшись, они дали бы
+    // «страница 7 из 3», и виноватой выглядела бы навигация.
+    const where = {
+      deletedAt: null,
+      ...(q.search
+        ? {
+            OR: [
+              { name: { contains: q.search, mode: "insensitive" as const } },
+              { phone: { contains: q.search } },
+              { email: { contains: q.search, mode: "insensitive" as const } },
+              // Номер ищется, только если введено число: иначе каждый
+              // поиск по имени тащил бы за собой ещё и сравнение с
+              // номером, а «Анна» номером не бывает.
+              ...(/^\d+$/.test(q.search) ? [{ number: Number(q.search) }] : []),
+            ],
+          }
+        : {}),
+    };
+
+    const [rows, total] = await withTenant(tenantOf(req), (tx) =>
+      Promise.all([
+        tx.customer.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          ...skipTake(q),
+          include: { _count: { select: { orders: true, devices: true } } },
+        }),
+        tx.customer.count({ where }),
+      ])
     );
 
     res.json(
-      rows.map((c) => ({
-        id: c.id,
-        number: c.number,
-        type: c.type,
-        name: c.name,
-        phone: c.phone,
-        phone2: c.phone2,
-        email: c.email,
-        address: c.address,
-        source: c.source,
-        note: c.note,
-        discountPercent: Number(c.discountPercent),
-        createdAt: c.createdAt,
-        orderCount: c._count.orders,
-        deviceCount: c._count.devices,
-      }))
+      paged(
+        rows.map((c) => ({
+          id: c.id,
+          number: c.number,
+          type: c.type,
+          name: c.name,
+          phone: c.phone,
+          phone2: c.phone2,
+          email: c.email,
+          address: c.address,
+          source: c.source,
+          note: c.note,
+          discountPercent: Number(c.discountPercent),
+          createdAt: c.createdAt,
+          orderCount: c._count.orders,
+          deviceCount: c._count.devices,
+        })),
+        total,
+        q
+      )
     );
   })
 );

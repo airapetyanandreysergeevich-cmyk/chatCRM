@@ -17,8 +17,9 @@ import {
   Spinner,
   StatusGlyph,
 } from "../components/ui";
-import { ApiError, api } from "../lib/api";
+import { ApiError, api, type Page } from "../lib/api";
 import { DebtPanel } from "../components/DebtPanel";
+import { Pager } from "../components/Pager";
 import { formatDateShort, plural } from "../lib/format";
 
 interface Client {
@@ -66,6 +67,8 @@ const formOf = (c: Client): Form => ({
 
 export default function Clients() {
   const [rows, setRows] = useState<Client[] | null>(null);
+  const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   /** null — окно закрыто, "new" — создание, объект — правка. */
@@ -73,12 +76,15 @@ export default function Clients() {
 
   const load = useCallback(async () => {
     try {
-      const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
-      setRows(await api.get<Client[]>(`/customers${q}`));
+      const p = new URLSearchParams({ page: String(page) });
+      if (search.trim()) p.set("search", search.trim());
+      const data = await api.get<Page<Client>>(`/customers?${p.toString()}`);
+      setRows(data.rows);
+      setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить клиентов");
     }
-  }, [search]);
+  }, [search, page]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
@@ -110,7 +116,12 @@ export default function Clients() {
         <SearchInput
           placeholder="Имя, телефон, email или номер"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            // Новый поиск — снова первая страница: иначе человек ищет и
+            // попадает на седьмую страницу того, чего нашлось три строки.
+            setPage(1);
+          }}
           className="sm:max-w-[380px]"
         />
       </Card>
@@ -203,10 +214,14 @@ export default function Clients() {
         </List>
       )}
 
-      {rows && rows.length > 0 && (
-        <p className="text-[12.5px] text-ink-dim">
-          {plural(rows.length, "клиент", "клиента", "клиентов")} в списке.
-        </p>
+      {rows && (
+        <Pager
+          {...pageInfo}
+          onPage={(n) => {
+            setPage(n);
+            window.scrollTo({ top: 0 });
+          }}
+        />
       )}
 
       {editing && (

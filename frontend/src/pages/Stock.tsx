@@ -19,6 +19,7 @@ import {
   StatusGlyph,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
+import { Pager } from "../components/Pager";
 import { useAuth } from "../lib/auth";
 import { formatDateTime, plural } from "../lib/format";
 import { money } from "../lib/orders";
@@ -59,16 +60,28 @@ export default function Stock() {
     const p = new URLSearchParams(params);
     if (next && next !== "all") p.set("filter", next);
     else p.delete("filter");
+    // Сменили отбор — страница снова первая: «мало» на седьмой странице
+    // выглядело бы как пустой склад.
+    p.delete("page");
     setParams(p, { replace: true });
+  };
+
+  const page = Math.max(1, Number(params.get("page") ?? 1) || 1);
+  const setPage = (next: number) => {
+    const p = new URLSearchParams(params);
+    if (next > 1) p.set("page", String(next));
+    else p.delete("page");
+    setParams(p, { replace: true });
+    window.scrollTo({ top: 0 });
   };
 
   const load = useCallback(async () => {
     try {
-      setData(await stockApi.list({ search: search.trim(), filter }));
+      setData(await stockApi.list({ search: search.trim(), filter, page }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить склад");
     }
-  }, [search, filter]);
+  }, [search, filter, page]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
@@ -97,7 +110,10 @@ export default function Stock() {
           <SearchInput
             placeholder="Название, артикул или категория"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+            setSearch(e.target.value);
+            if (page > 1) setPage(1);
+          }}
             className="lg:max-w-[380px]"
           />
           <div className="flex flex-wrap gap-1.5">
@@ -234,6 +250,14 @@ export default function Stock() {
               ))}
             </List>
           )}
+
+          <Pager
+            page={data.page}
+            pages={data.pages}
+            total={data.total}
+            pageSize={data.pageSize}
+            onPage={setPage}
+          />
 
           <p className="text-[12.5px] text-ink-dim">
             {plural(data.totals.positions, "позиция", "позиции", "позиций")} в номенклатуре

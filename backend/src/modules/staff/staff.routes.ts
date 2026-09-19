@@ -3,6 +3,7 @@ import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
+import { pageFields, paged, skipTake } from "../../lib/paging";
 import { hashPassword } from "../../lib/password";
 import { ALL_PERMISSIONS, PERMISSION_GROUPS, PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermission, requireTenant } from "../../middleware/auth";
@@ -33,29 +34,40 @@ staffRouter.get(
   "/staff",
   requirePermission(PERMISSIONS.STAFF_MANAGE),
   ah(async (req, res) => {
-    const users = await withTenant(tenantOf(req), (tx) =>
-      tx.user.findMany({
-        where: { deletedAt: null },
-        orderBy: [{ isOwner: "desc" }, { fullName: "asc" }],
-        include: { role: { select: { id: true, name: true, code: true } } },
-      })
+    const q = z.object(pageFields).parse(req.query);
+    const where = { deletedAt: null };
+
+    const [users, total] = await withTenant(tenantOf(req), (tx) =>
+      Promise.all([
+        tx.user.findMany({
+          where,
+          orderBy: [{ isOwner: "desc" }, { fullName: "asc" }],
+          ...skipTake(q),
+          include: { role: { select: { id: true, name: true, code: true } } },
+        }),
+        tx.user.count({ where }),
+      ])
     );
     res.json(
-      users.map((u) => ({
-        id: u.id,
-        fullName: u.fullName,
-        phone: u.phone,
-        email: u.email,
-        isOwner: u.isOwner,
-        isActive: u.isActive,
-        lastLoginAt: u.lastLoginAt,
-        // Владельцу важно видеть, у кого нет приложения: без него мастер
-        // не получает оповещений о назначенных заказах.
-        androidAppAt: u.androidAppAt,
-        role: u.role,
-        workPercent: u.workPercent,
-        partPercent: u.partPercent,
-      }))
+      paged(
+        users.map((u) => ({
+          id: u.id,
+          fullName: u.fullName,
+          phone: u.phone,
+          email: u.email,
+          isOwner: u.isOwner,
+          isActive: u.isActive,
+          lastLoginAt: u.lastLoginAt,
+          // Владельцу важно видеть, у кого нет приложения: без него мастер
+          // не получает оповещений о назначенных заказах.
+          androidAppAt: u.androidAppAt,
+          role: u.role,
+          workPercent: u.workPercent,
+          partPercent: u.partPercent,
+        })),
+        total,
+        q
+      )
     );
   })
 );

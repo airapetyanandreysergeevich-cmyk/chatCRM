@@ -3,6 +3,7 @@ import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
+import { pageFields } from "../../lib/paging";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
   actorUserId,
@@ -57,6 +58,16 @@ stockRouter.get(
 
 // ------------------------------------------------------------ номенклатура
 
+/**
+ * Сколько позиций читаем разом, чтобы отобрать и посчитать.
+ *
+ * Отбор идёт по остаткам, которых в базе нет отдельным числом: они
+ * складываются из строк по складам. Две тысячи позиций — это склад крупной
+ * мастерской целиком, и прочитать его разом дешевле, чем городить подсчёт
+ * остатков запросом ради страницы на пятьдесят строк.
+ */
+const MAX_SCAN = 2000;
+
 stockRouter.get(
   "/",
   requirePermission(PERMISSIONS.STOCK_VIEW),
@@ -65,7 +76,7 @@ stockRouter.get(
       .object({
         search: z.string().trim().max(120).optional(),
         filter: z.enum(["all", "low", "zero", "in"]).default("all"),
-        limit: z.coerce.number().int().min(1).max(300).default(120),
+        ...pageFields,
       })
       .parse(req.query);
 
@@ -86,7 +97,12 @@ stockRouter.get(
             : {}),
         },
         orderBy: { name: "asc" },
-        take: q.limit,
+        // Постраничности на стороне базы здесь быть не может: «мало»,
+        // «нет в наличии» и «есть» считаются из остатков по складам, то
+        // есть уже после выборки. Поэтому читаем позиции целиком, отбираем
+        // и режем на страницы здесь же — иначе «мало» на второй странице
+        // означало бы «мало среди тех пятидесяти, что попались».
+        take: MAX_SCAN,
         include: { balances: { include: { warehouse: { select: { id: true, name: true } } } } },
       })
     );
@@ -126,13 +142,21 @@ stockRouter.get(
             ? items.filter((i) => i.qty > 0)
             : items;
 
+    const page = filtered.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
+
     res.json({
-      items: filtered.map(({ avgCost, value, ...rest }) => (cost ? { ...rest, avgCost, value } : rest)),
+      items: page.map(({ avgCost, value, ...rest }) => (cost ? { ...rest, avgCost, value } : rest)),
+      // Счётчики — по всему складу, а не по отобранному: «мало у 12» это
+      // свойство склада, и от того, какой фильтр включён, оно не меняется.
       totals: {
         positions: items.length,
         low: items.filter((i) => i.low).length,
         ...(cost ? { value: items.reduce((n, i) => n + i.value, 0) } : {}),
       },
+      total: filtered.length,
+      page: q.page,
+      pageSize: q.pageSize,
+      pages: Math.max(1, Math.ceil(filtered.length / q.pageSize)),
     });
   })
 );

@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, type Page } from "./api";
 import type { OrderStatus } from "./orders";
 import type { StageKey } from "./stages";
 
@@ -69,7 +69,12 @@ export interface StockItem {
 
 export interface StockList {
   items: StockItem[];
+  /** Счётчики по всему складу, а не по странице и не по фильтру. */
   totals: { positions: number; low: number; value?: number };
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
 }
 
 export type MovementType = "IN" | "OUT" | "WRITE_OFF" | "RETURN" | "TRANSFER" | "INVENTORY";
@@ -161,7 +166,7 @@ export const summaryApi = {
 };
 
 export const stockApi = {
-  list: (params: { search?: string; filter?: string } = {}) =>
+  list: (params: { search?: string; filter?: string; page?: number } = {}) =>
     api.get<StockList>(`/stock${qs(params)}`),
   warehouses: () => api.get<Array<{ id: string; name: string; isDefault: boolean }>>("/stock/warehouses"),
   createItem: (body: { sku?: string; name: string; unit?: string; category?: string; minQty?: number }) =>
@@ -182,8 +187,8 @@ export const stockApi = {
 };
 
 export const purchasesApi = {
-  list: (params: { status?: string; orderId?: string } = {}) =>
-    api.get<Purchase[]>(`/purchases${qs(params)}`),
+  list: (params: { status?: string; orderId?: string; page?: number } = {}) =>
+    api.get<Page<Purchase>>(`/purchases${qs(params)}`),
   create: (body: {
     orderId?: string;
     comment?: string;

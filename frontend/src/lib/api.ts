@@ -89,6 +89,20 @@ function fileNameFrom(headers: Headers): string {
   return plain ? plain[1] : "finecrm-выгрузка";
 }
 
+/**
+ * Страница списка. Форма одна на все списки — иначе на каждой странице
+ * пришлось бы помнить свою, а забытое поле выглядело бы как «навигация
+ * не работает только здесь».
+ */
+export interface Page<T> {
+  rows: T[];
+  /** Сколько всего подходит под фильтр, а не сколько пришло. */
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+}
+
 export const api = {
   get: <T,>(path: string) => request<T>(path),
   post: <T,>(path: string, body?: unknown) =>
