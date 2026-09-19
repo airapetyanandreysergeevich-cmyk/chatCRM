@@ -44,8 +44,8 @@ export const PALETTE_FIELDS: Array<{ key: keyof Palette; label: string; hint: st
 
 export const DEFAULT_THEME: Theme = {
   dark: {
-    bg: "#0F1117",
-    surface: "#171A22",
+    bg: "#1F2430",
+    surface: "#2B3243",
     brand: "#2F8FE0",
     stageNew: "#FFF993",
     stageWaiting: "#FC7E68",
