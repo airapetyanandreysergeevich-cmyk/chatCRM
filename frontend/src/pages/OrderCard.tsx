@@ -75,18 +75,17 @@ function Rows({ items }: { items: Array<{ label: string; value: React.ReactNode 
   );
 }
 
-function Checklist({ title, items }: { title: string; items: Array<{ key: string; label: string; checked: boolean }> }) {
-  const picked = items.filter((i) => i.checked);
+function Checklist({ title, items }: { title: string; items: string[] }) {
   return (
     <div>
       <p className="text-[13px] font-semibold text-ink-muted">{title}</p>
-      {picked.length === 0 ? (
+      {items.length === 0 ? (
         <p className="mt-1 text-[13.5px] text-ink-dim">ничего не отмечено</p>
       ) : (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {picked.map((i) => (
-            <span key={i.key} className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12.5px] text-ink-soft">
-              {i.label}
+          {items.map((label) => (
+            <span key={label} className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12.5px] text-ink-soft">
+              {label}
             </span>
           ))}
         </div>

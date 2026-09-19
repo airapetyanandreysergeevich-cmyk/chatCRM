@@ -48,32 +48,64 @@ export const ORDER_KINDS = [
 ] as const;
 
 /**
- * Именно `type`, а не `interface`. TypeScript выводит неявную индексную
- * сигнатуру только для псевдонимов типов, а Prisma ждёт от Json-поля тип
- * с такой сигнатурой. С `interface` сборка падает на присвоении
- * completeness и appearance — при том, что данные абсолютно те же.
+ * Комплектность и внешнее состояние — список пунктов, записанный строкой.
+ *
+ * Раньше это был чек-лист: десять пунктов из справочника, у каждого «да» или
+ * «нет». Список кнопок под полем от этого и остался — по ним отмечается то,
+ * что встречается каждый день. Но приёмщику постоянно нужно дописать своё:
+ * «царапина на крышке у петли», «блок питания чужой». В чек-листе для этого
+ * места нет, и такое уезжало в «Прочее по состоянию» или не записывалось
+ * вовсе — а потом спор с клиентом решать нечем.
+ *
+ * Поэтому значение — просто перечисление через запятую, хоть с кнопок, хоть
+ * набранное руками. Разбор один на всех: бланк приёма, выгрузка в файл,
+ * загрузка из файла и старые заказы приходят сюда.
  */
-export type ChecklistValue = {
-  key: string;
-  label: string;
-  checked: boolean;
-};
+
+/** Сколько пунктов держим и какой длины. Дальше это не список, а сочинение. */
+const MAX_ITEMS = 40;
+const MAX_ITEM_LENGTH = 120;
 
 /**
- * Приводим присланное с фронтенда к справочнику: чужие ключи в базу не попадают,
- * а подпись пункта сохраняется вместе со значением — если справочник потом
- * поменяют, старый заказ останется читаемым.
+ * Список пунктов из чего угодно: из строки «А, Б», из массива строк или из
+ * старого чек-листа вида [{ label, checked }].
+ *
+ * Старый вид разбираем не ради совместимости вообще, а потому что в базе
+ * лежат тысячи принятых заказов, и переписывать их миграцией ради формата
+ * значит рисковать данными приёмки — теми самыми, которыми решается спор о
+ * забытой зарядке.
  */
-export function normalizeChecklist(
-  input: unknown,
-  dictionary: ReadonlyArray<{ key: string; label: string }>
-): ChecklistValue[] {
-  const checked = new Set(
-    Array.isArray(input)
-      ? input
-          .map((v) => (typeof v === "string" ? v : (v as { key?: unknown })?.key))
-          .filter((v): v is string => typeof v === "string")
-      : []
-  );
-  return dictionary.map((d) => ({ key: d.key, label: d.label, checked: checked.has(d.key) }));
+export function toLabels(input: unknown): string[] {
+  const raw: string[] = [];
+
+  if (typeof input === "string") {
+    raw.push(...input.split(","));
+  } else if (Array.isArray(input)) {
+    for (const v of input) {
+      if (typeof v === "string") {
+        raw.push(...v.split(","));
+      } else if (v && typeof v === "object") {
+        const item = v as { label?: unknown; checked?: unknown };
+        if (item.checked && typeof item.label === "string") raw.push(item.label);
+      }
+    }
+  }
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const piece of raw) {
+    const value = piece.replace(/\s+/g, " ").trim().slice(0, MAX_ITEM_LENGTH);
+    if (!value) continue;
+    // Повторы убираем без учёта регистра: «Кабель» и «кабель» — один пункт,
+    // и в квитанции он должен стоять один раз.
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+    if (out.length >= MAX_ITEMS) break;
+  }
+  return out;
 }
+
+/** Обратно строкой — для квитанции, выгрузки и всего, что читает человек. */
+export const labelsText = (input: unknown): string => toLabels(input).join(", ");

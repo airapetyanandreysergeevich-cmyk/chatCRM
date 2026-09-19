@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { createWithNumber } from "../../lib/customerNumber";
+import { toLabels } from "../../lib/dictionaries";
 import { recalcTotals } from "../orders/totals";
 import { parseNumber, phoneKey, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
@@ -381,6 +382,10 @@ async function applyOrder(
 
   const common = {
     complaint: val(v["Неисправность"]) ?? "",
+    // Пустая ячейка ничего не затирает — как и везде в загрузке. Поэтому
+    // undefined, а не пустой список: файл почти всегда неполный.
+    completeness: v["Комплектность"] ? toLabels(v["Комплектность"]) : undefined,
+    appearance: v["Внешнее состояние"] ? toLabels(v["Внешнее состояние"]) : undefined,
     receptionNote: val(v["Примечание приёмщика"]),
     diagnosis: val(v["Диагноз"]),
     isUrgent: /^(да|1|true|yes)$/i.test(v["Срочный"] ?? "") || undefined,

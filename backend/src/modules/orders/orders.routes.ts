@@ -4,11 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import {
-  APPEARANCE_ITEMS,
-  COMPLETENESS_ITEMS,
-  normalizeChecklist,
-} from "../../lib/dictionaries";
+import { toLabels } from "../../lib/dictionaries";
 import { env } from "../../lib/env";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { notifyTenant } from "../../lib/notify";
@@ -181,8 +177,10 @@ const acceptSchema = z.object({
   complaint: z.string().trim().min(3, "Опишите неисправность словами клиента"),
   receptionNote: z.string().trim().optional(),
   devicePasscode: z.string().trim().optional(),
-  completeness: z.array(z.string()).default([]),
-  appearance: z.array(z.string()).default([]),
+  // Строкой или списком: бланк приёма шлёт то, что набрано в поле, а
+  // загрузка из файла — ячейку целиком. Разбирает и то и другое toLabels.
+  completeness: z.union([z.string(), z.array(z.string())]).default([]),
+  appearance: z.union([z.string(), z.array(z.string())]).default([]),
   appearanceNote: z.string().trim().optional(),
   hasOpenTraces: z.boolean().default(false),
   hasWaterDamage: z.boolean().default(false),
@@ -277,8 +275,8 @@ ordersRouter.post(
           complaint: body.complaint,
           receptionNote: body.receptionNote || null,
           devicePasscode: body.devicePasscode || null,
-          completeness: normalizeChecklist(body.completeness, COMPLETENESS_ITEMS),
-          appearance: normalizeChecklist(body.appearance, APPEARANCE_ITEMS),
+          completeness: toLabels(body.completeness),
+          appearance: toLabels(body.appearance),
           appearanceNote: body.appearanceNote || null,
           hasOpenTraces: body.hasOpenTraces,
           hasWaterDamage: body.hasWaterDamage,
@@ -379,8 +377,8 @@ const patchSchema = acceptSchema
     estimatedCost: z.number().min(0).nullable().optional(),
     approvedLimit: z.number().min(0).nullable().optional(),
     assignedMasterId: z.string().uuid().nullable().optional(),
-    completeness: z.array(z.string()).optional(),
-    appearance: z.array(z.string()).optional(),
+    completeness: z.union([z.string(), z.array(z.string())]).optional(),
+    appearance: z.union([z.string(), z.array(z.string())]).optional(),
   });
 
 ordersRouter.patch(
@@ -399,10 +397,8 @@ ordersRouter.patch(
         data: {
           ...body,
           dueAt: body.dueAt === undefined ? undefined : body.dueAt ? new Date(body.dueAt) : null,
-          completeness: body.completeness
-            ? normalizeChecklist(body.completeness, COMPLETENESS_ITEMS)
-            : undefined,
-          appearance: body.appearance ? normalizeChecklist(body.appearance, APPEARANCE_ITEMS) : undefined,
+          completeness: body.completeness === undefined ? undefined : toLabels(body.completeness),
+          appearance: body.appearance === undefined ? undefined : toLabels(body.appearance),
         },
       });
       await writeAudit(tx, {

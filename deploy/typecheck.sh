@@ -62,5 +62,14 @@ docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   npx tsc --noEmit
 " && echo "    типы сходятся"
 
+# Кнопки комплектности и внешнего состояния правят ту же строку, что человек
+# набирает руками. Ошибка здесь выглядит не как сбой, а как молча испорченная
+# запись приёмки — та самая, которой решается спор о забытой зарядке.
+echo ">>> Кнопки приёмки"
+docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/chips.ts
+"
+
 echo
 echo ">>> Всё сходится. Обновить сервер: bash deploy/update.sh"

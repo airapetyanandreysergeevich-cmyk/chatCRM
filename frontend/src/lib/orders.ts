@@ -12,12 +12,6 @@ export interface OrderStatus {
   isInitial?: boolean;
 }
 
-export interface ChecklistItem {
-  key: string;
-  label: string;
-  checked: boolean;
-}
-
 export interface OrderWork {
   id?: string;
   name: string;
@@ -85,8 +79,9 @@ export interface Order {
   complaint: string;
   receptionNote: string | null;
   devicePasscode: string | null;
-  completeness: ChecklistItem[];
-  appearance: ChecklistItem[];
+  /** Перечисление через запятую: и отмеченное кнопками, и набранное руками. */
+  completeness: string[];
+  appearance: string[];
   appearanceNote: string | null;
   hasOpenTraces: boolean;
   hasWaterDamage: boolean;

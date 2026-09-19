@@ -17,6 +17,7 @@
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";
+import { labelsText, toLabels } from "../src/lib/dictionaries";
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
 import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
@@ -72,6 +73,13 @@ const fakeTx = {
       customer: { name: "Кузнецов И.", number: 412, phone: "+7 900 000-00-00" },
       device: { kind: "ноутбук", brand: "Lenovo", model: "IdeaPad 5", serial: "PF2XK9LM" },
       complaint: "не включается",
+      // Новые заказы хранят перечисление списком строк, старые — чек-листом.
+      // В заглушке оба вида сразу: выгрузка обязана прочитать и тот и другой.
+      completeness: ["Блок питания", "Кабель"],
+      appearance: [
+        { key: "scratches", label: "Царапины", checked: true },
+        { key: "chips", label: "Сколы", checked: false },
+      ],
       receptionNote: null,
       diagnosis: null,
       assignedMaster: { fullName: "Сергей Панов" },
@@ -421,6 +429,30 @@ async function main(): Promise<void> {
     cd.includes(`filename*=UTF-8''${encodeURIComponent("заказы-2026-09-18.xlsx")}`),
     "русское имя едет в filename* — именно его берёт нынешний браузер"
   );
+
+  // 15а. Комплектность и внешнее состояние. Именно ими решается спор о
+  //      забытой зарядке, и при переезде из другой программы их нельзя терять.
+  const kcol = ordersSheet.columns.findIndex((c) => c.title === "Комплектность");
+  const acol = ordersSheet.columns.findIndex((c) => c.title === "Внешнее состояние");
+  check(ordersSheet.rows[0][kcol] === "Блок питания, Кабель", `комплектность выгружается строкой (${ordersSheet.rows[0][kcol]})`);
+  check(
+    ordersSheet.rows[0][acol] === "Царапины",
+    `старый чек-лист читается, неотмеченное не выгружается (${ordersSheet.rows[0][acol]})`
+  );
+  check(
+    matchColumns(["Комплектация", "Техническое состояние"], DATASETS.orders).size === 2,
+    "чужие написания обоих заголовков узнаются"
+  );
+
+  check(toLabels("Блок питания, Кабель").length === 2, "строка разбирается на пункты");
+  check(toLabels("  Блок   питания ,, Кабель , ")[0] === "Блок питания", "лишние пробелы и пустые пункты убираются");
+  check(toLabels("Кабель, кабель").length === 1, "повтор в другом регистре не задваивается");
+  check(toLabels([{ label: "Царапины", checked: true }, { label: "Сколы", checked: false }]).join() === "Царапины", "старый чек-лист отдаёт только отмеченное");
+  check(toLabels(["Блок питания", "Кабель, Сумка"]).length === 3, "список, где в одной строке два пункта, тоже разбирается");
+  check(toLabels(null).length === 0 && toLabels(undefined).length === 0, "пустое остаётся пустым");
+  check(toLabels("а".repeat(500))[0].length === 120, "слишком длинный пункт обрезается, а не роняет запись");
+  check(toLabels(Array.from({ length: 80 }, (_, i) => "п" + i)).length === 40, "число пунктов ограничено");
+  check(labelsText(["Кабель", "Сумка"]) === "Кабель, Сумка", "обратно строкой — через запятую с пробелом");
 
   // 15. Состав работ и запчастей. Одной суммой заказ не объяснить: «Работы,
   //     ₽ — 4500» не говорит ни клиенту, ни мастерской, что именно сделали.

@@ -16,14 +16,12 @@ import {
   Spinner,
   Textarea,
 } from "../components/ui";
+import { ChipInput } from "../components/ChipInput";
 import { SuggestInput } from "../components/SuggestInput";
 import { ApiError } from "../lib/api";
 import { plural } from "../lib/format";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
 import { ordersApi, type CustomerHit, type Reference } from "../lib/orders";
-
-const toggle = (list: string[], key: string) =>
-  list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
 
 const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(",", ".")));
 
@@ -104,8 +102,10 @@ export default function OrderNew() {
     prepayment: "",
     assignedMasterId: "",
   });
-  const [completeness, setCompleteness] = useState<string[]>([]);
-  const [appearance, setAppearance] = useState<string[]>([]);
+  // Перечисления строкой, а не списком отмеченных ключей: в поле можно
+  // дописать своё, чего в кнопках нет.
+  const [completeness, setCompleteness] = useState("");
+  const [appearance, setAppearance] = useState("");
   const [hints, setHints] = useState<Hints>(EMPTY_HINTS);
 
   useEffect(() => {
@@ -443,33 +443,33 @@ export default function OrderNew() {
 
         <Card>
           <SectionLabel>Комплектность</SectionLabel>
-          <p className="mt-2 text-[13px] text-ink-dim">Отметьте всё, что клиент сдал вместе с техникой.</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {ref.completeness.map((c) => (
-              <Checkbox
-                key={c.key}
-                label={c.label}
-                checked={completeness.includes(c.key)}
-                onChange={() => setCompleteness((v) => toggle(v, c.key))}
-              />
-            ))}
+          <p className="mt-2 text-[13px] text-ink-dim">
+            Что клиент сдал вместе с техникой. Кнопки дописывают пункт в строку, а строку можно
+            править руками — «блок питания чужой» кнопкой не отметишь.
+          </p>
+          <div className="mt-4">
+            <ChipInput
+              value={completeness}
+              onChange={setCompleteness}
+              options={ref.completeness}
+              placeholder="Блок питания, Кабель…"
+            />
           </div>
         </Card>
 
         <Card>
           <SectionLabel>Внешнее состояние</SectionLabel>
           <p className="mt-2 text-[13px] text-ink-dim">
-            Зафиксированные дефекты защищают и мастерскую, и клиента.
+            Зафиксированные дефекты защищают и мастерскую, и клиента. Чем точнее записано, тем
+            меньше спорить при выдаче.
           </p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {ref.appearance.map((a) => (
-              <Checkbox
-                key={a.key}
-                label={a.label}
-                checked={appearance.includes(a.key)}
-                onChange={() => setAppearance((v) => toggle(v, a.key))}
-              />
-            ))}
+          <div className="mt-4">
+            <ChipInput
+              value={appearance}
+              onChange={setAppearance}
+              options={ref.appearance}
+              placeholder="Царапины, скол на крышке у петли…"
+            />
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <Checkbox

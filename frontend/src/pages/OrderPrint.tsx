@@ -60,9 +60,12 @@ function Pairs({ items }: { items: Array<[string, React.ReactNode]> }) {
 }
 
 /** Отмеченные пункты чек-листа строкой: в бланке галочки занимают полстраницы. */
-function Checked({ items, empty }: { items: Array<{ label: string; checked: boolean }>; empty: string }) {
-  const on = items.filter((i) => i.checked).map((i) => i.label);
-  return <p className="text-[12px]">{on.length ? on.join(", ") : <span className="text-black/50">{empty}</span>}</p>;
+function Checked({ items, empty }: { items: string[]; empty: string }) {
+  return (
+    <p className="text-[12px]">
+      {items.length ? items.join(", ") : <span className="text-black/50">{empty}</span>}
+    </p>
+  );
 }
 
 function LineTable({

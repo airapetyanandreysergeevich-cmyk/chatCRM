@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { Request } from "express";
+import { toLabels } from "../../lib/dictionaries";
 import { forbidden } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import { permissionsOf } from "../../middleware/auth";
@@ -105,8 +106,10 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
     complaint: order.complaint,
     receptionNote: order.receptionNote,
     devicePasscode: order.devicePasscode,
-    completeness: order.completeness,
-    appearance: order.appearance,
+    // Старые заказы лежат в базе чек-листом, новые — списком строк. Наружу
+    // отдаём одно и то же, чтобы ни карточка, ни квитанция про это не знали.
+    completeness: toLabels(order.completeness),
+    appearance: toLabels(order.appearance),
     appearanceNote: order.appearanceNote,
     hasOpenTraces: order.hasOpenTraces,
     hasWaterDamage: order.hasWaterDamage,
