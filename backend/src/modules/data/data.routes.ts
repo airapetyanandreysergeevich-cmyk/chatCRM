@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { Router, type Request } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { ah, badRequest, notFound } from "../../lib/errors";
+import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
+import { removeFile } from "../../lib/storage";
 import {
   authenticate,
   actorUserId,
@@ -17,6 +18,7 @@ import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { applyRows } from "./apply";
 import { DATASETS, DATASET_KEYS, isDatasetKey, type DatasetKey } from "./dataset";
 import { buildSheets } from "./export";
+import { sortDatasets, wipeBlocker, wipeDatasets, wipeFiles } from "./wipe";
 import { MAX_IMPORT_ROWS, parseRows, type ImportPreview, type ParsedRow } from "./import";
 import { contentDisposition, formatDate, readTable, writeCsv, writeHtml, writeXlsx } from "./tableFile";
 
@@ -99,13 +101,27 @@ function putPending(p: Omit<Pending, "expiresAt">): string {
 
 dataRouter.get(
   "/",
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    // Сколько записей в каждом разделе. Нужны не для красоты: без них
+    // «сотрём Заказы» — это обещание неизвестно чего, а «сотрём 4039
+    // заказов» — то, на что человек действительно отвечает «да».
+    const counts = await withTenant(tenantOf(req), async (tx) => {
+      const [orders, customers, stock, services] = await Promise.all([
+        tx.order.count({ where: { deletedAt: null } }),
+        tx.customer.count({ where: { deletedAt: null } }),
+        tx.stockItem.count(),
+        tx.service.count(),
+      ]);
+      return { orders, customers, stock, services } as Record<DatasetKey, number>;
+    });
+
     res.json({
       datasets: DATASET_KEYS.map((key) => ({
         key,
         title: DATASETS[key].title,
         hint: DATASETS[key].hint,
         matchBy: DATASETS[key].matchBy,
+        count: counts[key] ?? 0,
         columns: DATASETS[key].columns.map((c) => ({
           title: c.title,
           required: !!c.required,
@@ -193,6 +209,103 @@ dataRouter.get(
     res.setHeader("Content-Type", type);
     res.setHeader("Content-Disposition", contentDisposition(fileName, `${asciiBase}-${stamp}.${format}`));
     res.send(body);
+  })
+);
+
+// ------------------------------------------------------------------ стирание
+
+/**
+ * Слово подтверждения. Не «да» и не галочка: набрать семь букв — это
+ * действие, которое нельзя совершить мимоходом, а именно мимоходом и
+ * случаются беды такого размера.
+ */
+const CONFIRM_WORD = "УДАЛИТЬ";
+
+/**
+ * Стирать базу может только владелец.
+ *
+ * Право «Настройки мастерской» дают и старшему приёмщику, чтобы он правил
+ * статусы и бланки. Выгрузка и загрузка под ним же — они поправимы. Стирание
+ * не поправимо ничем, и раздавать его вместе с бланками нельзя.
+ */
+function requireOwner(req: Request, _res: Response, next: NextFunction) {
+  if (req.auth?.kind === "tenant" && req.auth.isOwner) return next();
+  next(forbidden("Стирать базу может только владелец мастерской"));
+}
+
+const wipeSchema = z.object({
+  datasets: z.array(z.string()).min(1),
+  confirm: z.string(),
+});
+
+dataRouter.delete(
+  "/",
+  requireOwner,
+  ah(async (req, res) => {
+    const { datasets, confirm } = wipeSchema.parse(req.body);
+    const keys = datasets.filter(isDatasetKey);
+    if (keys.length === 0) throw badRequest("Не выбрано, что стирать");
+
+    // Слово сверяем на сервере, а не только в окне: окно — это удобство, а
+    // запрет должен стоять там, где его нельзя обойти.
+    if (confirm.trim().toUpperCase() !== CONFIRM_WORD) {
+      throw badRequest(`Слово не совпадает — стирание отменено. Нужно ввести ${CONFIRM_WORD}`);
+    }
+
+    const tenantId = tenantOf(req);
+    const ordered = sortDatasets(keys);
+
+    // Отказ — раньше первой удалённой строки.
+    const blocker = await withTenant(tenantId, (tx) => wipeBlocker(tx, ordered));
+    if (blocker) throw conflict(blocker);
+
+    // Фотографии убираем до транзакции: хранилище — это сеть, и четыре
+    // тысячи запросов к нему внутри транзакции держали бы её открытой всё
+    // это время. Оборвётся на середине — строки ещё на месте, повторим.
+    let files = 0;
+    if (ordered.includes("orders")) {
+      const objectKeys = await withTenant(tenantId, (tx) => wipeFiles(tx));
+      for (const key of objectKeys) {
+        try {
+          await removeFile(key);
+          files += 1;
+        } catch {
+          // Файла может уже не быть — это не повод останавливать стирание,
+          // которое владелец затеял осознанно.
+        }
+      }
+    }
+
+    const wiped = await withTenant(
+      tenantId,
+      async (tx) => {
+        const out = await wipeDatasets(tx, ordered);
+        out.files = files;
+        // Журнал пишем в той же транзакции: откатится стирание — уйдёт и
+        // запись о нём, и в журнале не останется следа от того, чего не было.
+        await writeAudit(tx, {
+          tenantId,
+          userId: actorUserId(req),
+          entity: "Data",
+          entityId: ordered.join(","),
+          action: "DELETE",
+          diff: { datasets: ordered, rows: out.rows, files: out.files },
+          ip: clientIp(req),
+        });
+        return out;
+      },
+      // Стирание четырёх тысяч заказов в пять секунд не укладывается — как и
+      // загрузка, ради которой этот срок однажды уже пришлось задавать.
+      { timeout: 10 * 60_000, maxWait: 30_000 }
+    );
+
+    res.json({
+      datasets: ordered,
+      titles: ordered.map((k) => DATASETS[k].title),
+      rows: wiped.rows,
+      files: wiped.files,
+      finishedAt: formatDate(new Date()),
+    });
   })
 );
 

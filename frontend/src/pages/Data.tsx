@@ -1,21 +1,127 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconDownload, IconUpload } from "../components/icons";
-import { Banner, Button, Card, PageHeader, SectionLabel, Select, Spinner } from "../components/ui";
+import { Modal } from "../components/Modal";
+import { IconDelete, IconDownload, IconUpload } from "../components/icons";
+import { Banner, Button, Card, Field, Input, PageHeader, SectionLabel, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import {
   dataApi,
+  WIPE_WORD,
   type DataReference,
+  type DatasetInfo,
   type DatasetKey,
   type FormatKey,
   type ImportPreview,
   type ImportResult,
+  type WipeResult,
 } from "../lib/dataApi";
 
+/**
+ * Окно стирания.
+ *
+ * Два рубежа, и оба нужны. Первый — счёт: «сотрём Заказы» это обещание
+ * неизвестно чего, а «сотрём 4039 заказов» — то, на что человек отвечает
+ * осознанно. Второй — слово: галочку и кнопку «Да» нажимают мимоходом, а
+ * мимоходом и случаются беды такого размера. Семь букв набрать мимоходом
+ * нельзя.
+ */
+function WipeModal({
+  datasets,
+  onClose,
+  onDone,
+}: {
+  datasets: DatasetInfo[];
+  onClose: () => void;
+  onDone: (result: WipeResult) => void;
+}) {
+  const [word, setWord] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ready = word.trim().toUpperCase() === WIPE_WORD;
+  const totalRows = datasets.reduce((n, d) => n + d.count, 0);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      onDone(await dataApi.wipe(datasets.map((d) => d.key), word));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось стереть");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Стереть базу насовсем" onClose={onClose}>
+      <div className="space-y-4">
+        <Banner tone="error">
+          Это нельзя отменить. Выгрузите файл, если не уверены, — он скачивается за секунду.
+        </Banner>
+
+        <div>
+          <p className="text-[13.5px] text-ink-muted">Будет стёрто:</p>
+          <ul className="mt-2 space-y-1.5">
+            {datasets.map((d) => (
+              <li
+                key={d.key}
+                className="flex items-baseline justify-between gap-3 rounded-field bg-surface-raised px-3 py-2"
+              >
+                <span className="text-[14px] font-semibold">{d.title}</span>
+                <span className="text-[14px] font-bold text-state-off">
+                  {d.count === 0 ? "пусто" : `${d.count.toLocaleString("ru-RU")} записей`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Про деньги говорим здесь, а не в журнале: владелец должен узнать
+            об этом до нажатия, а не после. */}
+        <p className="text-[12.5px] text-ink-dim">
+          Кассовые операции останутся в кассе и потеряют ссылку на заказ: стереть их вместе с
+          заказами значило бы изменить остаток кассы, который вы сверяете с ящиком. Фотографии
+          заказов удалятся из хранилища вместе с ними.
+        </p>
+
+        {error && <Banner tone="error">{error}</Banner>}
+
+        <Field label={`Наберите ${WIPE_WORD}, чтобы подтвердить`}>
+          <Input
+            value={word}
+            onChange={(e) => setWord(e.target.value)}
+            placeholder={WIPE_WORD}
+            autoComplete="off"
+            autoFocus
+          />
+        </Field>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Отмена
+          </Button>
+          <Button variant="danger" icon={<IconDelete />} disabled={!ready || busy} onClick={() => void run()}>
+            {busy ? "Стираем…" : totalRows > 0 ? `Стереть ${totalRows.toLocaleString("ru-RU")} записей` : "Стереть"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /** Выгрузка: выбираем разделы галочками, формат — кнопкой. */
-function ExportCard({ reference }: { reference: DataReference }) {
+function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped: () => void }) {
+  const { me } = useAuth();
   const [picked, setPicked] = useState<DatasetKey[]>(["customers"]);
   const [busy, setBusy] = useState<FormatKey | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wiping, setWiping] = useState(false);
+  const [wiped, setWiped] = useState<WipeResult | null>(null);
+
+  // Стирание — только владельцу. Право «Настройки мастерской» бывает и у
+  // старшего приёмщика: выгрузка и загрузка поправимы, стирание — нет.
+  const canWipe = me?.kind === "tenant" && me.user.isOwner;
+  const pickedInfo = reference.datasets.filter((d) => picked.includes(d.key));
 
   const toggle = (key: DatasetKey) =>
     setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
@@ -62,7 +168,17 @@ function ExportCard({ reference }: { reference: DataReference }) {
 
       {error && <div className="mt-3"><Banner tone="error">{error}</Banner></div>}
 
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
+      {wiped && (
+        <div className="mt-3">
+          <Banner>
+            {wiped.titles.join(", ")}: стёрто{" "}
+            {Object.values(wiped.rows).reduce((n, v) => n + v, 0).toLocaleString("ru-RU")} записей
+            {wiped.files > 0 && `, удалено фотографий: ${wiped.files}`}. {wiped.finishedAt}
+          </Banner>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
         {reference.formats.map((f) => (
           <Button
             key={f.key}
@@ -74,12 +190,39 @@ function ExportCard({ reference }: { reference: DataReference }) {
             {busy === f.key ? "Готовим…" : f.title}
           </Button>
         ))}
+
+        {/* Стирание стоит в стороне от выгрузки — у другого края и другим
+            цветом. Рядом с «Excel» его однажды нажали бы вместо него. */}
+        {canWipe && (
+          <div className="ml-auto">
+            <Button
+              variant="danger"
+              icon={<IconDelete />}
+              disabled={picked.length === 0}
+              onClick={() => setWiping(true)}
+            >
+              Удалить
+            </Button>
+          </div>
+        )}
       </div>
 
       {picked.length > 1 && (
         <p className="mt-3 text-[12.5px] text-ink-dim">
           CSV — это один лист, для нескольких разделов сразу берите Excel.
         </p>
+      )}
+
+      {wiping && (
+        <WipeModal
+          datasets={pickedInfo}
+          onClose={() => setWiping(false)}
+          onDone={(result) => {
+            setWiping(false);
+            setWiped(result);
+            onWiped();
+          }}
+        />
       )}
     </Card>
   );
@@ -462,7 +605,7 @@ export default function Data() {
         title="Базы"
         subtitle="Выгрузка данных мастерской и загрузка из файла."
       />
-      <ExportCard reference={reference} />
+      <ExportCard reference={reference} onWiped={() => void load()} />
       <ImportCard reference={reference} />
       <ColumnsCard reference={reference} />
     </div>

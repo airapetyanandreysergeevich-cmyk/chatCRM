@@ -10,7 +10,18 @@ export interface DatasetInfo {
   title: string;
   hint: string;
   matchBy: string;
+  /** Сколько записей сейчас в разделе. Нужно окну стирания, чтобы назвать число. */
+  count: number;
   columns: Array<{ title: string; required: boolean; readOnly: boolean }>;
+}
+
+export interface WipeResult {
+  datasets: DatasetKey[];
+  titles: string[];
+  /** Сколько строк ушло, по таблицам базы. */
+  rows: Record<string, number>;
+  files: number;
+  finishedAt: string;
 }
 
 export interface FormatInfo {
@@ -59,8 +70,18 @@ export interface ImportResult {
   finishedAt: string;
 }
 
+/** Слово, которым владелец подтверждает стирание. Совпадает с проверкой на сервере. */
+export const WIPE_WORD = "УДАЛИТЬ";
+
 export const dataApi = {
   reference: () => api.get<DataReference>("/data"),
+
+  /**
+   * Стирание разделов насовсем. Слово сверяет и сервер — окно здесь для
+   * человека, а не вместо запрета.
+   */
+  wipe: (datasets: DatasetKey[], confirm: string) =>
+    api.del<WipeResult>("/data", { datasets, confirm }),
 
   /**
    * Скачивание идёт обычным запросом с токеном, а не переходом по ссылке:
