@@ -19,7 +19,7 @@ import {
 import { SuggestInput } from "../components/SuggestInput";
 import { ApiError } from "../lib/api";
 import { plural } from "../lib/format";
-import { EMPTY_HINTS, hintsApi, matchHints, withoutHint, type Hints } from "../lib/hints";
+import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
 import { ordersApi, type CustomerHit, type Reference } from "../lib/orders";
 
 const toggle = (list: string[], key: string) =>
@@ -111,10 +111,7 @@ export default function OrderNew() {
   useEffect(() => {
     ordersApi
       .reference()
-      .then((r) => {
-        setRef(r);
-        setDevice((d) => ({ ...d, kind: d.kind || r.deviceKinds[0] }));
-      })
+      .then(setRef)
       .catch(() => setError(new ApiError(0, "Не удалось загрузить справочники")));
 
     // Память полей техники. Без неё бланк работает как раньше, поэтому
@@ -384,18 +381,24 @@ export default function OrderNew() {
           <SectionLabel>Техника</SectionLabel>
           <div className="mt-4 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Тип" error={fieldError("device.kind")}>
-                <Select value={device.kind} onChange={(e) => setDevice({ ...device, kind: e.target.value })}>
-                  {ref.deviceKinds.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </Select>
+              {/* Вид, марку и модель мастерская набирает руками, и одни и те
+                  же аппараты приходят снова и снова. Поэтому все три поля
+                  помнят прежние варианты и предлагают их с первой буквы.
+
+                  Вид раньше был выпадающим списком из девяти строк. Список
+                  кончался «Прочим», и мастерская с потоком кофемашин или
+                  автомагнитол сваливала туда половину заказов — а потом не
+                  находила их ни поиском, ни глазами. Встроенные виды никуда
+                  не делись: они идут в подсказках следом за своими. */}
+              <Field label="Тип" error={fieldError("device.kind")} interactive>
+                <SuggestInput
+                  value={device.kind}
+                  onChange={(kind) => setDevice({ ...device, kind })}
+                  items={matchHints(withBuiltIn(hints.kind, ref.deviceKinds), device.kind)}
+                  onForget={forget}
+                  placeholder="Ноутбук, Кофемашина, Автомагнитола…"
+                />
               </Field>
-              {/* Марку и модель мастерская набирает руками, и одни и те же
-                  аппараты приходят снова и снова. Поэтому оба поля помнят
-                  прежние варианты и предлагают их с первой буквы. */}
               <Field label="Бренд" interactive>
                 <SuggestInput
                   value={device.brand}

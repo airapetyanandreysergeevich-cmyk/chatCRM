@@ -38,12 +38,13 @@ hintsRouter.get(
         // Сначала то, что чаще нужно; при равном счёте — по алфавиту,
         // чтобы порядок не прыгал от запроса к запросу.
         orderBy: [{ uses: "desc" }, { value: "asc" }],
-        take: LIMIT * 2,
+        take: LIMIT * 3,
         select: { id: true, field: true, scope: true, value: true, uses: true },
       })
     );
 
     res.json({
+      kind: rows.filter((r) => r.field === "kind").slice(0, LIMIT),
       brand: rows.filter((r) => r.field === "brand").slice(0, LIMIT),
       model: rows.filter((r) => r.field === "model").slice(0, LIMIT),
     });

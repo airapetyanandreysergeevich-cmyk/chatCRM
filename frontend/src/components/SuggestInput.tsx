@@ -19,6 +19,12 @@ export interface Suggestion {
   value: string;
   /** Приписка справа: сколько раз пригодилось, цена — что уместно полю. */
   meta?: string;
+  /**
+   * Вариант не из памяти, а встроенный в программу: урну ему не показываем.
+   * Забыть то, чего не запоминали, нельзя, а кнопка, которая ничего не
+   * делает, хуже её отсутствия.
+   */
+  fixed?: boolean;
 }
 
 export function SuggestInput({
@@ -131,7 +137,7 @@ export function SuggestInput({
                 {item.meta && <span className="shrink-0 text-[12px] text-ink-dim">{item.meta}</span>}
               </button>
 
-              {onForget && (
+              {onForget && !item.fixed && (
                 <button
                   type="button"
                   title={`Забыть «${item.value}»`}
