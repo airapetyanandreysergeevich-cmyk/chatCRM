@@ -67,22 +67,31 @@ async function main() {
   // поломке: окно с бегущей полоской, за которым может стоять что угодно.
   // Ожидание без срока — это не терпение, а отказ сообщать.
   {
+    // «Соня» — это сам node под чужим именем, которому передан сценарий
+    // «сказать и уснуть». Раньше здесь был соня.cmd, и на Windows проверка не
+    // проходила ни разу: программа ищет именно соня.exe — как ищет initdb.exe
+    // и pg_ctl.exe, — а .cmd без оболочки новые версии node не запускают
+    // вовсе. Настоящий .exe запускается тем же путём, что и постгрес, и
+    // проверяет ровно то, что происходит у мастерской.
     const binDir = path.join(dataDir, "самодельные");
     fs.mkdirSync(binDir, { recursive: true });
-    const sleeper = path.join(binDir, process.platform === "win32" ? "соня.cmd" : "соня");
-    fs.writeFileSync(
-      sleeper,
-      process.platform === "win32"
-        ? "@echo off\r\necho начал и задумался\r\nping -n 60 127.0.0.1 > nul\r\n"
-        : '#!/bin/sh\necho "начал и задумался"\nsleep 60\n',
-      { mode: 0o755 }
-    );
+    const sleeper = path.join(binDir, process.platform === "win32" ? "соня.exe" : "соня");
+    fs.rmSync(sleeper, { force: true });
+    try {
+      // Жёсткая ссылка вместо копии: node весит под сотню мегабайт, а ссылка —
+      // ничего. Не вышло (другой диск) — копируем.
+      fs.linkSync(process.execPath, sleeper);
+    } catch {
+      fs.copyFileSync(process.execPath, sleeper);
+    }
+    const scenario = path.join(binDir, "задумался.js");
+    fs.writeFileSync(scenario, 'console.log("начал и задумался");\nsetInterval(() => {}, 1000);\n');
 
     const slow = new LocalPostgres({ dataDir: path.join(dataDir, "неважно"), logDir: l.logs, binDir });
     const began = Date.now();
     let said = "";
     try {
-      await slow.runTold("соня", "Создание кластера", [], { timeoutMs: 1500 });
+      await slow.runTold("соня", "Создание кластера", [scenario], { timeoutMs: 1500 });
     } catch (err) {
       said = err.message;
     }
