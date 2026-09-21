@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { IconCompany, IconPerson } from "../components/icons";
+import { IconCompany, IconPerson, IconSettings } from "../components/icons";
+import { QuickPickEditor } from "../components/QuickPickEditor";
 import {
   Banner,
   Button,
@@ -19,6 +20,8 @@ import {
 import { ChipInput } from "../components/ChipInput";
 import { SuggestInput } from "../components/SuggestInput";
 import { ApiError } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import type { QuickPick, QuickPickField } from "../lib/quickPicks";
 import { plural } from "../lib/format";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
 import { ordersApi, type CustomerHit, type Reference } from "../lib/orders";
@@ -68,6 +71,11 @@ function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: Cust
 export default function OrderNew() {
   const navigate = useNavigate();
   const [ref, setRef] = useState<Reference | null>(null);
+  const { can } = useAuth();
+  // Шестерёнка у кнопок — тому, кто отвечает за настройки мастерской:
+  // кнопки общие, и убранная одним приёмщиком пропадёт у всех.
+  const canEditPicks = can("settings.manage");
+  const [editingPicks, setEditingPicks] = useState<QuickPickField | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [phoneHits, setPhoneHits] = useState<CustomerHit[]>([]);
@@ -233,6 +241,7 @@ export default function OrderNew() {
   const fieldError = (path: string) => error?.field(path);
 
   return (
+    <>
     <form onSubmit={submit} className="space-y-5">
       <PageHeader
         eyebrow="Мастерская"
@@ -436,7 +445,20 @@ export default function OrderNew() {
         </Card>
 
         <Card>
-          <SectionLabel>Комплектность</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <SectionLabel>Комплектность</SectionLabel>
+            {canEditPicks && (
+              <button
+                type="button"
+                onClick={() => setEditingPicks("completeness")}
+                aria-label="Настроить кнопки"
+                title="Настроить кнопки: добавить, переименовать, убрать"
+                className="-mr-1.5 -mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-field text-ink-dim transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-[17px] [&>svg]:w-[17px]"
+              >
+                <IconSettings />
+              </button>
+            )}
+          </div>
           <p className="mt-2 text-[13px] text-ink-dim">
             Что клиент сдал вместе с техникой. Кнопки дописывают пункт в строку, а строку можно
             править руками — «блок питания чужой» кнопкой не отметишь.
@@ -452,7 +474,20 @@ export default function OrderNew() {
         </Card>
 
         <Card>
-          <SectionLabel>Внешнее состояние</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <SectionLabel>Внешнее состояние</SectionLabel>
+            {canEditPicks && (
+              <button
+                type="button"
+                onClick={() => setEditingPicks("appearance")}
+                aria-label="Настроить кнопки"
+                title="Настроить кнопки: добавить, переименовать, убрать"
+                className="-mr-1.5 -mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-field text-ink-dim transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-[17px] [&>svg]:w-[17px]"
+              >
+                <IconSettings />
+              </button>
+            )}
+          </div>
           <p className="mt-2 text-[13px] text-ink-dim">
             Зафиксированные дефекты защищают и мастерскую, и клиента. Чем точнее записано, тем
             меньше спорить при выдаче.
@@ -586,5 +621,21 @@ export default function OrderNew() {
         </Button>
       </div>
     </form>
+
+    {/* Окно правки кнопок — рядом с формой бланка, а не внутри неё: форма в
+        форме недопустима, и Enter в поле «Новая кнопка» отправил бы весь
+        заказ. */}
+    {editingPicks && (
+      <QuickPickEditor
+        field={editingPicks}
+        onClose={() => setEditingPicks(null)}
+        onChanged={(list: QuickPick[]) =>
+          setRef((r) =>
+            r ? { ...r, [editingPicks]: list.map((q) => ({ key: q.id, label: q.label, locked: q.locked })) } : r
+          )
+        }
+      />
+    )}
+    </>
   );
 }

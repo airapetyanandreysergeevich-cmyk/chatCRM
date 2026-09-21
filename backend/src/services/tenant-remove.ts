@@ -53,6 +53,7 @@ const ORDER: readonly string[] = [
   "order",
   // справочники мастерской
   "deviceHint",
+  "quickPick",
   "service",
   "orderStatus",
   "device",

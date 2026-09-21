@@ -80,6 +80,7 @@ model Tenant {
   orderStatuses       OrderStatus[]
   services            Service[]
   deviceHints         DeviceHint[]
+  quickPicks          QuickPick[]
   orders              Order[]
   orderStatusHistory  OrderStatusHistory[]
   orderWorks          OrderWork[]
@@ -566,6 +567,27 @@ model DeviceHint {
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, field, scope, value])
+  @@index([tenantId, field])
+}
+
+/// Кнопки быстрого заполнения на бланке приёма: комплектность и внешнее
+/// состояние. Список у каждой мастерской свой и правится ею самой — та, что
+/// чинит телефоны, не листает «Блок питания» и «Диск (HDD/SSD)».
+model QuickPick {
+  id        String   @id @default(uuid())
+  tenantId  String
+  field     String // completeness | appearance
+  label     String
+  /// Сколько раз пригодилась при приёме: по этому числу кнопки и выстроены.
+  uses      Int      @default(0)
+  /// Порядок при равном счёте. У новой мастерской все по нулю, и кнопки
+  /// стоят в порядке справочника, а не по алфавиту.
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, field, label])
   @@index([tenantId, field])
 }
 

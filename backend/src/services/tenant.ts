@@ -1,4 +1,5 @@
 import { prisma, withTenant } from "../lib/db";
+import { seedQuickPicks } from "../modules/quickpicks/quickpicks.service";
 import { ALL_PERMISSIONS, ROLE_PRESETS } from "../lib/permissions";
 import { hashPassword } from "../lib/password";
 
@@ -74,6 +75,10 @@ export async function createTenant(input: CreateTenantInput) {
     await tx.orderStatus.createMany({
       data: DEFAULT_STATUSES.map((s, i) => ({ ...s, tenantId: tenant.id, sortOrder: i })),
     });
+
+    // Стартовые кнопки комплектности и внешнего состояния. Дальше мастерская
+    // правит их сама шестерёнкой на бланке приёма.
+    await seedQuickPicks(tx, tenant.id);
 
     await tx.warehouse.create({
       data: { tenantId: tenant.id, branchId: branch.id, name: "Основной склад", isDefault: true },

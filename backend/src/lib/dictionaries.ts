@@ -26,7 +26,9 @@ export const COMPLETENESS_ITEMS = [
   { key: "sim", label: "SIM-карта" },
   { key: "memory_card", label: "Карта памяти" },
   { key: "stylus", label: "Стилус или мышь" },
-  { key: "docs", label: "Документы, чек" },
+  // Без запятой: запятая разделяет пункты в строке, и «Документы, чек»
+  // разваливался на два пункта — кнопка не подсвечивалась никогда.
+  { key: "docs", label: "Документы и чек" },
 ] as const;
 
 /** Внешнее состояние фиксируется при приёме и защищает обе стороны. */
@@ -151,3 +153,36 @@ export function withFlags(
   if (flags.hasWaterDamage && !have.hasWaterDamage) out.push(WATER_DAMAGE);
   return out;
 }
+
+// ------------------------------------------------------ кнопки быстрого заполнения
+
+/**
+ * Кнопки комплектности и внешнего состояния на бланке приёма.
+ *
+ * Список выше — только стартовый: у каждой мастерской он свой, лежит в
+ * таблице QuickPick и правится шестерёнкой прямо на бланке. Мастерская,
+ * которая чинит телефоны, уберёт «Диск (HDD/SSD)» и добавит «Сим-лоток».
+ */
+export type QuickPickField = "completeness" | "appearance";
+export const QUICK_PICK_FIELDS: readonly QuickPickField[] = ["completeness", "appearance"];
+
+export const QUICK_PICK_DEFAULTS: Record<QuickPickField, readonly string[]> = {
+  completeness: COMPLETENESS_ITEMS.map((i) => i.label),
+  appearance: APPEARANCE_ITEMS.map((i) => i.label),
+};
+
+/**
+ * Кнопки, которые нельзя удалить или переименовать.
+ *
+ * «Следы вскрытия» и «Следы влаги» не просто подпись: по ним заказ получает
+ * флаги, которыми решается гарантия (см. flagsOf). Переименуй кнопку в
+ * «Вскрывали» — и флаг перестанет ставиться, а узнают об этом в день спора с
+ * клиентом. Порядок у них при этом общий: по частоте, как у остальных.
+ */
+export const LOCKED_PICKS: Record<QuickPickField, readonly string[]> = {
+  completeness: [],
+  appearance: [OPEN_TRACES, WATER_DAMAGE],
+};
+
+export const isLockedPick = (field: QuickPickField, label: string): boolean =>
+  LOCKED_PICKS[field].some((l) => l.toLowerCase() === label.trim().toLowerCase());

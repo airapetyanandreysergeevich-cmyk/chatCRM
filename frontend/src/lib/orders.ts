@@ -124,8 +124,9 @@ export interface Order {
 
 export interface Reference {
   deviceKinds: string[];
-  completeness: Array<{ key: string; label: string }>;
-  appearance: Array<{ key: string; label: string }>;
+  /** Кнопки быстрого заполнения мастерской — уже по частоте. */
+  completeness: Array<{ key: string; label: string; locked?: boolean }>;
+  appearance: Array<{ key: string; label: string; locked?: boolean }>;
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   masters: Array<{ id: string; fullName: string }>;

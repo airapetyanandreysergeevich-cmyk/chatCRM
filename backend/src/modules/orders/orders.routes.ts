@@ -24,6 +24,7 @@ import {
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { rememberDevice } from "../hints/hints.service";
+import { countQuickPicks } from "../quickpicks/quickpicks.service";
 import {
   assertOrderAccess,
   limitExceeded,
@@ -258,6 +259,11 @@ ordersRouter.post(
       // Вид, марку и модель кладём в память подсказок: в следующий раз такую
       // же технику приёмщик выберет из списка, а не наберёт заново.
       await rememberDevice(tx, body.device);
+
+      // Кнопки, чьи пункты попали в заказ, поднимаются в списке — на
+      // следующем бланке частое окажется первым.
+      await countQuickPicks(tx, "completeness", toLabels(body.completeness));
+      await countQuickPicks(tx, "appearance", toLabels(body.appearance));
 
       if (body.parentOrderId) {
         const parent = await tx.order.findFirst({ where: { id: body.parentOrderId, deletedAt: null } });
