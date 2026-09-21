@@ -17,8 +17,10 @@ export type StageKey = Extract<StatusGroup, "NEW" | "WAITING" | "IN_PROGRESS" | 
 export interface Stage {
   key: StageKey;
   label: string;
-  /** Панель: едва заметная заливка и тонкий яркий контур. */
-  panel: string;
+  /** Светящаяся полоса по верхней грани колонки на главной. */
+  glow: string;
+  /** Точка у названия колонки — тот же свет, только маленький. */
+  dot: string;
   /** Плашка статуса: та же заливка, тот же цвет текста. */
   chip: string;
   /** Выбранный фильтр в списке заказов. */
@@ -32,15 +34,21 @@ export interface Stage {
  * иначе цвет пришлось бы держать в двух местах, и они разошлись бы в первый
  * же день.
  *
- * Заливка взята почти прозрачной намеренно: четыре насыщенных прямоугольника
- * рядом друг с другом невозможно читать дольше минуты, а смотреть на эту
- * страницу приходится весь день.
+ * Колонки на главной — одного цвета. Раньше каждая была залита своим цветом
+ * и обведена им же, и четыре разные заливки рядом читались как четыре разные
+ * программы. Цвет стадии теперь собран в тонкую светящуюся полосу по верхней
+ * грани и в точку у названия: колонку по-прежнему узнаёшь с другого конца
+ * мастерской, но смотреть на доску весь день не утомительно.
+ *
+ * Свечение задано тенью с цветом из той же переменной: так оно следует за
+ * палитрой мастерской и перекрашивается вместе с ней.
  */
 export const STAGES: Stage[] = [
   {
     key: "NEW",
     label: "Диагностика",
-    panel: "border-stage-new/40 bg-stage-new/[0.04]",
+    glow: "bg-stage-new/[0.85] shadow-[0_0_14px_1px_rgb(var(--stage-new)/0.5)]",
+    dot: "bg-stage-new shadow-[0_0_8px_1px_rgb(var(--stage-new)/0.75)]",
     chip: "bg-stage-new/10 text-stage-new",
     pill: "border-stage-new/50 bg-stage-new/[0.14] text-stage-new",
     text: "text-stage-new",
@@ -48,7 +56,8 @@ export const STAGES: Stage[] = [
   {
     key: "WAITING",
     label: "Согласование",
-    panel: "border-stage-waiting/40 bg-stage-waiting/[0.04]",
+    glow: "bg-stage-waiting/[0.85] shadow-[0_0_14px_1px_rgb(var(--stage-waiting)/0.5)]",
+    dot: "bg-stage-waiting shadow-[0_0_8px_1px_rgb(var(--stage-waiting)/0.75)]",
     chip: "bg-stage-waiting/10 text-stage-waiting",
     pill: "border-stage-waiting/50 bg-stage-waiting/[0.14] text-stage-waiting",
     text: "text-stage-waiting",
@@ -56,7 +65,8 @@ export const STAGES: Stage[] = [
   {
     key: "IN_PROGRESS",
     label: "Ремонт",
-    panel: "border-stage-progress/40 bg-stage-progress/[0.045]",
+    glow: "bg-stage-progress/[0.85] shadow-[0_0_14px_1px_rgb(var(--stage-progress)/0.5)]",
+    dot: "bg-stage-progress shadow-[0_0_8px_1px_rgb(var(--stage-progress)/0.75)]",
     chip: "bg-stage-progress/[0.12] text-stage-progress",
     pill: "border-stage-progress/50 bg-stage-progress/[0.14] text-stage-progress",
     text: "text-stage-progress",
@@ -64,7 +74,8 @@ export const STAGES: Stage[] = [
   {
     key: "DONE",
     label: "Выдача",
-    panel: "border-stage-done/40 bg-stage-done/[0.04]",
+    glow: "bg-stage-done/[0.85] shadow-[0_0_14px_1px_rgb(var(--stage-done)/0.5)]",
+    dot: "bg-stage-done shadow-[0_0_8px_1px_rgb(var(--stage-done)/0.75)]",
     chip: "bg-stage-done/10 text-stage-done",
     pill: "border-stage-done/50 bg-stage-done/[0.14] text-stage-done",
     text: "text-stage-done",

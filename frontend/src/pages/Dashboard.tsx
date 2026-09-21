@@ -114,7 +114,7 @@ function OrderCardTile({ card }: { card: BoardCard }) {
   return (
     <Link
       to={`/orders/${card.id}`}
-      className="block rounded-card border border-line bg-surface p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+      className="block rounded-card border border-line bg-surface-raised p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
     >
       <div className="flex items-center gap-2">
         <span className="font-mono text-[13px] font-semibold text-ink-soft">{card.number}</span>
@@ -165,7 +165,12 @@ function StageColumnPanel({
   const hidden = column.total - shown.length;
 
   return (
-    <section className={"rounded-panel border p-3 sm:p-3.5 " + stage.panel}>
+    <section className="relative rounded-panel border border-line bg-surface p-3 sm:p-3.5">
+      {/* Цвет стадии — тонкая светящаяся полоса по верхней грани. Отдельным
+          элементом, а не рамкой: рамка читается как контур, а нужна
+          подсветка. Чуть отступает от углов, чтобы не спорить со скруглением. */}
+      <span aria-hidden className={"absolute inset-x-3.5 -top-px h-[2px] rounded-pill " + stage.glow} />
+
       {/* Заголовок — ссылка в список заказов с тем же фильтром. Сама панель
           ссылкой быть не может: внутри неё уже лежат ссылки на заказы. */}
       <Link
@@ -173,7 +178,8 @@ function StageColumnPanel({
         title={`Все заказы: ${stage.label.toLowerCase()}`}
         className="flex items-center justify-between gap-2 rounded-field px-0.5 pb-3 transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
       >
-        <h2 className={"text-[13px] font-bold uppercase tracking-[0.1em] " + stage.text}>
+        <h2 className="flex items-center gap-2 text-[13px] font-bold uppercase tracking-[0.1em] text-ink-soft">
+          <span aria-hidden className={"h-[7px] w-[7px] shrink-0 rounded-full " + stage.dot} />
           {stage.label}
         </h2>
         <span

@@ -101,6 +101,45 @@ if (fs.existsSync(client)) {
   }
 }
 
+// Свежесть сборок.
+//
+// Установщик кладёт в себя backend/dist и frontend/dist такими, какими нашёл,
+// и раньше проверка смотрела только, что они есть. Однажды сервер в
+// установщике оказался четырёхдневной давности: сборку интерфейса обновили,
+// а сервера — нет. Новый интерфейс спрашивал у старого сервера то, чего тот
+// не умел, и выглядело это так, будто обновления просто не применились.
+//
+// Поэтому сверяем время: сборка не может быть старше самого нового файла
+// своих исходников. npm run dist пересобирает обе сама; эта проверка — на
+// случай, если установщик собирают в обход неё.
+function newest(dir) {
+  let latest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    const t = entry.isDirectory() ? newest(full) : fs.statSync(full).mtimeMs;
+    if (t > latest) latest = t;
+  }
+  return latest;
+}
+
+const fresh = [
+  { what: "Сервер", built: path.join(repo, "backend", "dist", "index.js"), src: path.join(repo, "backend", "src"), fix: "cd backend && npm run build" },
+  { what: "Интерфейс", built: path.join(repo, "frontend", "dist", "index.html"), src: path.join(repo, "frontend", "src"), fix: "cd frontend && npm run build" },
+];
+for (const f of fresh) {
+  if (!fs.existsSync(f.built) || !fs.existsSync(f.src)) continue;
+  const builtAt = fs.statSync(f.built).mtimeMs;
+  const changedAt = newest(f.src);
+  if (builtAt >= changedAt) {
+    console.log(`ok     ${f.what}: сборка свежее исходников`);
+  } else {
+    const days = ((changedAt - builtAt) / 86_400_000).toFixed(1);
+    console.log(`НЕТ    ${f.what}: сборка старше исходников на ${days} дн.`);
+    console.log(`       ${f.fix}`);
+    missing++;
+  }
+}
+
 if (missing) {
   console.log(`\nСборка остановлена: не хватает ${missing}.`);
   process.exit(1);
