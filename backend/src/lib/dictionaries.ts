@@ -38,7 +38,15 @@ export const APPEARANCE_ITEMS = [
   { key: "worn", label: "Потёртости" },
   { key: "screen_defect", label: "Дефекты экрана" },
   { key: "missing_parts", label: "Отсутствуют элементы корпуса" },
+  // Два признака, от которых зависит гарантия: раньше были отдельными
+  // галочками под списком, теперь — такие же кнопки. Флаги заказа
+  // hasOpenTraces и hasWaterDamage выводятся из списка, см. flagsOf.
+  { key: "open_traces", label: "Следы вскрытия" },
+  { key: "water", label: "Следы влаги" },
 ] as const;
+
+export const OPEN_TRACES = "Следы вскрытия";
+export const WATER_DAMAGE = "Следы влаги";
 
 export const ORDER_KINDS = [
   { value: "REPAIR", label: "Ремонт" },
@@ -109,3 +117,37 @@ export function toLabels(input: unknown): string[] {
 
 /** Обратно строкой — для квитанции, выгрузки и всего, что читает человек. */
 export const labelsText = (input: unknown): string => toLabels(input).join(", ");
+
+/**
+ * Признаки вскрытия и влаги — из списка внешнего состояния.
+ *
+ * Флаги в заказе остались: по ним решается гарантия, и искать их удобнее
+ * полем, чем текстом. Но вводятся они теперь кнопками в том же списке, что и
+ * царапины, и источник у них один — этот список. Два места ввода для одного
+ * факта однажды разошлись бы: «следы влаги» в списке и снятая галочка рядом.
+ */
+export function flagsOf(labels: string[]): { hasOpenTraces: boolean; hasWaterDamage: boolean } {
+  const low = labels.map((l) => l.toLowerCase());
+  return {
+    hasOpenTraces: low.includes(OPEN_TRACES.toLowerCase()),
+    hasWaterDamage: low.includes(WATER_DAMAGE.toLowerCase()),
+  };
+}
+
+/**
+ * Список состояния вместе с признаками старых заказов.
+ *
+ * У заказов, принятых до кнопок, признак стоит флагом, а в списке его нет.
+ * Показываем его в списке — иначе карточка и квитанция молча потеряли бы
+ * «следы вскрытия», а это ровно то, чем мастерская защищается от претензии.
+ */
+export function withFlags(
+  labels: string[],
+  flags: { hasOpenTraces?: boolean | null; hasWaterDamage?: boolean | null }
+): string[] {
+  const have = flagsOf(labels);
+  const out = [...labels];
+  if (flags.hasOpenTraces && !have.hasOpenTraces) out.push(OPEN_TRACES);
+  if (flags.hasWaterDamage && !have.hasWaterDamage) out.push(WATER_DAMAGE);
+  return out;
+}

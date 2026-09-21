@@ -4,7 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { toLabels } from "../../lib/dictionaries";
+import { flagsOf, toLabels } from "../../lib/dictionaries";
 import { env } from "../../lib/env";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { notifyTenant } from "../../lib/notify";
@@ -287,8 +287,11 @@ ordersRouter.post(
           completeness: toLabels(body.completeness),
           appearance: toLabels(body.appearance),
           appearanceNote: body.appearanceNote || null,
-          hasOpenTraces: body.hasOpenTraces,
-          hasWaterDamage: body.hasWaterDamage,
+          // Флаги — из списка состояния. Явные значения в запросе ещё
+          // принимаются: так старый бланк, открытый в чужой вкладке до
+          // обновления, не потеряет отмеченное.
+          hasOpenTraces: body.hasOpenTraces || flagsOf(toLabels(body.appearance)).hasOpenTraces,
+          hasWaterDamage: body.hasWaterDamage || flagsOf(toLabels(body.appearance)).hasWaterDamage,
           storageLocation: body.storageLocation || null,
           estimatedCost: body.estimatedCost ?? null,
           approvedLimit: body.approvedLimit ?? null,
@@ -408,6 +411,7 @@ ordersRouter.patch(
           dueAt: body.dueAt === undefined ? undefined : body.dueAt ? new Date(body.dueAt) : null,
           completeness: body.completeness === undefined ? undefined : toLabels(body.completeness),
           appearance: body.appearance === undefined ? undefined : toLabels(body.appearance),
+          ...(body.appearance === undefined ? {} : flagsOf(toLabels(body.appearance))),
         },
       });
       await writeAudit(tx, {

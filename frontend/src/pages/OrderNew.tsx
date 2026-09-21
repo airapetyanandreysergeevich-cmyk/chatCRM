@@ -92,9 +92,6 @@ export default function OrderNew() {
     complaint: "",
     receptionNote: "",
     devicePasscode: "",
-    appearanceNote: "",
-    hasOpenTraces: false,
-    hasWaterDamage: false,
     storageLocation: "",
     dueAt: "",
     estimatedCost: "",
@@ -215,9 +212,6 @@ export default function OrderNew() {
         devicePasscode: form.devicePasscode || undefined,
         completeness,
         appearance,
-        appearanceNote: form.appearanceNote || undefined,
-        hasOpenTraces: form.hasOpenTraces,
-        hasWaterDamage: form.hasWaterDamage,
         storageLocation: form.storageLocation || undefined,
         dueAt: form.dueAt ? new Date(form.dueAt).toISOString() : undefined,
         estimatedCost: num(form.estimatedCost),
@@ -471,26 +465,11 @@ export default function OrderNew() {
               placeholder="Царапины, скол на крышке у петли…"
             />
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <Checkbox
-              label="Следы вскрытия"
-              checked={form.hasOpenTraces}
-              onChange={(v) => setForm({ ...form, hasOpenTraces: v })}
-            />
-            <Checkbox
-              label="Следы влаги"
-              checked={form.hasWaterDamage}
-              onChange={(v) => setForm({ ...form, hasWaterDamage: v })}
-            />
-          </div>
-          <div className="mt-4">
-            <Field label="Прочее по состоянию">
-              <Input
-                value={form.appearanceNote}
-                onChange={(e) => setForm({ ...form, appearanceNote: e.target.value })}
-              />
-            </Field>
-          </div>
+          {/* «Следы вскрытия» и «Следы влаги» — теперь такие же кнопки в
+              списке выше, а «Прочее по состоянию» больше не нужно: своё
+              дописывается прямо в строку. Три места для одного вопроса
+              «в каком виде сдали технику» — это три места, где его можно
+              заполнить наполовину. */}
         </Card>
       </div>
 

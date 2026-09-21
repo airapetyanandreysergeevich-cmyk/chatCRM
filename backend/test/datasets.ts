@@ -17,7 +17,7 @@
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";
-import { labelsText, toLabels } from "../src/lib/dictionaries";
+import { flagsOf, labelsText, toLabels, withFlags } from "../src/lib/dictionaries";
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
 import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
@@ -80,6 +80,9 @@ const fakeTx = {
         { key: "scratches", label: "Царапины", checked: true },
         { key: "chips", label: "Сколы", checked: false },
       ],
+      // Старый заказ: признак стоит флагом, в списке его нет.
+      hasOpenTraces: true,
+      hasWaterDamage: false,
       receptionNote: null,
       diagnosis: null,
       assignedMaster: { fullName: "Сергей Панов" },
@@ -436,8 +439,23 @@ async function main(): Promise<void> {
   const acol = ordersSheet.columns.findIndex((c) => c.title === "Внешнее состояние");
   check(ordersSheet.rows[0][kcol] === "Блок питания, Кабель", `комплектность выгружается строкой (${ordersSheet.rows[0][kcol]})`);
   check(
-    ordersSheet.rows[0][acol] === "Царапины",
-    `старый чек-лист читается, неотмеченное не выгружается (${ordersSheet.rows[0][acol]})`
+    ordersSheet.rows[0][acol] === "Царапины, Следы вскрытия",
+    `старый чек-лист читается, неотмеченное не выгружается, флаг старого заказа попадает в список (${ordersSheet.rows[0][acol]})`
+  );
+
+  // Следы вскрытия и влаги — теперь кнопки в том же списке. Флаги заказа,
+  // по которым решается гарантия, выводятся из списка, а у старых заказов
+  // флаг возвращается в список — иначе квитанция потеряла бы то, чем
+  // мастерская защищается от претензии.
+  check(flagsOf(["Царапины", "следы вскрытия"]).hasOpenTraces, "«следы вскрытия» в списке ставят флаг, регистр не важен");
+  check(!flagsOf(["Царапины"]).hasWaterDamage, "без пункта флага нет");
+  check(
+    withFlags(["Сколы"], { hasWaterDamage: true }).join(", ") === "Сколы, Следы влаги",
+    "флаг старого заказа дописывается в список"
+  );
+  check(
+    withFlags(["Следы влаги"], { hasWaterDamage: true }).length === 1,
+    "и не задваивается, если пункт уже есть"
   );
   check(
     matchColumns(["Комплектация", "Техническое состояние"], DATASETS.orders).size === 2,

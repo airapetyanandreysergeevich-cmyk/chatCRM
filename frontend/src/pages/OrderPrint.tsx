@@ -60,10 +60,22 @@ function Pairs({ items }: { items: Array<[string, React.ReactNode]> }) {
 }
 
 /** Отмеченные пункты чек-листа строкой: в бланке галочки занимают полстраницы. */
-function Checked({ items, empty }: { items: string[]; empty: string }) {
+/**
+ * Перечисление строкой. Пункты из strong выделяются жирным прямо в строке:
+ * «следы вскрытия» и «следы влаги» решают гарантию, и на бумаге их должно
+ * быть видно с первого взгляда — как было, когда они стояли отдельной строкой.
+ */
+function Checked({ items, empty, strong = [] }: { items: string[]; empty: string; strong?: string[] }) {
+  if (!items.length) return <p className="text-[12px] text-black/50">{empty}</p>;
+  const bold = new Set(strong.map((s) => s.toLowerCase()));
   return (
     <p className="text-[12px]">
-      {items.length ? items.join(", ") : <span className="text-black/50">{empty}</span>}
+      {items.map((item, i) => (
+        <span key={item}>
+          {i > 0 && ", "}
+          {bold.has(item.toLowerCase()) ? <strong>{item}</strong> : item}
+        </span>
+      ))}
     </p>
   );
 }
@@ -230,15 +242,12 @@ export default function OrderPrint() {
             </Section>
 
             <Section title="Внешнее состояние">
-              <Checked items={order.appearance} empty="Видимых дефектов не зафиксировано" />
+              <Checked
+                items={order.appearance}
+                empty="Видимых дефектов не зафиксировано"
+                strong={["Следы вскрытия", "Следы влаги"]}
+              />
               {order.appearanceNote && <p className="mt-1 text-[12px]">{order.appearanceNote}</p>}
-              {(order.hasOpenTraces || order.hasWaterDamage) && (
-                <p className="mt-1 text-[12px] font-semibold">
-                  {[order.hasOpenTraces && "Следы вскрытия", order.hasWaterDamage && "Следы влаги"]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              )}
             </Section>
 
             <Section title="Неисправность со слов клиента">

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { labelsText } from "../../lib/dictionaries";
+import { labelsText, toLabels, withFlags } from "../../lib/dictionaries";
 import { DATASETS, type DatasetKey } from "./dataset";
 import type { SheetData } from "./tableFile";
 
@@ -139,6 +139,8 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
       complaint: true,
       completeness: true,
       appearance: true,
+      hasOpenTraces: true,
+      hasWaterDamage: true,
       receptionNote: true,
       diagnosis: true,
       dueAt: true,
@@ -180,7 +182,7 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
       // Старые заказы лежат чек-листом, новые — списком строк; labelsText
       // читает оба и отдаёт одну строку через запятую.
       labelsText(o.completeness),
-      labelsText(o.appearance),
+      labelsText(withFlags(toLabels(o.appearance), o)),
       o.receptionNote,
       o.diagnosis,
       o.assignedMaster?.fullName ?? "",

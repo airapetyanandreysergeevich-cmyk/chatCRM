@@ -260,6 +260,12 @@ export const IconStatusCancelled = (p: IconProps) => (
   </Icon>
 );
 
+export const IconClose = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m6.5 6.5 11 11m0-11-11 11" />
+  </Icon>
+);
+
 export const IconUrgent = (p: IconProps) => (
   <Icon {...p}>
     <path d="M13 3 5.5 13.5H11L10 21l7.5-10.5H12L13 3Z" />

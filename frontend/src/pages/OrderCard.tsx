@@ -517,17 +517,10 @@ export default function OrderCard() {
               <Checklist title="Комплектность" items={order.completeness ?? []} />
               <div className="space-y-3">
                 <Checklist title="Внешнее состояние" items={order.appearance ?? []} />
-                {(order.hasOpenTraces || order.hasWaterDamage || order.appearanceNote) && (
-                  <p className="text-[13px] text-ink-muted">
-                    {[
-                      order.hasOpenTraces && "следы вскрытия",
-                      order.hasWaterDamage && "следы влаги",
-                      order.appearanceNote,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                )}
+                {/* Следы вскрытия и влаги сервер уже вписал в список выше —
+                    и у новых заказов, и у старых, где они стояли флагом.
+                    Примечание осталось только у заказов, принятых до кнопок. */}
+                {order.appearanceNote && <p className="text-[13px] text-ink-muted">{order.appearanceNote}</p>}
               </div>
             </div>
           </Card>
