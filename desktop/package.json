@@ -2,7 +2,7 @@
   "name": "finecrm-desktop",
   "//productName": "Имя, под которым программа живёт в системе. Обязано быть здесь, а не только в разделе build: Electron берёт из него папку настроек (%APPDATA%\\<имя>), и без этой строки она называлась бы finecrm-desktop — не тем именем, которое ищет деинсталлятор и человек.",
   "productName": "FineCRM",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Локальная версия FineCRM для Windows: Основа со встроенной базой, клиент локальной сети, клиент облака",
   "main": "src/main.js",
@@ -109,7 +109,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://finecrm.ru/download/desktop/",
+        "url": "https://www.finecrm.ru/download/desktop/",
         "channel": "latest"
       }
     ],

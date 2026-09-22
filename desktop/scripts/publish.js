@@ -7,7 +7,7 @@
  *
  * Берёт из desktop/dist три файла текущей версии — установщик, его .blockmap
  * и latest.yml — и кладёт в ~/repairshop/deploy/downloads/desktop на сервере.
- * Оттуда их раздаёт nginx по https://finecrm.ru/download/desktop/, и
+ * Оттуда их раздаёт nginx по https://www.finecrm.ru/download/desktop/, и
  * установленные программы находят новую версию при следующей проверке.
  *
  * Порядок важен: сначала установщик и карта блоков, latest.yml — последним.
