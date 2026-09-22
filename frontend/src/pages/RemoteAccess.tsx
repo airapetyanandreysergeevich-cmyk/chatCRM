@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Banner, Button, Card, Checkbox, Field, Input, PageHeader, SectionLabel, Spinner } from "../components/ui";
+import {
+  Banner,
+  Button,
+  Card,
+  Checkbox,
+  PageHeader,
+  SectionLabel,
+  Spinner,
+  Textarea,
+} from "../components/ui";
 import { ApiError, api } from "../lib/api";
 
 /**
@@ -11,15 +20,19 @@ import { ApiError, api } from "../lib/api";
  * программа сама соединяется с сервером поставщика, и тот отдаёт ей адрес в
  * интернете. Наружу мастерская по-прежнему ничего не открывает.
  *
- * Ключ выдаёт поставщик программы, он же его отзывает. Здесь ключ только
- * вставляют, и обратно он не показывается: видно четыре последних знака —
- * ровно чтобы отличить один ключ от другого.
+ * Всё, что нужно сделать, — вставить одну фразу и нажать «Подключить».
+ * В ней уже и адрес сервера, и ключ, и код мастерской: переписывать по
+ * отдельности нечего, а значит, и ошибиться негде. Обратно фраза не
+ * показывается никогда — видно только четыре последних знака ключа.
  */
 
 interface State {
   enabled: boolean;
+  /** Фраза уже вставлена: можно просто двигать переключатель. */
+  connected: boolean;
   keyHint: string;
-  url: string;
+  code: string;
+  address: string;
   state: "off" | "connecting" | "online" | "error";
   detail: string | null;
 }
@@ -33,8 +46,9 @@ const WORDS: Record<State["state"], { text: string; tone: string }> = {
 
 export default function RemoteAccess() {
   const [data, setData] = useState<State | null>(null);
-  const [key, setKey] = useState("");
+  const [phrase, setPhrase] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -52,12 +66,19 @@ export default function RemoteAccess() {
     return () => clearInterval(t);
   }, [load]);
 
-  async function save(enabled: boolean) {
+  async function save(enabled: boolean, withPhrase: boolean) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await api.put("/settings/remote-access", { enabled, key: key.trim() || undefined });
-      setKey("");
+      await api.put("/settings/remote-access", {
+        enabled,
+        phrase: withPhrase ? phrase.trim() : undefined,
+      });
+      if (withPhrase) {
+        setPhrase("");
+        setNotice("Фраза принята — подключаемся");
+      }
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось сохранить");
@@ -80,58 +101,74 @@ export default function RemoteAccess() {
       />
 
       {error && <Banner tone="error">{error}</Banner>}
+      {notice && <Banner>{notice}</Banner>}
 
       <Card>
         <SectionLabel>Состояние</SectionLabel>
         <p className={"mt-2 text-[17px] font-bold " + status.tone}>{status.text}</p>
-        {data.detail && data.state === "error" && (
-          <p className="mt-1 text-[13px] text-ink-muted">{data.detail}</p>
+        {data.detail && data.state === "error" && <p className="mt-1 text-[13px] text-ink-muted">{data.detail}</p>}
+
+        {data.address && (
+          <p className="mt-3 text-[13.5px]">
+            <span className="text-ink-muted">Адрес мастерской: </span>
+            <a href={data.address} target="_blank" rel="noreferrer" className="font-semibold text-brand-ink hover:underline">
+              {data.address}
+            </a>
+          </p>
         )}
-        {data.enabled && data.keyHint && (
-          <p className="mt-2 text-[13px] text-ink-dim">Ключ …{data.keyHint}</p>
+
+        {data.connected && (
+          <p className="mt-2 text-[13px] text-ink-dim">
+            Фраза подключена, ключ …{data.keyHint}
+          </p>
         )}
+
+        <div className="mt-4">
+          <Checkbox
+            label="Пускать в мастерскую из интернета"
+            checked={data.enabled}
+            disabled={busy || !data.connected}
+            onChange={(next) => void save(next, false)}
+          />
+          {!data.connected && (
+            <p className="mt-1.5 text-[12.5px] text-ink-dim">
+              Сначала вставьте фразу подключения — её выдаёт поставщик программы.
+            </p>
+          )}
+        </div>
+
         <p className="mt-3 text-[13px] leading-relaxed text-ink-dim">
-          Адрес, по которому открывается мастерская, выдаёт поставщик программы вместе с ключом.
           Компьютер с Основой для этого должен быть включён: когда он спит, адрес не отвечает.
         </p>
       </Card>
 
       <Card>
-        <SectionLabel>Ключ доступа</SectionLabel>
+        <SectionLabel>{data.connected ? "Новая фраза подключения" : "Фраза подключения"}</SectionLabel>
         <form
-          className="mt-3 space-y-4"
+          className="mt-3 space-y-3"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
-            void save(true);
+            void save(true, true);
           }}
         >
-          <Field
-            label={data.keyHint ? "Новый ключ" : "Ключ"}
-            hint={
-              data.keyHint
-                ? "Оставьте пустым, чтобы сохранить прежний ключ"
-                : "Его выдаёт поставщик программы — скопируйте целиком"
-            }
-          >
-            <Input
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              autoCapitalize="none"
-              autoComplete="off"
-              placeholder={data.keyHint ? `…${data.keyHint}` : ""}
-            />
-          </Field>
-
-          <Checkbox
-            label="Пускать в мастерскую из интернета"
-            checked={data.enabled}
-            disabled={busy}
-            onChange={(next) => void save(next)}
+          <Textarea
+            value={phrase}
+            onChange={(e) => setPhrase(e.target.value)}
+            rows={3}
+            spellCheck={false}
+            autoCapitalize="none"
+            aria-label="Фраза подключения"
+            placeholder="FINECRM-…"
+            className="font-mono text-[13px]"
           />
-
+          <p className="text-[12.5px] leading-relaxed text-ink-dim">
+            Вставьте строку, которую прислал поставщик программы, целиком — вместе с началом FINECRM-.
+            Лишний текст вокруг не помешает.
+            {data.connected && " Пока не вставите новую, работает прежняя."}
+          </p>
           <div className="flex flex-col gap-2 sm:flex-row-reverse">
-            <Button type="submit" disabled={busy || (!key.trim() && data.enabled)} className="sm:min-w-[200px]">
-              {busy ? "Сохраняем…" : data.enabled ? "Сменить ключ" : "Включить"}
+            <Button type="submit" disabled={busy || !phrase.trim()} className="sm:min-w-[200px]">
+              {busy ? "Подключаем…" : "Подключить"}
             </Button>
           </div>
         </form>
@@ -151,6 +188,10 @@ export default function RemoteAccess() {
           <li>
             Выключили здесь — доступ снаружи пропал сразу. Работа в самой мастерской, по локальной
             сети, от этого не зависит вовсе.
+          </li>
+          <li>
+            Фраза — это пароль от входа снаружи. Передавайте её так же бережно и не пересылайте в
+            общие чаты.
           </li>
         </ul>
       </Card>

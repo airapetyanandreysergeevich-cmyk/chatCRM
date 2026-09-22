@@ -20,6 +20,8 @@ export type RemoteAccess = {
   enabled: boolean;
   url: string;
   key: string;
+  /** Код мастерской из фразы подключения — по нему показываем её адрес. */
+  code?: string;
 };
 
 const KEY = "remoteAccess";
@@ -37,6 +39,7 @@ export async function readRemoteAccess(): Promise<RemoteAccess | null> {
     enabled: raw.enabled !== false,
     url: typeof raw.url === "string" && raw.url ? raw.url : defaultRelayUrl(),
     key: typeof raw.key === "string" ? raw.key : "",
+    code: typeof raw.code === "string" ? raw.code : "",
   };
 }
 

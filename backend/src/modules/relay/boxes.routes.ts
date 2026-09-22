@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
+import { encodeInvite, publicAddress } from "./invite";
 import { fingerprint, newKey, normalizeCode } from "./boxes.service";
 import { relayHub } from "./relay.instance";
 
@@ -18,6 +19,19 @@ import { relayHub } from "./relay.instance";
  */
 
 export const boxesRouter = Router();
+
+/**
+ * Адрес узла связи для фразы подключения.
+ *
+ * Берём из запроса, а не из настроек: панель открыта на том самом домене, к
+ * которому мастерской и предстоит подключаться. Так фраза остаётся верной и
+ * на finecrm.ru, и на любом другом домене, куда систему поставят.
+ */
+function relayUrlFor(req: { headers: Record<string, unknown>; get(name: string): string | undefined }): string {
+  const host = req.get("x-forwarded-host") || req.get("host") || "www.finecrm.ru";
+  const proto = (req.get("x-forwarded-proto") || "https").split(",")[0];
+  return `${proto === "http" ? "ws" : "wss"}://${host}/relay/agent`;
+}
 
 const boxSchema = z.object({
   name: z.string().trim().min(2, "Укажите название мастерской"),
@@ -83,7 +97,13 @@ boxesRouter.post(
       },
     });
     // Ключ целиком — единственный раз в жизни. Дальше только его хвост.
-    res.status(201).json({ id: box.id, code: box.code, key });
+    const url = relayUrlFor(req);
+    res.status(201).json({
+      id: box.id,
+      code: box.code,
+      phrase: encodeInvite({ url, key, code: box.code, name: box.name }),
+      address: publicAddress(url, box.code),
+    });
   })
 );
 
@@ -99,7 +119,12 @@ boxesRouter.post(
       data: { keyHash: fingerprint(key), keyHint: key.slice(-4) },
     });
     relayHub()?.disconnect(box.code, "ключ перевыпущен");
-    res.json({ key });
+    const url = relayUrlFor(req);
+    res.json({
+      code: box.code,
+      phrase: encodeInvite({ url, key, code: box.code, name: box.name }),
+      address: publicAddress(url, box.code),
+    });
   })
 );
 

@@ -3,6 +3,7 @@ import express from "express";
 import http from "http";
 import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
+import { encodeInvite, parseInvite, publicAddress } from "../src/modules/relay/invite";
 
 /**
  * Туннель целиком: запрос из интернета → узел связи → Основа → и обратно.
@@ -139,6 +140,25 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   check(
     withBase(Buffer.from("просто текст"), "/b/x/").toString() === "просто текст",
     "не страница — не трогаем"
+  );
+
+  // Фраза подключения: то, что собственник передаёт мастерской одной строкой.
+  const DEFAULT_URL = "wss://www.finecrm.ru/relay/agent";
+  const phrase = encodeInvite({ url: DEFAULT_URL, key: KEY, code: CODE, name: "Сервис на Ленина" });
+  const parsed = parseInvite(phrase, "wss://другой/relay/agent");
+  check(parsed?.key === KEY && parsed?.code === CODE && parsed?.url === DEFAULT_URL, "фраза разбирается обратно целиком");
+  check(
+    parseInvite(`  Держите:\n${phrase}\n\nвопросы — пишите  `, DEFAULT_URL)?.key === KEY,
+    "фраза вынимается из письма с лишним текстом"
+  );
+  check(parseInvite("здравствуйте, вот ваш доступ", DEFAULT_URL) === null, "обычный текст фразой не считается");
+  check(
+    parseInvite(KEY + "extra-dlinnyj-kluch-0001", DEFAULT_URL)?.url === DEFAULT_URL,
+    "голый ключ по-прежнему принимается — с адресом по умолчанию"
+  );
+  check(
+    publicAddress(DEFAULT_URL, CODE) === `https://www.finecrm.ru/b/${CODE}/`,
+    "по фразе видно, каким будет адрес мастерской"
   );
 
   const box = await startBox();

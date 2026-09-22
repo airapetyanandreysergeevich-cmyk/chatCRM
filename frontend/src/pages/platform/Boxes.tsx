@@ -20,13 +20,14 @@ import { formatDateTime } from "../../lib/format";
  * Коробочные мастерские: кому открыт доступ к своей Основе из интернета.
  *
  * Мастерская работает у себя, на своём компьютере, и её база никуда не
- * уезжает. Здесь выдаётся только право подключиться к нашему серверу: код в
- * адресе и ключ. Выключатель рядом — это и есть рубильник услуги: выключили,
- * и адрес перестал работать, а программа в мастерской продолжает работать по
- * локальной сети как ни в чём не бывало.
+ * уезжает. Здесь выдаётся только право подключиться к нашему серверу — одной
+ * фразой, в которой и адрес, и ключ, и код мастерской. Выключатель рядом —
+ * это и есть рубильник услуги: выключили, и адрес перестал работать, а
+ * программа в мастерской продолжает работать по локальной сети как ни в чём
+ * не бывало.
  *
- * Ключ показывается один раз, при выдаче: у нас хранится только его
- * отпечаток. Потерялся — перевыпускаем, старый сразу перестаёт действовать.
+ * Фраза показывается один раз, при выдаче: у нас хранится только отпечаток
+ * ключа. Потерялась — выпускаем новую, прежняя сразу перестаёт действовать.
  */
 
 interface Box {
@@ -47,7 +48,7 @@ export default function Boxes() {
   const [rows, setRows] = useState<Box[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [issued, setIssued] = useState<{ code: string; key: string } | null>(null);
+  const [issued, setIssued] = useState<{ code: string; phrase: string; address: string } | null>(null);
   const [confirmKey, setConfirmKey] = useState<Box | null>(null);
 
   const load = useCallback(async () => {
@@ -72,9 +73,12 @@ export default function Boxes() {
   }
 
   async function reissue(box: Box) {
-    const { key } = await api.post<{ key: string }>(`/platform/boxes/${box.id}/key`, {});
+    const next = await api.post<{ code: string; phrase: string; address: string }>(
+      `/platform/boxes/${box.id}/key`,
+      {}
+    );
     setConfirmKey(null);
-    setIssued({ code: box.code, key });
+    setIssued(next);
     await load();
   }
 
@@ -97,7 +101,8 @@ export default function Boxes() {
       {rows.length === 0 ? (
         <EmptyState title="Пока никому не открыт">
           Мастерская с коробочной версией работает у себя по локальной сети. Чтобы сотрудники могли
-          заходить и снаружи, выдайте ей ключ — он вводится в программе, в разделе «Доступ из интернета».
+          заходить и снаружи, выдайте ей фразу подключения — её вставляют в программе, в разделе
+          «Настройки → Доступ из интернета».
         </EmptyState>
       ) : (
         <List>
@@ -144,7 +149,7 @@ export default function Boxes() {
                     className="min-h-[34px] px-3 text-[13px]"
                     onClick={() => setConfirmKey(b)}
                   >
-                    Новый ключ
+                    Новая фраза
                   </Button>
                   <Button
                     variant={b.isActive ? "danger" : "secondary"}
@@ -172,15 +177,15 @@ export default function Boxes() {
       )}
 
       {confirmKey && (
-        <Modal title={`Новый ключ для «${confirmKey.name}»`} onClose={() => setConfirmKey(null)}>
+        <Modal title={`Новая фраза для «${confirmKey.name}»`} onClose={() => setConfirmKey(null)}>
           <div className="space-y-4">
             <Banner tone="warning">
-              Старый ключ перестанет работать сразу, и мастерская отключится. Новый ключ придётся ввести
+              Прежняя фраза перестанет работать сразу, и мастерская отключится. Новую придётся вставить
               в программе — до этого доступ из интернета работать не будет.
             </Banner>
             <div className="flex flex-col gap-2 sm:flex-row-reverse">
               <Button variant="danger" onClick={() => void reissue(confirmKey)} className="sm:flex-1">
-                Выпустить новый
+                Выпустить новую
               </Button>
               <Button variant="secondary" onClick={() => setConfirmKey(null)} className="sm:flex-1">
                 Отмена
@@ -190,12 +195,18 @@ export default function Boxes() {
         </Modal>
       )}
 
-      {issued && <KeyModal code={issued.code} value={issued.key} onClose={() => setIssued(null)} />}
+      {issued && <PhraseModal issued={issued} onClose={() => setIssued(null)} />}
     </div>
   );
 }
 
-function NewBoxModal({ onClose, onDone }: { onClose: () => void; onDone: (b: { code: string; key: string }) => void }) {
+function NewBoxModal({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: (b: { code: string; phrase: string; address: string }) => void;
+}) {
   const [form, setForm] = useState({ name: "", code: "", note: "" });
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -207,7 +218,7 @@ function NewBoxModal({ onClose, onDone }: { onClose: () => void; onDone: (b: { c
     setBusy(true);
     setError(null);
     try {
-      const box = await api.post<{ code: string; key: string }>("/platform/boxes", form);
+      const box = await api.post<{ code: string; phrase: string; address: string }>("/platform/boxes", form);
       onDone(box);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
@@ -246,8 +257,20 @@ function NewBoxModal({ onClose, onDone }: { onClose: () => void; onDone: (b: { c
   );
 }
 
-/** Единственный раз, когда ключ виден целиком. Дальше — только хвост. */
-function KeyModal({ code, value, onClose }: { code: string; value: string; onClose: () => void }) {
+/**
+ * Единственный раз, когда доступ виден целиком.
+ *
+ * Отдаём одной фразой: в ней и адрес узла связи, и ключ, и код мастерской.
+ * Передавать три строки по телефону — это три возможности ошибиться, а одна
+ * копируется кнопкой и вставляется целиком.
+ */
+function PhraseModal({
+  issued,
+  onClose,
+}: {
+  issued: { code: string; phrase: string; address: string };
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState<string | null>(null);
 
   const copy = async (text: string, what: string) => {
@@ -262,36 +285,36 @@ function KeyModal({ code, value, onClose }: { code: string; value: string; onClo
   const box = "mt-1.5 break-all rounded-field border border-line bg-surface-input px-3 py-2.5 font-mono text-[13px]";
 
   return (
-    <Modal title="Ключ выдан" onClose={onClose}>
+    <Modal title="Доступ открыт" onClose={onClose}>
       <div className="space-y-4">
         <Banner tone="warning">
-          Ключ показывается один раз: у нас хранится только его отпечаток. Скопируйте и передайте
-          мастерской — если потеряется, выпустите новый.
+          Фраза показывается один раз: у нас хранится только отпечаток ключа. Передайте её мастерской —
+          там её вставляют в «Настройки → Доступ из интернета» и нажимают «Подключить».
         </Banner>
 
         <div>
-          <span className="text-[13px] font-semibold text-ink-soft">Адрес мастерской</span>
-          <div className={box}>{addressOf(code)}</div>
+          <span className="text-[13px] font-semibold text-ink-soft">Фраза подключения</span>
+          <div className={box}>{issued.phrase}</div>
         </div>
 
         <div>
-          <span className="text-[13px] font-semibold text-ink-soft">Ключ доступа</span>
-          <div className={box}>{value}</div>
+          <span className="text-[13px] font-semibold text-ink-soft">Адрес мастерской после подключения</span>
+          <div className={box}>{issued.address}</div>
         </div>
 
         {copied && <p className="text-center text-[13px] text-state-done">Скопировано: {copied}</p>}
 
+        <Button type="button" onClick={() => void copy(issued.phrase, "фраза")} className="w-full">
+          Скопировать фразу
+        </Button>
         <div className="grid gap-2 sm:grid-cols-2">
-          <Button type="button" variant="secondary" onClick={() => void copy(value, "ключ")}>
-            Скопировать ключ
-          </Button>
-          <Button type="button" variant="secondary" onClick={() => void copy(addressOf(code), "адрес")}>
+          <Button type="button" variant="secondary" onClick={() => void copy(issued.address, "адрес")}>
             Скопировать адрес
           </Button>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Готово
+          </Button>
         </div>
-        <Button type="button" onClick={onClose} className="w-full">
-          Готово
-        </Button>
       </div>
     </Modal>
   );

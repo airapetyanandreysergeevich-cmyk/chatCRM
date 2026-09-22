@@ -26,6 +26,7 @@ import { enforceTenantStatus } from "../../middleware/tenantStatus";
 
 import { applyRemoteAccess, relayAgentState } from "../relay/relay.instance";
 import { defaultRelayUrl, readRemoteAccess, saveRemoteAccess } from "../relay/remoteAccess";
+import { parseInvite, publicAddress } from "../relay/invite";
 
 export const settingsRouter = Router();
 settingsRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -252,9 +253,11 @@ settingsRouter.delete(
  */
 const remoteAccessSchema = z.object({
   enabled: z.boolean(),
-  /** Пусто — оставить прежний: поле в окне показывает только хвост ключа. */
-  key: z.string().trim().max(200).optional(),
-  url: z.string().trim().max(300).optional(),
+  /**
+   * Фраза подключения от поставщика — адрес, ключ и код одной строкой.
+   * Пусто — остаётся прежняя: переключатель можно двигать, не вставляя ничего.
+   */
+  phrase: z.string().trim().max(2000).optional(),
 });
 
 settingsRouter.get(
@@ -263,10 +266,14 @@ settingsRouter.get(
   ah(async (_req, res) => {
     const saved = await readRemoteAccess();
     const agent = relayAgentState();
+    const url = saved?.url || defaultRelayUrl();
     res.json({
       enabled: saved?.enabled ?? false,
+      /** Подключена ли фраза вообще — сам ключ наружу не отдаётся никогда. */
+      connected: Boolean(saved?.key),
       keyHint: saved?.key ? saved.key.slice(-4) : "",
-      url: saved?.url || defaultRelayUrl(),
+      code: saved?.code ?? "",
+      address: publicAddress(url, saved?.code ?? ""),
       state: agent.state,
       detail: agent.detail ?? null,
     });
@@ -279,11 +286,18 @@ settingsRouter.put(
   ah(async (req, res) => {
     const body = remoteAccessSchema.parse(req.body);
     const saved = await readRemoteAccess();
-    const key = body.key ? body.key : (saved?.key ?? "");
-    const url = body.url || saved?.url || defaultRelayUrl();
-    if (body.enabled && !key) throw badRequest("Вставьте ключ доступа — его выдаёт поставщик программы");
 
-    await saveRemoteAccess({ enabled: body.enabled, url, key });
+    // Вставили новую фразу — разбираем её. Не вставили — работаем с прежней.
+    const invite = body.phrase ? parseInvite(body.phrase, defaultRelayUrl()) : null;
+    if (body.phrase && !invite) {
+      throw badRequest("Это не похоже на фразу подключения — скопируйте её целиком и вставьте ещё раз");
+    }
+    const key = invite?.key ?? saved?.key ?? "";
+    const url = invite?.url ?? saved?.url ?? defaultRelayUrl();
+    const code = invite?.code || saved?.code || "";
+    if (body.enabled && !key) throw badRequest("Вставьте фразу подключения — её выдаёт поставщик программы");
+
+    await saveRemoteAccess({ enabled: body.enabled, url, key, code });
     const agent = applyRemoteAccess(body.enabled ? { url, key } : null);
 
     await withTenant(tenantOf(req), (tx) =>
@@ -294,11 +308,18 @@ settingsRouter.put(
         entityId: tenantOf(req),
         action: "UPDATE",
         // Ключ в журнал не пишем ни при каких обстоятельствах.
-        diff: { remoteAccess: body.enabled ? "включён" : "выключен", keyChanged: !!body.key },
+        diff: { remoteAccess: body.enabled ? "включён" : "выключен", keyChanged: !!invite },
         ip: clientIp(req),
       })
     );
 
-    res.json({ enabled: body.enabled, keyHint: key.slice(-4), state: agent.state });
+    res.json({
+      enabled: body.enabled,
+      connected: Boolean(key),
+      keyHint: key.slice(-4),
+      code,
+      address: publicAddress(url, code),
+      state: agent.state,
+    });
   })
 );
