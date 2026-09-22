@@ -27,7 +27,18 @@ interface Draft {
   url: string;
 }
 
-export function OrderChat({ orderId, myId, canModerate }: { orderId: string; myId: string | null; canModerate: boolean }) {
+export function OrderChat({
+  orderId,
+  myId,
+  canModerate,
+  found,
+}: {
+  orderId: string;
+  myId: string | null;
+  canModerate: boolean;
+  /** Сообщение, найденное поиском по заказам: его надо показать и подсветить. */
+  found?: string | null;
+}) {
   const [messages, setMessages] = useState<OrderMessage[] | null>(null);
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -36,6 +47,8 @@ export function OrderChat({ orderId, myId, canModerate }: { orderId: string; myI
   const [viewing, setViewing] = useState<{ photos: ViewerPhoto[]; start: number } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  /** Подсвеченное сообщение: гаснет через три секунды. */
+  const [glow, setGlow] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const counter = useRef(0);
   const stick = useRef(true);
@@ -62,6 +75,23 @@ export function OrderChat({ orderId, myId, canModerate }: { orderId: string; myI
     const el = list.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  /**
+   * Пришли из поиска по заказам: лента прокручивается к найденной записи и
+   * подсвечивает её на три секунды. Без этого человек попадает в ленту из
+   * сорока сообщений и ищет глазами то, что уже нашёл поиском.
+   */
+  useEffect(() => {
+    if (!found || !messages) return;
+    if (!messages.some((m) => m.id === found)) return;
+    // Прокрутку к новому в этот раз не делаем: она увела бы вниз от находки.
+    stick.current = false;
+    setGlow(found);
+    const el = document.getElementById(`message-${found}`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = setTimeout(() => setGlow(null), 3000);
+    return () => clearTimeout(t);
+  }, [found, messages]);
 
   // Превью черновых снимков — память браузера; освобождаем за собой.
   useEffect(() => () => drafts.forEach((d) => URL.revokeObjectURL(d.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -176,11 +206,15 @@ export function OrderChat({ orderId, myId, canModerate }: { orderId: string; myI
                 {newDay && (
                   <div className="py-1 text-center text-[12px] font-semibold text-ink-dim">{dayLabel(m.createdAt)}</div>
                 )}
-                <div className={"flex " + (mine ? "justify-end" : "justify-start")}>
+                <div id={`message-${m.id}`} className={"flex scroll-mt-16 " + (mine ? "justify-end" : "justify-start")}>
                   <div
                     className={
-                      "group max-w-[88%] rounded-[14px] border px-3 py-2 sm:max-w-[75%] " +
-                      (mine ? "border-brand/30 bg-brand-tint" : "border-line bg-surface-raised")
+                      "group max-w-[88%] rounded-[14px] border px-3 py-2 transition-colors duration-500 sm:max-w-[75%] " +
+                      (glow === m.id
+                        ? "border-brand bg-brand-tint ring-2 ring-brand"
+                        : mine
+                          ? "border-brand/30 bg-brand-tint"
+                          : "border-line bg-surface-raised")
                     }
                   >
                     <div className="flex items-baseline gap-2 text-[12px]">

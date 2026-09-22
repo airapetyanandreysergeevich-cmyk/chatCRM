@@ -15,7 +15,17 @@ export const orderInclude = {
   status: { select: { id: true, name: true, group: true, color: true } },
   branch: { select: { id: true, name: true } },
   customer: {
-    select: { id: true, name: true, phone: true, phone2: true, email: true, address: true, type: true },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      phone2: true,
+      email: true,
+      address: true,
+      type: true,
+      // Цветная метка клиента: по ней его узнают в списке заказов, не открывая карточку.
+      color: true,
+    },
   },
   device: { select: { id: true, kind: true, brand: true, model: true, serial: true } },
   acceptedBy: { select: { id: true, fullName: true } },

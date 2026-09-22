@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
@@ -20,6 +20,7 @@ import {
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDate, formatDateTime } from "../lib/format";
+import { customerColor, nameStyle } from "../lib/customerColor";
 import {
   masterLabel,
   money,
@@ -330,6 +331,9 @@ export default function OrderCard() {
   /** Какой снимок открыт в просмотре: номер в общем списке. */
   const [viewing, setViewing] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
+  // Пришли из поиска по заказам — в адресе номер найденной записи истории.
+  const [params] = useSearchParams();
+  const found = params.get("found");
 
   const load = useCallback(async () => {
     try {
@@ -605,7 +609,7 @@ export default function OrderCard() {
             </div>
           </Card>
 
-          <OrderChat orderId={order.id} myId={myId} canModerate={can("orders.edit")} />
+          <OrderChat orderId={order.id} myId={myId} canModerate={can("orders.edit")} found={found} />
         </div>
 
         <div className="space-y-4">
@@ -668,7 +672,20 @@ export default function OrderCard() {
               <div className="mt-3">
                 <Rows
                   items={[
-                    { label: "Имя", value: order.customer.name },
+                    {
+                      label: "Имя",
+                      // Цветная метка клиента — та же, что в списках: приёмщик
+                      // узнаёт человека до того, как назовёт срок и цену.
+                      value: order.customer.name ? (
+                        <span
+                          className="font-semibold"
+                          style={nameStyle(order.customer.color)}
+                          title={customerColor(order.customer.color)?.label}
+                        >
+                          {order.customer.name}
+                        </span>
+                      ) : null,
+                    },
                     {
                       label: "Телефон",
                       value: order.customer.phone ? (

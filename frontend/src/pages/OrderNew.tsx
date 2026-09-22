@@ -25,6 +25,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { QuickPick, QuickPickField } from "../lib/quickPicks";
 import { plural } from "../lib/format";
+import { customerColor, nameStyle } from "../lib/customerColor";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
 import { masterLabel, ordersApi, type CustomerHit, type Reference } from "../lib/orders";
 
@@ -53,7 +54,15 @@ function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: Cust
             {c.type === "COMPANY" ? <IconCompany /> : <IconPerson />}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[14px] font-semibold">{c.name}</span>
+            <span className="block truncate text-[14px] font-semibold" style={nameStyle(c.color)}>
+              {c.name}
+              {customerColor(c.color) && (
+                <span
+                  className="ml-1.5 inline-block h-[9px] w-[9px] rounded-full align-middle"
+                  style={{ backgroundColor: customerColor(c.color)!.dot }}
+                />
+              )}
+            </span>
             <span className="block truncate text-[12.5px] text-ink-muted">
               {c.phone}
               {c.orderCount > 0 && ` · ${plural(c.orderCount, "заказ", "заказа", "заказов")}`}
@@ -273,7 +282,10 @@ export default function OrderNew() {
             {picked && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-field border border-brand/40 bg-brand-tint px-3 py-2.5">
                 <span className="text-[13.5px]">
-                  Карточка из базы: <span className="font-semibold">{picked.name}</span>
+                  Карточка из базы:{" "}
+                  <span className="font-semibold" style={nameStyle(picked.color)} title={customerColor(picked.color)?.label}>
+                    {picked.name}
+                  </span>
                   {picked.orderCount > 0 && (
                     <span className="text-ink-muted">
                       {" "}

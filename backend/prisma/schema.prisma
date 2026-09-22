@@ -368,6 +368,9 @@ model Customer {
   source          String? // источник обращения
   inn             String? // для юрлиц
   discountPercent Decimal      @default(0) @db.Decimal(5, 2)
+  /// Цветная метка в списках: мастерская сама решает, что значит каждый цвет
+  /// («щедрый», «спорит из-за каждой копейки»). Пусто — без метки.
+  color           String?
   note            String?
   consentAt       DateTime? // согласие на обработку персональных данных
   createdById     String?

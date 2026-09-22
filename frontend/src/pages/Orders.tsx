@@ -17,6 +17,7 @@ import {
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Pager } from "../components/Pager";
+import { customerColor, nameStyle } from "../lib/customerColor";
 import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
 import {
   money,
@@ -123,7 +124,7 @@ export default function Orders() {
       <Card className="p-3.5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <SearchInput
-            placeholder="Номер, техника, серийный номер, неисправность или комментарий"
+            placeholder="Номер, техника, неисправность, комментарий или запись в истории ремонта"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -185,7 +186,13 @@ export default function Orders() {
           {rows.map((o) => {
             const due = o.status.group === "CLOSED" ? null : dueLabel(o.dueAt);
             return (
-              <Link key={o.id} to={`/orders/${o.id}`} className="block">
+              <Link
+                key={o.id}
+                // Нашлось в истории — открываем заказ сразу на ленте и с
+                // запросом: карточка подсветит ту самую запись.
+                to={o.foundMessage ? `/orders/${o.id}?found=${o.foundMessage.id}#history` : `/orders/${o.id}`}
+                className="block"
+              >
                 <ListRow
                   glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
                   title={
@@ -209,9 +216,25 @@ export default function Orders() {
                   }
                   subtitle={
                     <>
-                      {o.customer.name && <span className="text-ink-soft">{o.customer.name}</span>}
+                      {o.customer.name && (
+                        <span
+                          className="text-ink-soft"
+                          style={nameStyle(o.customer.color)}
+                          title={customerColor(o.customer.color)?.label}
+                        >
+                          {o.customer.name}
+                        </span>
+                      )}
                       {o.customer.name && " · "}
                       {o.complaint || "без описания"}
+                      {/* Нашлось в истории ремонта: показываем саму запись —
+                          иначе непонятно, почему заказ оказался в выдаче. */}
+                      {o.foundMessage && (
+                        <span className="mt-1 block truncate text-[12.5px] text-ink-dim">
+                          <span className="text-ink-muted">в истории ремонта:</span> «{o.foundMessage.text}»
+                          {o.foundMessage.author ? ` — ${o.foundMessage.author}` : ""}
+                        </span>
+                      )}
                     </>
                   }
                   meta={

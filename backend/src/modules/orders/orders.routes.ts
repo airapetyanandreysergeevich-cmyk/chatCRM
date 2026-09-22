@@ -102,6 +102,9 @@ function searchWhere(search: string, withContacts: boolean): Prisma.OrderWhereIn
     { appearanceNote: like },
     { storageLocation: like },
     { statusHistory: { some: { comment: like } } },
+    // История ремонта: «та самая мамка, про которую писали „ждём шлейф“» —
+    // мастер помнит свою запись в ленте, а не номер заказа.
+    { messages: { some: { text: like, deletedAt: null } } },
     { device: { is: { serial: like } } },
     { device: { is: { model: like } } },
     { device: { is: { brand: like } } },
@@ -161,7 +164,19 @@ ordersRouter.get(
 
     const contacts = seesCustomerContacts(req);
     const money = seesMoney(req);
-    res.json(paged(rows.map((o) => projectOrder(o, { contacts, money })), total, q));
+
+    // Нашлось в истории ремонта — показываем ту самую запись прямо в списке.
+    // Иначе строка «заказ 0412» на запрос «шлейф» выглядит случайной: слова
+    // из запроса в ней нет, оно внутри ленты сообщений.
+    const found = q.search ? await matchedMessages(tenantOf(req), rows.map((o) => o.id), q.search) : new Map();
+
+    res.json(
+      paged(
+        rows.map((o) => ({ ...projectOrder(o, { contacts, money }), foundMessage: found.get(o.id) ?? null })),
+        total,
+        q
+      )
+    );
   })
 );
 
@@ -206,6 +221,40 @@ const acceptSchema = z.object({
   prepayment: z.number().min(0).default(0),
   assignedMasterId: z.string().uuid().optional(),
 });
+
+/**
+ * Первое совпадение в истории ремонта по каждому найденному заказу.
+ *
+ * Отдельным запросом, а не включением в выборку: сообщения нужны только при
+ * поиске и только по одному на заказ, а тащить их вместе с карточкой значило
+ * бы грузить ленту целиком там, где её никто не смотрит.
+ */
+async function matchedMessages(tenantId: string, orderIds: string[], search: string) {
+  const out = new Map<string, { id: string; text: string; createdAt: Date; author: string | null }>();
+  if (!orderIds.length) return out;
+  const rows = await withTenant(tenantId, (tx) =>
+    tx.orderMessage.findMany({
+      where: {
+        orderId: { in: orderIds },
+        deletedAt: null,
+        text: { contains: search, mode: "insensitive" },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 200,
+      select: { id: true, orderId: true, text: true, createdAt: true, author: { select: { fullName: true } } },
+    })
+  );
+  for (const m of rows) {
+    if (out.has(m.orderId)) continue;
+    out.set(m.orderId, {
+      id: m.id,
+      text: m.text.length > 180 ? `${m.text.slice(0, 177)}…` : m.text,
+      createdAt: m.createdAt,
+      author: m.author?.fullName ?? null,
+    });
+  }
+  return out;
+}
 
 ordersRouter.post(
   "/",

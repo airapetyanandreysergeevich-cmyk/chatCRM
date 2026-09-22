@@ -69,6 +69,8 @@ export interface Order {
   customer: {
     id: string;
     type: "INDIVIDUAL" | "COMPANY";
+    /** Цветная метка клиента — см. lib/customerColor. */
+    color?: string | null;
     name?: string;
     phone?: string;
     phone2?: string | null;
@@ -108,6 +110,13 @@ export interface Order {
   totalParts: number | null;
   previousRepair: PreviousRepair | null;
   parentOrderId: string | null;
+
+  /**
+   * Совпадение в истории ремонта — только в результатах поиска. По нему в
+   * списке видно, за что заказ нашёлся, когда слов запроса нет ни в технике,
+   * ни в жалобе клиента.
+   */
+  foundMessage?: { id: string; text: string; createdAt: string; author: string | null } | null;
 
   estimatedCost?: number | null;
   /** Процент скидки клиента на работы, застывший на заказе при приёме. */
@@ -202,6 +211,7 @@ export interface CustomerHit {
   email: string | null;
   address: string | null;
   source: string | null;
+  color?: string | null;
   discountPercent: number;
   orderCount: number;
 }

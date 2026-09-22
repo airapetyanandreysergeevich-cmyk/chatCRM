@@ -70,6 +70,7 @@ customersRouter.get(
           address: c.address,
           source: c.source,
           note: c.note,
+          color: c.color,
           discountPercent: Number(c.discountPercent),
           createdAt: c.createdAt,
           orderCount: c._count.orders,
@@ -191,6 +192,7 @@ customersRouter.get(
         email: c.email,
         address: c.address,
         source: c.source,
+        color: c.color,
         discountPercent: Number(c.discountPercent),
         orderCount: c._count.orders,
       }))
@@ -256,7 +258,18 @@ customersRouter.get(
   })
 );
 
+/**
+ * Цветные метки клиентов.
+ *
+ * Мастерская сама решает, что значит цвет: зелёный — «щедрый, всегда оставляет
+ * чаевые», красный — «спорит из-за каждой копейки, всё фиксировать». Поэтому
+ * здесь только набор цветов, без навязанных названий: подпись у метки —
+ * название цвета, а смысл живёт в голове у тех, кто работает за стойкой.
+ */
+export const CUSTOMER_COLORS = ["red", "amber", "green", "pink", "blue", "purple"] as const;
+
 const customerSchema = z.object({
+  color: z.enum(CUSTOMER_COLORS).nullable().optional().or(z.literal("")),
   type: z.enum(["INDIVIDUAL", "COMPANY"]).default("INDIVIDUAL"),
   name: z.string().trim().min(2, "Укажите имя или название"),
   phone: z.string().trim().min(6, "Укажите телефон"),
@@ -274,7 +287,7 @@ const customerSchema = z.object({
  * Стёртое в форме поле приходит пустой строкой. В базе это должен быть null:
  * пустая строка в телефоне ломает поиск, а в email — проверку на занятость.
  */
-const OPTIONAL_TEXT = ["phone2", "email", "address", "inn", "source", "note"] as const;
+const OPTIONAL_TEXT = ["phone2", "email", "address", "inn", "source", "note", "color"] as const;
 
 function blankToNull(body: Record<string, unknown>): Record<string, null> {
   const out: Record<string, null> = {};

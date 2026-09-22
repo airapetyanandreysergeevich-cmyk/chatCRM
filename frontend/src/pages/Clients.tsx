@@ -21,6 +21,8 @@ import { ApiError, api, type Page } from "../lib/api";
 import { DebtPanel } from "../components/DebtPanel";
 import { Pager } from "../components/Pager";
 import { formatDateShort, plural } from "../lib/format";
+import { ColorPicker } from "../components/ColorPicker";
+import { customerColor, nameStyle } from "../lib/customerColor";
 
 interface Client {
   id: string;
@@ -34,6 +36,8 @@ interface Client {
   address: string | null;
   source: string | null;
   note: string | null;
+  /** Цветная метка: ключ цвета или пусто. Что он значит, решает мастерская. */
+  color: string | null;
   discountPercent: number;
   createdAt: string;
   orderCount: number;
@@ -49,6 +53,7 @@ const blank = {
   email: "",
   address: "",
   note: "",
+  color: "",
   discountPercent: "0",
 };
 
@@ -62,6 +67,7 @@ const formOf = (c: Client): Form => ({
   email: c.email ?? "",
   address: c.address ?? "",
   note: c.note ?? "",
+  color: c.color ?? "",
   discountPercent: String(c.discountPercent ?? 0),
 });
 
@@ -151,7 +157,18 @@ export default function Clients() {
               }
               title={
                 <>
-                  <span className="truncate">{c.name}</span>
+                  {/* Цветной кружок рядом с именем: цвет имени читается не на
+                      всяком экране, а кружок виден и при ярком солнце в окне. */}
+                  {customerColor(c.color) && (
+                    <span
+                      title={customerColor(c.color)!.label}
+                      className="h-[10px] w-[10px] shrink-0 rounded-full"
+                      style={{ backgroundColor: customerColor(c.color)!.dot }}
+                    />
+                  )}
+                  <span className="truncate" style={nameStyle(c.color)}>
+                    {c.name}
+                  </span>
                   {c.type === "COMPANY" && <Badge>организация</Badge>}
                 </>
               }
@@ -351,6 +368,16 @@ function ClientModal({
             invalid={!!error?.field("discountPercent")}
           />
         </Field>
+
+        <div>
+          <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Цветная метка</span>
+          <ColorPicker value={form.color} onChange={(color) => setForm((f) => ({ ...f, color }))} />
+          <span className="mt-1.5 block text-[12.5px] text-ink-dim">
+            Имя клиента будет выделено этим цветом в списках, в поиске и в бланке приёма. Что означает
+            цвет, решаете вы: например, зелёный — щедрый постоянный клиент, красный — с таким всё
+            фиксировать письменно.
+          </span>
+        </div>
 
         <Field label="Заметка" error={error?.field("note")} hint="Видна только сотрудникам мастерской">
           <Input value={form.note} onChange={set("note")} />
