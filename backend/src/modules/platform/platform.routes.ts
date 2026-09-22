@@ -82,6 +82,7 @@ platformRouter.get(
         status: t.status,
         plan: t.plan,
         maxUsers: t.maxUsers,
+        plateOcr: t.plateOcr,
         timezone: t.timezone,
         contactName: t.contactName,
         contactPhone: t.contactPhone,
@@ -167,6 +168,7 @@ const updateTenantSchema = z.object({
   contactPhone: z.string().trim().optional(),
   contactEmail: z.string().email().optional().or(z.literal("")),
   plan: z.string().optional(),
+  plateOcr: z.boolean().optional(),
 });
 
 platformRouter.patch(
@@ -175,6 +177,9 @@ platformRouter.patch(
     const auth = platformAuth(req);
     const body = updateTenantSchema.parse(req.body);
     if (body.plan !== undefined && auth.role !== "OWNER") throw forbidden("Тариф меняет только собственник");
+    if (body.plateOcr !== undefined && auth.role !== "OWNER") {
+      throw forbidden("Распознавание шильдиков включает и выключает только собственник");
+    }
 
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
     if (!tenant || tenant.deletedAt) throw notFound("Мастерская не найдена");

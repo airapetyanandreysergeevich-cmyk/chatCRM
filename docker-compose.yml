@@ -62,6 +62,20 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT}
       PLATFORM_OWNER_EMAIL: ${PLATFORM_OWNER_EMAIL}
       PLATFORM_OWNER_PASSWORD: ${PLATFORM_OWNER_PASSWORD}
+      # Распознаватель шильдиков. Без него сайт работает как раньше, просто
+      # без кнопки камеры на бланке, — поэтому и depends_on на него нет.
+      OCR_URL: http://ocr:8000
+
+  # Распознавание шильдиков: RapidOCR + zxing-cpp, только процессор.
+  # Порт наружу не публикуется — к сервису ходит только backend. Одно ядро и
+  # потолок памяти: распознавание не должно отнимать сервер у сайта и базы.
+  ocr:
+    build: ./ocr
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 900m
+    environment:
+      OMP_NUM_THREADS: "1"
 
   frontend:
     build: ./frontend

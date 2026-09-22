@@ -64,6 +64,14 @@ docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
   npx tsx test/quickpicks.ts
 "
 
+# Разбор шильдиков на настоящих снимках ASUS, Lenovo, Acer, Samsung.
+# Главное — серийный номер: чужой штрихкод не должен его подменять.
+echo ">>> Разбор шильдиков"
+docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/plate.ts
+"
+
 # Долг нигде не хранится — он считается. Ошибка в этом счёте выглядит не как
 # сбой, а как неверная сумма, которую приёмщик называет клиенту вслух.
 echo ">>> Расчёт долга"
@@ -94,6 +102,12 @@ echo ">>> Страницы списков"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL
   npx tsx test/pager.ts
+"
+
+echo ">>> Подстановка шильдика в бланк"
+docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/plate.ts
 "
 
 echo

@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
-import { withTenant } from "../../lib/db";
+import { prisma, withTenant } from "../../lib/db";
+import { env } from "../../lib/env";
 import { DEVICE_KINDS, ORDER_KINDS } from "../../lib/dictionaries";
 import { listQuickPicks } from "../quickpicks/quickpicks.service";
 import { ah } from "../../lib/errors";
@@ -36,6 +37,7 @@ referenceRouter.get(
       await listQuickPicks(tx, "appearance"),
       await listQuickPicks(tx, "complaint"),
     ] as const);
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true } });
 
     res.json({
       deviceKinds: DEVICE_KINDS,
@@ -43,6 +45,9 @@ referenceRouter.get(
       appearance: appearance.map((q) => ({ key: q.id, label: q.label, locked: q.locked })),
       complaint: complaint.map((q) => ({ key: q.id, label: q.label, locked: q.locked })),
       orderKinds: ORDER_KINDS,
+      // Что включено у этой мастерской. Кнопка с камерой видна, только когда
+      // распознаватель есть на сервере и собственник платформы его не выключил.
+      features: { plateOcr: Boolean(env.ocrUrl && tenant?.plateOcr) },
       statuses: statuses.map((s) => ({
         id: s.id,
         name: s.name,

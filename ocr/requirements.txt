@@ -1,0 +1,5 @@
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.25.0
+opencv-python==4.13.0.92
+numpy==2.4.4
+zxing-cpp==3.1.1

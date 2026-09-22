@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Modal } from "../../components/Modal";
-import { Banner, Button, Card, Field, Input, SectionLabel, Select, Spinner, StatusChip } from "../../components/ui";
+import { Banner, Button, Card, Checkbox, Field, Input, SectionLabel, Select, Spinner, StatusChip } from "../../components/ui";
 import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { formatDate, plural } from "../../lib/format";
@@ -12,6 +12,8 @@ interface TenantRow {
   status: "ACTIVE" | "READONLY" | "SUSPENDED";
   plan: string;
   maxUsers: number;
+  /** Распознавание шильдиков камерой на бланке приёма. */
+  plateOcr: boolean;
   contactPhone: string | null;
   createdAt: string;
   /** Не пусто — мастерская в архиве: вход закрыт, данные целы. */
@@ -27,12 +29,16 @@ const STATUS_LABEL: Record<TenantRow["status"], { text: string; tone: "done" | "
 };
 
 export default function Tenants() {
-  const { applyToken } = useAuth();
+  const { applyToken, me } = useAuth();
+  // Распознаватель — общий ресурс сервера, поэтому включает его собственник.
+  const isOwner = me?.kind === "platform" && me.platformUser.role === "OWNER";
   const [rows, setRows] = useState<TenantRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [impersonate, setImpersonate] = useState<TenantRow | null>(null);
   const [removing, setRemoving] = useState<TenantRow | null>(null);
+  /** Ошибка действия — над списком, а не вместо него. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -45,6 +51,17 @@ export default function Tenants() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function togglePlateOcr(t: TenantRow, on: boolean) {
+    // Сразу на экране, не дожидаясь сервера; при отказе — вернуть как было.
+    setRows((rs) => rs?.map((r) => (r.id === t.id ? { ...r, plateOcr: on } : r)) ?? rs);
+    try {
+      await api.patch(`/platform/tenants/${t.id}`, { plateOcr: on });
+    } catch (err) {
+      setRows((rs) => rs?.map((r) => (r.id === t.id ? { ...r, plateOcr: !on } : r)) ?? rs);
+      setNotice(err instanceof ApiError ? err.message : "Не удалось переключить распознавание");
+    }
+  }
 
   async function changeStatus(t: TenantRow, status: TenantRow["status"]) {
     await api.patch(`/platform/tenants/${t.id}`, { status });
@@ -75,6 +92,8 @@ export default function Tenants() {
         </div>
         <Button onClick={() => setCreating(true)}>Новая мастерская</Button>
       </div>
+
+      {notice && <Banner tone="error">{notice}</Banner>}
 
       {rows.length === 0 ? (
         <Card>
@@ -112,6 +131,15 @@ export default function Tenants() {
                   <dd className="font-bold">{formatDate(t.createdAt)}</dd>
                 </div>
               </dl>
+
+              <div className="mt-4 border-t border-line pt-3">
+                <Checkbox
+                  checked={t.plateOcr}
+                  disabled={!isOwner || !!t.archivedAt}
+                  onChange={(on) => void togglePlateOcr(t, on)}
+                  label="Распознавание шильдиков камерой"
+                />
+              </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
                 {t.archivedAt ? (

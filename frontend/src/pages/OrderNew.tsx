@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { IconCompany, IconPerson, IconSettings } from "../components/icons";
+import { IconCamera, IconCompany, IconPerson, IconSettings } from "../components/icons";
+import { PlateScanner } from "../components/PlateScanner";
+import { mergeDevice } from "../lib/plate";
 import { QuickPickEditor } from "../components/QuickPickEditor";
 import {
   Banner,
@@ -76,6 +78,9 @@ export default function OrderNew() {
   // кнопки общие, и убранная одним приёмщиком пропадёт у всех.
   const canEditPicks = can("settings.manage");
   const [editingPicks, setEditingPicks] = useState<QuickPickField | null>(null);
+  const [scanning, setScanning] = useState(false);
+  /** Серийный номер пришёл с камеры — раскрыть блок, где он лежит, чтобы его было видно. */
+  const [scannedSerial, setScannedSerial] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [phoneHits, setPhoneHits] = useState<CustomerHit[]>([]);
@@ -381,7 +386,21 @@ export default function OrderNew() {
         </Card>
 
         <Card>
-          <SectionLabel>Техника</SectionLabel>
+          <div className="flex items-start justify-between gap-3">
+            <SectionLabel>Техника</SectionLabel>
+            {ref.features.plateOcr && (
+              <button
+                type="button"
+                onClick={() => setScanning(true)}
+                aria-label="Заполнить по шильдику"
+                title="Заполнить по шильдику: навести камеру на наклейку с моделью и серийным номером"
+                className="-mr-1.5 -mt-1.5 flex h-8 items-center gap-1.5 rounded-field px-2 text-[13px] font-semibold text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-[18px] [&>svg]:w-[18px]"
+              >
+                <IconCamera />
+                <span className="hidden sm:inline">По шильдику</span>
+              </button>
+            )}
+          </div>
           <div className="mt-4 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               {/* Вид, марку и модель мастерская набирает руками, и одни и те
@@ -425,7 +444,10 @@ export default function OrderNew() {
             </Field>
           </div>
 
-          <More filled={countFilled(device.serial, form.devicePasscode, form.storageLocation)}>
+          <More
+            filled={countFilled(device.serial, form.devicePasscode, form.storageLocation)}
+            forceOpen={scannedSerial}
+          >
             <Field label="Серийный номер">
               <Input value={device.serial} onChange={(e) => setDevice({ ...device, serial: e.target.value })} />
             </Field>
@@ -654,6 +676,18 @@ export default function OrderNew() {
     {/* Окно правки кнопок — рядом с формой бланка, а не внутри неё: форма в
         форме недопустима, и Enter в поле «Новая кнопка» отправил бы весь
         заказ. */}
+    {scanning && (
+      <PlateScanner
+        current={device}
+        onClose={() => setScanning(false)}
+        onApply={(draft) => {
+          setDevice((d) => mergeDevice(d, draft));
+          if (draft.serial.trim()) setScannedSerial(true);
+          setScanning(false);
+        }}
+      />
+    )}
+
     {editingPicks && (
       <QuickPickEditor
         field={editingPicks}

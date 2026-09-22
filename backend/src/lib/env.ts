@@ -53,6 +53,11 @@ export const env = {
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? "",
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",
   vapidSubject: process.env.VAPID_SUBJECT ?? "mailto:admin@finecrm.ru",
+
+  // Распознаватель шильдиков (сервис ocr). Пусто — функции нет вовсе: кнопка
+  // с камерой на бланке не показывается. Так в локальной версии, где своего
+  // распознавателя нет.
+  ocrUrl: (process.env.OCR_URL ?? "").replace(/\/+$/, ""),
 };
 
 export const pushConfigured = Boolean(env.vapidPublicKey && env.vapidPrivateKey);

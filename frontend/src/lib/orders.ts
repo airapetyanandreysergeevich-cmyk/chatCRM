@@ -128,6 +128,8 @@ export interface Reference {
   completeness: Array<{ key: string; label: string; locked?: boolean }>;
   appearance: Array<{ key: string; label: string; locked?: boolean }>;
   complaint: Array<{ key: string; label: string; locked?: boolean }>;
+  /** Что включено у мастерской. */
+  features: { plateOcr: boolean };
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   masters: Array<{ id: string; fullName: string }>;

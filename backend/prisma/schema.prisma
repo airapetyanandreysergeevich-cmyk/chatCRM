@@ -68,6 +68,10 @@ model Tenant {
   contactEmail String?
   settings     Json    @default("{}")
 
+  /// Распознавание шильдиков камерой на бланке приёма. Включает и выключает
+  /// собственник платформы: распознаватель — общий ресурс сервера.
+  plateOcr Boolean @default(true)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
