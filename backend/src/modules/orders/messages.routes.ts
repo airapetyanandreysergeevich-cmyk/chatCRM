@@ -175,7 +175,7 @@ messagesRouter.post(
       if (order.assignedMasterId) people.add(order.assignedMasterId);
       if (author) people.delete(author);
 
-      const full = await tx.orderMessage.findUniqueOrThrow({ where: { id: created.id }, select: messageSelect });
+      const full = await tx.orderMessage.findFirstOrThrow({ where: { id: created.id }, select: messageSelect });
       return { message: full, notify: [...people] };
     });
 
