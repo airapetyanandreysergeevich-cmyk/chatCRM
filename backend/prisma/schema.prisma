@@ -576,7 +576,7 @@ model DeviceHint {
 model QuickPick {
   id        String   @id @default(uuid())
   tenantId  String
-  field     String // completeness | appearance
+  field     String // completeness | appearance | complaint
   label     String
   /// Сколько раз пригодилась при приёме: по этому числу кнопки и выстроены.
   uses      Int      @default(0)

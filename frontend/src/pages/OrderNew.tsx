@@ -17,7 +17,7 @@ import {
   Spinner,
   Textarea,
 } from "../components/ui";
-import { ChipInput } from "../components/ChipInput";
+import { ChipInput, Chips, hasPhrase, togglePhrase } from "../components/ChipInput";
 import { SuggestInput } from "../components/SuggestInput";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -511,18 +511,47 @@ export default function OrderNew() {
       <Card>
         <SectionLabel>Заявка</SectionLabel>
         <div className="mt-4">
-          <Field
-            label="Неисправность со слов клиента"
-            error={fieldError("complaint")}
-            hint="Записывайте дословно — это юридически значимая часть квитанции"
-          >
-            <Textarea
-              value={form.complaint}
-              onChange={(e) => setForm({ ...form, complaint: e.target.value })}
-              placeholder="Не включается после того, как залили чаем"
-              invalid={!!fieldError("complaint")}
-            />
-          </Field>
+          <div className="flex items-start justify-between gap-3">
+            <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">
+              Неисправность со слов клиента
+            </span>
+            {canEditPicks && (
+              <button
+                type="button"
+                onClick={() => setEditingPicks("complaint")}
+                aria-label="Настроить кнопки"
+                title="Настроить кнопки: добавить, переименовать, убрать"
+                className="-mr-1.5 -mt-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-field text-ink-dim transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-[17px] [&>svg]:w-[17px]"
+              >
+                <IconSettings />
+              </button>
+            )}
+          </div>
+          {/* Не Field: он оборачивает всё в <label>, а клик по label браузер
+              переадресует в поле — кнопки-подсказки тогда не нажимались бы. */}
+          <Textarea
+            aria-label="Неисправность со слов клиента"
+            value={form.complaint}
+            onChange={(e) => setForm({ ...form, complaint: e.target.value })}
+            placeholder="Не включается после того, как залили чаем"
+            invalid={!!fieldError("complaint")}
+          />
+          {/* Кнопки дописывают частую жалобу, но текст остаётся дословным:
+              «после того, как залили чаем» приёмщик допишет сам. */}
+          <Chips
+            value={form.complaint}
+            onChange={(complaint) => setForm((f) => ({ ...f, complaint }))}
+            options={ref.complaint}
+            has={hasPhrase}
+            toggle={togglePhrase}
+          />
+          {fieldError("complaint") ? (
+            <span className="mt-1.5 block text-[12.5px] text-state-off">{fieldError("complaint")}</span>
+          ) : (
+            <span className="mt-2 block text-[12.5px] text-ink-dim">
+              Записывайте дословно — это юридически значимая часть квитанции
+            </span>
+          )}
         </div>
 
         <More

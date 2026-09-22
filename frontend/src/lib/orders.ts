@@ -127,6 +127,7 @@ export interface Reference {
   /** Кнопки быстрого заполнения мастерской — уже по частоте. */
   completeness: Array<{ key: string; label: string; locked?: boolean }>;
   appearance: Array<{ key: string; label: string; locked?: boolean }>;
+  complaint: Array<{ key: string; label: string; locked?: boolean }>;
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   masters: Array<{ id: string; fullName: string }>;

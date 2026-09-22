@@ -163,13 +163,48 @@ export function withFlags(
  * таблице QuickPick и правится шестерёнкой прямо на бланке. Мастерская,
  * которая чинит телефоны, уберёт «Диск (HDD/SSD)» и добавит «Сим-лоток».
  */
-export type QuickPickField = "completeness" | "appearance";
-export const QUICK_PICK_FIELDS: readonly QuickPickField[] = ["completeness", "appearance"];
+export type QuickPickField = "completeness" | "appearance" | "complaint";
+export const QUICK_PICK_FIELDS: readonly QuickPickField[] = ["completeness", "appearance", "complaint"];
+
+/**
+ * Частые жалобы — стартовые кнопки поля «Неисправность со слов клиента».
+ *
+ * Поле по-прежнему записывается дословно: кнопка лишь избавляет от набора
+ * «Не включается» в сотый раз, а «после того, как залили чаем» приёмщик
+ * допишет сам. Список тот же, что в миграции 20260922100000_complaint_picks.
+ */
+export const COMPLAINT_ITEMS: readonly string[] = [
+  "Не включается",
+  "Не заряжается",
+  "Не загружается система",
+  "Медленно работает",
+  "Греется и выключается",
+  "Шумит",
+  "Нет изображения",
+  "Разбит экран",
+  "Не работает клавиатура",
+  "Нет звука",
+  "Не работает Wi-Fi",
+  "Залит жидкостью",
+  "Чистка и профилактика",
+  "Установка системы и программ",
+];
 
 export const QUICK_PICK_DEFAULTS: Record<QuickPickField, readonly string[]> = {
   completeness: COMPLETENESS_ITEMS.map((i) => i.label),
   appearance: APPEARANCE_ITEMS.map((i) => i.label),
+  complaint: COMPLAINT_ITEMS,
 };
+
+/**
+ * Пункты жалобы для счёта кнопок.
+ *
+ * Жалоба — живая речь, а не перечень: «Не включается. Залили чаем» делится
+ * не только запятой, но и точкой, точкой с запятой и переводом строки. Точка
+ * режет только в конце предложения — «0.5 л» остаётся целым.
+ */
+export const complaintLabels = (text: string): string[] =>
+  toLabels(text.split(/[,;\n!?]|\.(?=\s|$)/));
 
 /**
  * Кнопки, которые нельзя удалить или переименовать.
@@ -182,6 +217,7 @@ export const QUICK_PICK_DEFAULTS: Record<QuickPickField, readonly string[]> = {
 export const LOCKED_PICKS: Record<QuickPickField, readonly string[]> = {
   completeness: [],
   appearance: [OPEN_TRACES, WATER_DAMAGE],
+  complaint: [],
 };
 
 export const isLockedPick = (field: QuickPickField, label: string): boolean =>

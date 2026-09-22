@@ -4,7 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { flagsOf, toLabels } from "../../lib/dictionaries";
+import { complaintLabels, flagsOf, toLabels } from "../../lib/dictionaries";
 import { env } from "../../lib/env";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { notifyTenant } from "../../lib/notify";
@@ -264,6 +264,7 @@ ordersRouter.post(
       // следующем бланке частое окажется первым.
       await countQuickPicks(tx, "completeness", toLabels(body.completeness));
       await countQuickPicks(tx, "appearance", toLabels(body.appearance));
+      await countQuickPicks(tx, "complaint", complaintLabels(body.complaint));
 
       if (body.parentOrderId) {
         const parent = await tx.order.findFirst({ where: { id: body.parentOrderId, deletedAt: null } });

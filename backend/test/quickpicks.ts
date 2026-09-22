@@ -17,7 +17,10 @@
  *   npx tsx test/quickpicks.ts
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  complaintLabels,
   LOCKED_PICKS,
   QUICK_PICK_DEFAULTS,
   QUICK_PICK_FIELDS,
@@ -82,7 +85,24 @@ async function main(): Promise<void> {
   );
   check(list[1].locked === true && list[0].locked === false, "защищённая кнопка помечена для окна правки");
 
-  // 5. Счёт нажатий не роняет приём заказа.
+  // 5. Жалоба — живая речь: пункты для счёта режутся и точкой в конце фразы.
+  const said = complaintLabels("Не включается. Залили 0.5 л чая; шумит\nне заряжается!  Не  включается");
+  check(
+    JSON.stringify(said) === JSON.stringify(["Не включается", "Залили 0.5 л чая", "шумит", "не заряжается"]),
+    `жалоба делится на пункты, «0.5» цел, повтор не считается дважды (${said.join(" | ")})`
+  );
+  check(QUICK_PICK_DEFAULTS.complaint.length > 0, "у жалобы есть стартовые кнопки");
+  check(LOCKED_PICKS.complaint.length === 0, "у жалобы защищённых кнопок нет");
+  check(labelSchema.safeParse("Не включается.").success === false, "точка в конце кнопки не пропускается");
+  check(labelSchema.safeParse("Замена 2.5\" диска").success, "точка внутри числа пропускается");
+  const sql = readFileSync(join(__dirname, "../prisma/migrations/20260922100000_complaint_picks/migration.sql"), "utf8");
+  const inSql = [...sql.matchAll(/\('([^']+)', \d+\)/g)].map((m) => m[1]);
+  check(
+    JSON.stringify(inSql) === JSON.stringify(QUICK_PICK_DEFAULTS.complaint),
+    "стартовые жалобы в миграции и в коде совпадают — у старых и новых мастерских одни кнопки"
+  );
+
+  // 6. Счёт нажатий не роняет приём заказа.
   const log: string[] = [];
   const failing = {
     $executeRawUnsafe: async (sql: string) => {

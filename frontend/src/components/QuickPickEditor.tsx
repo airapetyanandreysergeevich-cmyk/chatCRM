@@ -20,6 +20,7 @@ import { Banner, Button, Input } from "./ui";
 const TITLES: Record<QuickPickField, string> = {
   completeness: "Кнопки комплектности",
   appearance: "Кнопки внешнего состояния",
+  complaint: "Кнопки частых неисправностей",
 };
 
 export function QuickPickEditor({
