@@ -152,7 +152,7 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
     "фраза разбирается обратно целиком, вместе с почтой"
   );
   check(codeFromEmail("Masterskaya.Servis+crm@example.ru") === "masterskaya-servis", "код в адресе делается из почты");
-  check(codeFromEmail("ы@example.ru") === "", "из почты без латиницы код не выдумывается");
+  check(/^box-[0-9a-f]{6}$/.test(codeFromEmail("ы@почта.рф")), "из почты без латиницы код всё равно получается");
   check(
     parseInvite(`  Держите:\n${phrase}\n\nвопросы — пишите  `, DEFAULT_URL)?.key === KEY,
     "фраза вынимается из письма с лишним текстом"

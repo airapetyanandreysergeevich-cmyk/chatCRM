@@ -37,7 +37,10 @@ export function newKey(): string {
 export function codeFromEmail(email: string): string {
   const local = email.trim().toLowerCase().split("@")[0] ?? "";
   const code = normalizeCode(local.replace(/\+.*$/, ""));
-  return code.length >= 3 ? code.slice(0, 32) : "";
+  if (code.length >= 3) return code.slice(0, 32);
+  // Почта целиком не латиницей — адрес всё равно должен получиться, и
+  // спрашивать человека не о чем: делаем короткий код из самой почты.
+  return `box-${crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 6)}`;
 }
 
 /** Свободный код: занят — дописываем номер, пока не найдём свободный. */

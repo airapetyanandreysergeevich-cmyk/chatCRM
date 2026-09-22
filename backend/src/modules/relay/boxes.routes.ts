@@ -94,9 +94,7 @@ boxesRouter.post(
     if (body.code && asked.length < 3) throw badRequest("Код должен быть из латинских букв и цифр");
     if (asked && (await prisma.box.findUnique({ where: { code: asked } })))
       throw conflict("Такой код уже занят");
-    const base = asked || codeFromEmail(body.email);
-    if (!base) throw badRequest("Из почты не вышло кода — задайте его сами, латиницей");
-    const code = asked || (await freeCode(base));
+    const code = asked || (await freeCode(codeFromEmail(body.email)));
 
     const key = newKey();
     const box = await prisma.box.create({

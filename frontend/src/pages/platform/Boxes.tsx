@@ -201,6 +201,14 @@ export default function Boxes() {
   );
 }
 
+/**
+ * Открыть доступ — одно поле.
+ *
+ * Спрашиваем только почту того, кто запросил доступ: из неё делается и код в
+ * адресе, и подпись в списке, и адресат письма, когда фразу попросят прислать
+ * заново. Всё остальное сервер придумает сам — человеку, выдающему доступ,
+ * думать не о чем.
+ */
 function NewBoxModal({
   onClose,
   onDone,
@@ -208,11 +216,9 @@ function NewBoxModal({
   onClose: () => void;
   onDone: (b: { code: string; email: string; phrase: string; address: string }) => void;
 }) {
-  const [form, setForm] = useState({ email: "", code: "", note: "" });
+  const [email, setEmail] = useState("");
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
-  const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -221,7 +227,7 @@ function NewBoxModal({
     try {
       const box = await api.post<{ code: string; email: string; phrase: string; address: string }>(
         "/platform/boxes",
-        form
+        { email }
       );
       onDone(box);
     } catch (err) {
@@ -231,41 +237,37 @@ function NewBoxModal({
     }
   }
 
+  // Что получится в адресе — показываем сразу, пока человек печатает.
+  const guess = email.includes("@")
+    ? email.split("@")[0].toLowerCase().replace(/\+.*$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "")
+    : "";
+
   return (
-    <Modal title="Доступ из интернета" onClose={onClose}>
+    <Modal title="Открыть доступ из интернета" onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error">{error.message}</Banner>}
         <Field
-          label="Email владельца"
+          label="Email владельца мастерской"
           error={error?.field("email")}
-          hint="Доступ выдаётся на этот адрес: по нему делается адрес мастерской и видно, кому выдан ключ"
+          hint={
+            guess.length >= 3
+              ? `Адрес мастерской будет ${window.location.origin}/b/${guess}/`
+              : "На эту почту выдаётся доступ: по ней делается адрес и на неё же можно будет выслать фразу заново"
+          }
         >
           <Input
             type="email"
-            value={form.email}
-            onChange={set("email")}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             autoCapitalize="none"
+            autoFocus
             invalid={!!error?.field("email")}
             placeholder="master@servis.ru"
           />
         </Field>
-        <Field
-          label="Код в адресе"
-          error={error?.field("code")}
-          hint={
-            form.email.includes("@")
-              ? `Пусто — будет /b/${form.email.split("@")[0].toLowerCase().replace(/[^a-z0-9-]+/g, "-")}/`
-              : "Пусто — сделаем из почты. Можно задать свой, латиницей."
-          }
-        >
-          <Input value={form.code} onChange={set("code")} autoCapitalize="none" placeholder="servis-na-lenina" />
-        </Field>
-        <Field label="Заметка" error={error?.field("note")} hint="Видно только вам: тариф, телефон, что угодно">
-          <Input value={form.note} onChange={set("note")} />
-        </Field>
         <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
-          <Button type="submit" disabled={busy} className="sm:flex-1">
-            {busy ? "Открываем…" : "Открыть доступ"}
+          <Button type="submit" disabled={busy || !email.includes("@")} className="sm:flex-1">
+            {busy ? "Открываем…" : "Получить фразу"}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
             Отмена
