@@ -218,6 +218,8 @@ export const ordersApi = {
     api.get<Page<Order>>(`/orders?${new URLSearchParams(params).toString()}`),
   get: (id: string) => api.get<Order>(`/orders/${id}`),
   create: (body: unknown) => api.post<{ id: string; number: string }>("/orders", body),
+  /** Правка карточки: шлём только изменённые поля. */
+  update: (id: string, patch: Record<string, unknown>) => api.patch(`/orders/${id}`, patch),
   assignMaster: (id: string, masterId: string | null) => api.patch(`/orders/${id}`, { assignedMasterId: masterId }),
   setStatus: (id: string, statusId: string, comment?: string) =>
     api.post(`/orders/${id}/status`, { statusId, comment }),

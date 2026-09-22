@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
@@ -25,6 +26,32 @@ function assertCanGrant(req: Request, requested: string[]) {
   if (unknown.length) throw badRequest(`Неизвестные права: ${unknown.join(", ")}`);
 }
 
+/**
+ * Роли сотрудника из запроса: новый бланк шлёт список roleIds, старый — одну
+ * roleId. Первая в списке — основная (по ней, например, подписан сотрудник в
+ * старых отчётах), остальные — дополнительные. Права складываются.
+ */
+const roleIdsField = z.array(z.string().uuid()).min(1, "Выберите хотя бы одну роль").max(10);
+
+function requestedRoles(body: { roleId?: string; roleIds?: string[] }): string[] | undefined {
+  const list = body.roleIds ?? (body.roleId ? [body.roleId] : undefined);
+  return list && [...new Set(list)];
+}
+
+/** Проверить роли и разложить на основную и дополнительные. */
+async function resolveRoles(req: Request, tx: Prisma.TransactionClient, ids: string[]) {
+  const roles = await tx.role.findMany({ where: { id: { in: ids } } });
+  if (roles.length !== ids.length) throw badRequest("Роль не найдена");
+  assertCanGrant(req, [...new Set(roles.flatMap((r) => r.permissions))]);
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  const ordered = ids.map((id) => byId.get(id)!);
+  return {
+    roleId: ordered[0].id,
+    extraRoleIds: ordered.slice(1).map((r) => r.id),
+    names: ordered.map((r) => r.name),
+  };
+}
+
 // ---------- справочник прав ----------
 
 staffRouter.get("/permissions", (_req, res) => res.json(PERMISSION_GROUPS));
@@ -38,17 +65,20 @@ staffRouter.get(
     const q = z.object(pageFields).parse(req.query);
     const where = { deletedAt: null };
 
-    const [users, total] = await withTenant(tenantOf(req), (tx) =>
+    const [users, total, roles] = await withTenant(tenantOf(req), (tx) =>
       Promise.all([
         tx.user.findMany({
           where,
           orderBy: [{ isOwner: "desc" }, { fullName: "asc" }],
           ...skipTake(q),
-          include: { role: { select: { id: true, name: true, code: true } } },
         }),
         tx.user.count({ where }),
+        tx.role.findMany({ select: { id: true, name: true, code: true } }),
       ])
     );
+    const roleById = new Map(roles.map((r) => [r.id, r]));
+    const rolesOf = (u: { roleId: string | null; extraRoleIds: string[] }) =>
+      [u.roleId, ...u.extraRoleIds].flatMap((id) => (id && roleById.has(id) ? [roleById.get(id)!] : []));
     res.json(
       paged(
         users.map((u) => ({
@@ -62,7 +92,8 @@ staffRouter.get(
           // Владельцу важно видеть, у кого нет приложения: без него мастер
           // не получает оповещений о назначенных заказах.
           androidAppAt: u.androidAppAt,
-          role: u.role,
+          role: rolesOf(u)[0] ?? null,
+          roles: rolesOf(u),
           workPercent: u.workPercent,
           partPercent: u.partPercent,
         })),
@@ -89,7 +120,8 @@ const createStaffSchema = z.object({
   password: z.string().min(8, "Пароль от 8 символов"),
   fullName: z.string().trim().min(2, "Укажите имя"),
   phone: z.string().trim().optional(),
-  roleId: z.string().uuid("Выберите роль"),
+  roleId: z.string().uuid("Выберите роль").optional(),
+  roleIds: roleIdsField.optional(),
   workPercent: z.number().min(0).max(100).optional(),
   partPercent: z.number().min(0).max(100).optional(),
 });
@@ -112,9 +144,9 @@ staffRouter.post(
       if (count >= tenant.maxUsers)
         throw conflict(`Тариф позволяет не больше ${tenant.maxUsers} сотрудников. Обратитесь к нам, чтобы расширить.`);
 
-      const role = await tx.role.findFirst({ where: { id: body.roleId } });
-      if (!role) throw badRequest("Роль не найдена");
-      assertCanGrant(req, role.permissions);
+      const ids = requestedRoles(body);
+      if (!ids?.length) throw badRequest("Выберите роль");
+      const roles = await resolveRoles(req, tx, ids);
 
       const user = await tx.user.create({
         data: {
@@ -123,7 +155,8 @@ staffRouter.post(
           passwordHash: await hashPassword(body.password),
           fullName: body.fullName,
           phone: body.phone || null,
-          roleId: role.id,
+          roleId: roles.roleId,
+          extraRoleIds: roles.extraRoleIds,
           workPercent: body.workPercent ?? null,
           partPercent: body.partPercent ?? null,
         },
@@ -134,7 +167,7 @@ staffRouter.post(
         entity: "User",
         entityId: user.id,
         action: "CREATE",
-        diff: safeDiff({ ...body, roleName: role.name }),
+        diff: safeDiff({ ...body, roleNames: roles.names }),
         ip: clientIp(req),
       });
       return user;
@@ -149,6 +182,7 @@ const updateStaffSchema = z.object({
   phone: z.string().trim().optional(),
   email: z.string().trim().toLowerCase().email("Похоже, это не email").optional(),
   roleId: z.string().uuid().optional(),
+  roleIds: roleIdsField.optional(),
   isActive: z.boolean().optional(),
   workPercent: z.number().min(0).max(100).nullable().optional(),
   partPercent: z.number().min(0).max(100).nullable().optional(),
@@ -169,20 +203,25 @@ staffRouter.patch(
       if (!user) throw notFound("Сотрудник не найден");
       if (user.isOwner && body.isActive === false) throw forbidden("Владельца отключить нельзя");
 
-      if (body.roleId) {
-        const role = await tx.role.findFirst({ where: { id: body.roleId } });
-        if (!role) throw badRequest("Роль не найдена");
-        assertCanGrant(req, role.permissions);
-      }
+      const { roleId: _one, roleIds: _many, ...fields } = body;
+      const ids = requestedRoles(body);
+      const roles = ids ? await resolveRoles(req, tx, ids) : null;
 
-      const next = await tx.user.update({ where: { id: user.id }, data: body });
+      const next = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          ...fields,
+          ...(fields.phone !== undefined ? { phone: fields.phone || null } : {}),
+          ...(roles ? { roleId: roles.roleId, extraRoleIds: roles.extraRoleIds } : {}),
+        },
+      });
       await writeAudit(tx, {
         tenantId,
         userId: actorUserId(req),
         entity: "User",
         entityId: user.id,
         action: "UPDATE",
-        diff: safeDiff(body),
+        diff: safeDiff({ ...fields, ...(roles ? { roleNames: roles.names } : {}) }),
         ip: clientIp(req),
       });
       return next;
@@ -327,7 +366,9 @@ staffRouter.delete(
       const role = await tx.role.findFirst({ where: { id: req.params.id } });
       if (!role) throw notFound("Роль не найдена");
       if (role.isSystem) throw forbidden("Системную роль удалить нельзя — можно склонировать и править копию");
-      const inUse = await tx.user.count({ where: { roleId: role.id, deletedAt: null } });
+      const inUse = await tx.user.count({
+        where: { deletedAt: null, OR: [{ roleId: role.id }, { extraRoleIds: { has: role.id } }] },
+      });
       if (inUse) throw conflict(`Роль назначена ${inUse} сотрудникам — сначала переведите их на другую`);
       await tx.role.delete({ where: { id: role.id } });
       await writeAudit(tx, {

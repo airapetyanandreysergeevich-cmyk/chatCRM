@@ -5,12 +5,12 @@ import {
   Badge,
   Banner,
   Button,
+  Checkbox,
   Field,
   Input,
   List,
   ListRow,
   SectionLabel,
-  Select,
   Spinner,
   StatusGlyph,
 } from "../components/ui";
@@ -36,7 +36,13 @@ interface StaffRow {
   lastLoginAt: string | null;
   androidAppAt: string | null;
   role: { id: string; name: string; code: string | null } | null;
+  /** Все роли сотрудника, основная — первой. Права у ролей складываются. */
+  roles?: Array<{ id: string; name: string; code: string | null }>;
+  workPercent: string | number | null;
+  partPercent: string | number | null;
 }
+
+const rolesOf = (u: StaffRow) => u.roles ?? (u.role ? [u.role] : []);
 
 export default function Staff() {
   const [rows, setRows] = useState<StaffRow[] | null>(null);
@@ -45,6 +51,7 @@ export default function Staff() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<StaffRow | null>(null);
   const [resetting, setResetting] = useState<StaffRow | null>(null);
 
   const load = useCallback(async () => {
@@ -106,7 +113,7 @@ export default function Staff() {
             }
             subtitle={
               <>
-                {u.role?.name ?? "без роли"} · <span className="font-mono text-[13px]">{u.email}</span>
+                {rolesOf(u).length ? rolesOf(u).map((r) => r.name).join(", ") : "без роли"} · <span className="font-mono text-[13px]">{u.email}</span>
               </>
             }
             meta={
@@ -129,7 +136,14 @@ export default function Staff() {
             actions={
               // Ширина колонки кнопок задана, чтобы у владельца, у которого кнопка
               // одна, остальные столбцы не разъезжались.
-              <div className="flex flex-wrap gap-1.5 sm:min-w-[190px] sm:justify-end">
+              <div className="flex flex-wrap gap-1.5 sm:min-w-[280px] sm:justify-end">
+                <Button
+                  variant="secondary"
+                  className="min-h-[34px] px-3 text-[13px]"
+                  onClick={() => setEditing(u)}
+                >
+                  Изменить
+                </Button>
                 <Button
                   variant="secondary"
                   className="min-h-[34px] px-3 text-[13px]"
@@ -160,12 +174,17 @@ export default function Staff() {
         }}
       />
 
-      {creating && (
+      {(creating || editing) && (
         <StaffModal
           roles={roles}
-          onClose={() => setCreating(false)}
+          user={editing}
+          onClose={() => {
+            setCreating(false);
+            setEditing(null);
+          }}
           onDone={() => {
             setCreating(false);
+            setEditing(null);
             void load();
           }}
         />
@@ -185,25 +204,81 @@ export default function Staff() {
   );
 }
 
-function StaffModal({ roles, onClose, onDone }: { roles: Role[]; onClose: () => void; onDone: () => void }) {
+/**
+ * Карточка сотрудника: создание и правка.
+ *
+ * Ролей можно отметить несколько: в маленькой мастерской приёмщик сам же и
+ * развозит технику, а мастер принимает, когда стойка пустая. Права ролей
+ * складываются. Первая отмеченная — основная, ею сотрудник подписан там,
+ * где помещается одна роль.
+ */
+function StaffModal({
+  roles,
+  user,
+  onClose,
+  onDone,
+}: {
+  roles: Role[];
+  user: StaffRow | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const editing = !!user;
+  const pct = (v: string | number | null | undefined) => (v === null || v === undefined ? "" : String(Number(v)));
   const [form, setForm] = useState({
-    fullName: "",
-    email: "",
+    fullName: user?.fullName ?? "",
+    email: user?.email ?? "",
     password: "",
-    phone: "",
-    roleId: roles[0]?.id ?? "",
+    phone: user?.phone ?? "",
+    workPercent: pct(user?.workPercent),
+    partPercent: pct(user?.partPercent),
   });
+  const [roleIds, setRoleIds] = useState<string[]>(
+    user ? rolesOf(user).map((r) => r.id) : roles[0] ? [roles[0].id] : []
+  );
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const toggleRole = (id: string) =>
+    setRoleIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+
+  const percent = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    // Владельцу роль не обязательна: права у него и так все.
+    if (!roleIds.length && !user?.isOwner) {
+      setError(new ApiError(400, "Отметьте хотя бы одну роль"));
+      return;
+    }
+    // Роли шлём, только если их правда меняли: иначе управляющий, правящий
+    // телефон, упёрся бы в проверку «нельзя выдать права, которых нет у вас»
+    // из-за ролей, выданных сотруднику владельцем.
+    const before = user ? rolesOf(user).map((r) => r.id) : [];
+    const rolesChanged = !user || before.join() !== roleIds.join();
     setBusy(true);
     setError(null);
     try {
-      await api.post("/staff", form);
+      const common = {
+        fullName: form.fullName,
+        email: form.email,
+        phone: form.phone,
+        ...(rolesChanged && roleIds.length ? { roleIds } : {}),
+        workPercent: percent(form.workPercent),
+        partPercent: percent(form.partPercent),
+      };
+      if (editing) {
+        await api.patch(`/staff/${user.id}`, common);
+      } else {
+        await api.post("/staff", {
+          ...common,
+          password: form.password,
+          workPercent: common.workPercent ?? undefined,
+          partPercent: common.partPercent ?? undefined,
+        });
+      }
       onDone();
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
@@ -213,21 +288,43 @@ function StaffModal({ roles, onClose, onDone }: { roles: Role[]; onClose: () => 
   }
 
   return (
-    <Modal title="Новый сотрудник" onClose={onClose}>
+    <Modal title={editing ? user.fullName : "Новый сотрудник"} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error">{error.message}</Banner>}
         <Field label="Имя" error={error?.field("fullName")}>
           <Input value={form.fullName} onChange={set("fullName")} invalid={!!error?.field("fullName")} />
         </Field>
-        <Field label="Роль" error={error?.field("roleId")} hint="Роль определяет, что сотрудник видит и может менять">
-          <Select value={form.roleId} onChange={set("roleId")} invalid={!!error?.field("roleId")}>
+
+        <div>
+          <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Роли</span>
+          {user?.isOwner && (
+            <p className="mb-2 text-[12.5px] text-ink-dim">
+              У владельца все права и так — роли нужны, чтобы он попадал в списки, например мастеров.
+            </p>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2">
             {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
+              <Checkbox
+                key={r.id}
+                checked={roleIds.includes(r.id)}
+                onChange={() => toggleRole(r.id)}
+                label={
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{r.name}</span>
+                    {roleIds[0] === r.id && roleIds.length > 1 && <Badge tone="brand">основная</Badge>}
+                  </span>
+                }
+              />
             ))}
-          </Select>
-        </Field>
+          </div>
+          <span className="mt-1.5 block text-[12.5px] text-ink-dim">
+            Можно отметить несколько — например, «Приёмщик» и «Курьер». Права ролей складываются.
+          </span>
+          {error?.field("roleIds") && (
+            <span className="mt-1.5 block text-[12.5px] text-state-off">{error.field("roleIds")}</span>
+          )}
+        </div>
+
         <Field
           label="Email"
           error={error?.field("email")}
@@ -241,15 +338,30 @@ function StaffModal({ roles, onClose, onDone }: { roles: Role[]; onClose: () => 
             invalid={!!error?.field("email")}
           />
         </Field>
-        <Field label="Пароль" error={error?.field("password")} hint="От 8 символов. Сотрудник сменит его сам.">
-          <Input value={form.password} onChange={set("password")} invalid={!!error?.field("password")} />
-        </Field>
+        {!editing && (
+          <Field label="Пароль" error={error?.field("password")} hint="От 8 символов. Сотрудник сменит его сам.">
+            <Input value={form.password} onChange={set("password")} invalid={!!error?.field("password")} />
+          </Field>
+        )}
         <Field label="Телефон" error={error?.field("phone")}>
           <Input value={form.phone} onChange={set("phone")} />
         </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Процент с работ" hint="Для расчёта зарплаты" error={error?.field("workPercent")}>
+            <Input inputMode="decimal" value={form.workPercent} onChange={set("workPercent")} />
+          </Field>
+          <Field label="Процент с запчастей" error={error?.field("partPercent")}>
+            <Input inputMode="decimal" value={form.partPercent} onChange={set("partPercent")} />
+          </Field>
+        </div>
+        {editing && (
+          <p className="text-[12.5px] text-ink-dim">
+            Новые права начнут действовать при следующем обновлении входа сотрудника — обычно в течение нескольких минут.
+          </p>
+        )}
         <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
           <Button type="submit" disabled={busy} className="sm:flex-1">
-            {busy ? "Создаём…" : "Добавить"}
+            {busy ? "Сохраняем…" : editing ? "Сохранить" : "Добавить"}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
             Отмена

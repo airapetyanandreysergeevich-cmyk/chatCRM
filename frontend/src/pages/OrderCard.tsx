@@ -4,6 +4,7 @@ import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { OrderChat } from "../components/OrderChat";
+import { OrderEditModal } from "../components/OrderEditModal";
 import {
   Banner,
   Button,
@@ -328,6 +329,7 @@ export default function OrderCard() {
   const [shooting, setShooting] = useState(false);
   /** Какой снимок открыт в просмотре: номер в общем списке. */
   const [viewing, setViewing] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -427,6 +429,11 @@ export default function OrderCard() {
                 </option>
               ))}
             </Select>
+          )}
+          {can("orders.edit") && ref && (
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Изменить
+            </Button>
           )}
           {/* Печать рядом со сменой статуса: квитанцию распечатывают сразу
               после приёма, акт — при выдаче, оба раза отсюда. */}
@@ -887,6 +894,18 @@ export default function OrderCard() {
             </div>
           )}
         </Card>
+      )}
+
+      {editing && ref && (
+        <OrderEditModal
+          order={order}
+          reference={ref}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            void run(async () => {}, "Заказ изменён");
+          }}
+        />
       )}
 
       {shooting && (

@@ -79,12 +79,17 @@ async function tenantPayload(tenantId: string, userId: string): Promise<TenantTo
   return withTenant<TenantTokenPayload>(tenantId, async (tx) => {
     const user = await tx.user.findFirst({ where: { id: userId }, include: { role: true } });
     if (!user || !user.isActive || user.deletedAt) throw unauthorized("Учётная запись отключена");
+    // Ролей может быть несколько («приёмщик» и «курьер»): права складываются.
+    const extra = user.extraRoleIds.length
+      ? await tx.role.findMany({ where: { id: { in: user.extraRoleIds } }, select: { permissions: true } })
+      : [];
+    const permissions = new Set([...(user.role?.permissions ?? []), ...extra.flatMap((r) => r.permissions)]);
     return {
       kind: "tenant",
       userId: user.id,
       tenantId,
       roleCode: user.role?.code ?? null,
-      permissions: user.isOwner ? [...ALL_PERMISSIONS] : (user.role?.permissions ?? []),
+      permissions: user.isOwner ? [...ALL_PERMISSIONS] : [...permissions],
       isOwner: user.isOwner,
     };
   });

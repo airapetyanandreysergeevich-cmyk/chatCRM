@@ -262,6 +262,9 @@ model User {
   fullName     String
   phone        String?
   roleId       String?
+  /// Дополнительные роли: «приёмщик» и «курьер» в одном лице. Права
+  /// складываются. Основная роль — roleId, она же первая в списке.
+  extraRoleIds String[] @default([])
   branchId     String?
   isOwner      Boolean @default(false) // владелец мастерской: все права, не удаляется
   isActive     Boolean @default(true)

@@ -403,7 +403,32 @@ const patchSchema = acceptSchema
     assignedMasterId: z.string().uuid().nullable().optional(),
     completeness: z.union([z.string(), z.array(z.string())]).optional(),
     appearance: z.union([z.string(), z.array(z.string())]).optional(),
+    // Кнопка «Изменить» на карточке: ошиблись с видом обращения или с
+    // моделью при приёме — правят здесь, а не пересоздают заказ.
+    kind: acceptSchema.shape.kind.removeDefault().optional(),
+    device: z
+      .object({
+        kind: z.string().trim().min(2, "Укажите тип техники"),
+        brand: z.string().trim(),
+        model: z.string().trim(),
+        serial: z.string().trim(),
+      })
+      .partial()
+      .optional(),
   });
+
+/** Для журнала: что было и что стало — только по тем полям, что правда изменились. */
+function changesOf(before: Record<string, unknown>, after: Record<string, unknown>) {
+  const norm = (v: unknown) =>
+    v instanceof Date ? v.toISOString() : v === "" || v === undefined ? null : v && typeof v === "object" && "toNumber" in v ? Number(v) : v;
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  for (const [k, to] of Object.entries(after)) {
+    if (to === undefined) continue;
+    const from = before[k];
+    if (JSON.stringify(norm(from)) !== JSON.stringify(norm(to))) out[k] = { from: norm(from), to: norm(to) };
+  }
+  return out;
+}
 
 ordersRouter.patch(
   "/:id",
@@ -417,25 +442,51 @@ ordersRouter.patch(
       if (!order) throw notFound("Заказ не найден");
       if (body.assignedMasterId) await assertAssignable(tx, body.assignedMasterId);
 
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          ...body,
-          dueAt: body.dueAt === undefined ? undefined : body.dueAt ? new Date(body.dueAt) : null,
-          completeness: body.completeness === undefined ? undefined : toLabels(body.completeness),
-          appearance: body.appearance === undefined ? undefined : toLabels(body.appearance),
-          ...(body.appearance === undefined ? {} : flagsOf(toLabels(body.appearance))),
-        },
-      });
-      await writeAudit(tx, {
-        tenantId,
-        userId: actorUserId(req),
-        entity: "Order",
-        entityId: order.id,
-        action: "UPDATE",
-        diff: safeDiff(body as Record<string, unknown>),
-        ip: clientIp(req),
-      });
+      const { device: deviceIn, ...fields } = body;
+      // Пустая строка из бланка — «стёрли»: храним null, как при приёме.
+      const orNull = (v: string | undefined) => (v === undefined ? undefined : v || null);
+      const data = {
+        ...fields,
+        receptionNote: orNull(fields.receptionNote),
+        devicePasscode: orNull(fields.devicePasscode),
+        appearanceNote: orNull(fields.appearanceNote),
+        storageLocation: orNull(fields.storageLocation),
+        dueAt: fields.dueAt === undefined ? undefined : fields.dueAt ? new Date(fields.dueAt) : null,
+        completeness: fields.completeness === undefined ? undefined : toLabels(fields.completeness),
+        appearance: fields.appearance === undefined ? undefined : toLabels(fields.appearance),
+        ...(fields.appearance === undefined ? {} : flagsOf(toLabels(fields.appearance))),
+      };
+      await tx.order.update({ where: { id: order.id }, data });
+      const changes = changesOf(order as unknown as Record<string, unknown>, data);
+
+      if (deviceIn && Object.keys(deviceIn).length) {
+        const device = order.deviceId ? await tx.device.findFirst({ where: { id: order.deviceId } }) : null;
+        if (!device) throw badRequest("У заказа нет карточки техники");
+        const next = {
+          kind: deviceIn.kind,
+          brand: orNull(deviceIn.brand),
+          model: orNull(deviceIn.model),
+          serial: orNull(deviceIn.serial),
+        };
+        await tx.device.update({ where: { id: device.id }, data: next });
+        for (const [k, v] of Object.entries(changesOf(device as unknown as Record<string, unknown>, next))) {
+          changes[`device.${k}`] = v;
+        }
+        // Исправленная модель — такая же подсказка на будущее, как принятая.
+        await rememberDevice(tx, { ...device, ...Object.fromEntries(Object.entries(next).filter(([, v]) => v !== undefined)) });
+      }
+
+      if (Object.keys(changes).length) {
+        await writeAudit(tx, {
+          tenantId,
+          userId: actorUserId(req),
+          entity: "Order",
+          entityId: order.id,
+          action: "UPDATE",
+          diff: safeDiff(changes as Record<string, unknown>),
+          ip: clientIp(req),
+        });
+      }
 
       // Оповещаем только когда мастера действительно сменили: сохранение
       // карточки без изменений не должно дёргать человека второй раз.

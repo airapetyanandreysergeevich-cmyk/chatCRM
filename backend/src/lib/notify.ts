@@ -93,7 +93,12 @@ async function resolveRecipients(
 
   const or: Prisma.UserWhereInput[] = [];
   if (roleKeys.length) {
-    or.push(configured ? { roleId: { in: roleKeys } } : { role: { name: { in: roleKeys } } });
+    // В настройках роли записаны id, в умолчаниях — названиями. Сводим к id,
+    // чтобы найти роль и основной, и дополнительной у сотрудника.
+    const ids = configured
+      ? roleKeys
+      : (await tx.role.findMany({ where: { name: { in: roleKeys } }, select: { id: true } })).map((r) => r.id);
+    if (ids.length) or.push({ roleId: { in: ids } }, { extraRoleIds: { hasSome: ids } });
   }
   if (wantsOwner) or.push({ isOwner: true });
 
