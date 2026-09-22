@@ -46,7 +46,8 @@ const ORDER: readonly string[] = [
   "purchaseRequest",
   // вложения ссылаются и на заказ, и на заявку — значит, после обеих
   "attachment",
-  // заказы и всё, что к ним пришито
+  // заказы и всё, что к ним пришито (фото сообщений ушли вместе с вложениями)
+  "orderMessage",
   "orderPart",
   "orderWork",
   "orderStatusHistory",

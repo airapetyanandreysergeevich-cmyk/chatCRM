@@ -24,7 +24,7 @@ DECLARE
   t text;
   tenant_tables text[] := ARRAY[
     'Branch','Role','User','Customer','Device','DeviceHint','QuickPick','OrderStatus','Service','Order',
-    'OrderStatusHistory','OrderWork','OrderPart','Attachment',
+    'OrderStatusHistory','OrderWork','OrderPart','OrderMessage','Attachment',
     'PurchaseRequest','PurchaseRequestItem',
     'Warehouse','StockItem','StockBalance','StockMovement',
     'CashRegister','TransactionCategory','Transaction',

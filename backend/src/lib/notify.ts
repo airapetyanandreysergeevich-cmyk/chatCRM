@@ -26,6 +26,8 @@ interface TenantNotice {
   url?: string;
   /** Человек, которому событие адресовано лично (назначенный мастер). */
   targetUserId?: string | null;
+  /** Несколько адресатов лично — участники переписки в истории ремонта. */
+  targetUserIds?: string[];
   /** Кого оповещать не надо — обычно тот, кто сам это действие и сделал. */
   exceptUserId?: string | null;
   payload?: Record<string, unknown>;
@@ -104,6 +106,7 @@ async function resolveRecipients(
 
   const recipients = new Set(byRole.map((u) => u.id));
   if (definition?.hasDirectTarget && notice.targetUserId) recipients.add(notice.targetUserId);
+  if (definition?.hasDirectTarget) for (const id of notice.targetUserIds ?? []) recipients.add(id);
   if (notice.exceptUserId) recipients.delete(notice.exceptUserId);
   return [...recipients];
 }

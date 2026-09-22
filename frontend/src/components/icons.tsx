@@ -397,3 +397,16 @@ export const IconCamera = (p: IconProps) => (
     <circle cx="12" cy="12.5" r="3.4" />
   </Icon>
 );
+
+export const IconAttach = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20.5 11.2 12 19.7a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />
+  </Icon>
+);
+
+export const IconSend = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 12 20 4l-4.5 16-3.5-6.5L4 12z" />
+    <path d="m12 13.5 3.5-5" />
+  </Icon>
+);

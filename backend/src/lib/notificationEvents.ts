@@ -38,6 +38,13 @@ export const NOTIFICATION_EVENTS = [
     defaultRoles: ["Приёмщик", "Управляющий", "Владелец"],
   },
   {
+    code: "order.message",
+    title: "Сообщение в истории ремонта",
+    hint: "Уходит назначенному мастеру и тем, кто уже писал в историю этого заказа. Отметьте роли, которым оно нужно дополнительно.",
+    hasDirectTarget: true,
+    defaultRoles: [] as string[],
+  },
+  {
     code: "purchase.requested",
     title: "Заявка на закупку",
     hint: "Мастер попросил купить деталь — заявка ждёт согласования.",

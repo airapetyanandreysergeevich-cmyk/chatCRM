@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
+import { OrderChat } from "../components/OrderChat";
 import {
   Banner,
   Button,
@@ -350,6 +351,14 @@ export default function OrderCard() {
     ordersApi.reference().then(setRef).catch(() => undefined);
   }, [load]);
 
+  // Из оповещения «Сообщение в истории ремонта» — сразу к ленте.
+  const loaded = !!order;
+  useEffect(() => {
+    if (!loaded || window.location.hash !== "#history") return;
+    const t = setTimeout(() => document.getElementById("history")?.scrollIntoView({ behavior: "smooth" }), 300);
+    return () => clearTimeout(t);
+  }, [loaded]);
+
   async function run(action: () => Promise<unknown>, message: string) {
     setSaving(true);
     setError(null);
@@ -588,6 +597,8 @@ export default function OrderCard() {
               )}
             </div>
           </Card>
+
+          <OrderChat orderId={order.id} myId={myId} canModerate={can("orders.edit")} />
         </div>
 
         <div className="space-y-4">

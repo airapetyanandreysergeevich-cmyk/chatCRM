@@ -23,7 +23,8 @@ export const orderInclude = {
   issuedBy: { select: { id: true, fullName: true } },
   works: { orderBy: { createdAt: "asc" } },
   parts: { orderBy: { createdAt: "asc" } },
-  attachments: { orderBy: { createdAt: "asc" } },
+  // Фото из истории ремонта живут в своих сообщениях, среди снимков приёмки их нет.
+  attachments: { where: { kind: { not: "MESSAGE" } }, orderBy: { createdAt: "asc" } },
 } satisfies Prisma.OrderInclude;
 
 export type OrderWithRelations = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;

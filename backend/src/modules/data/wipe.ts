@@ -94,6 +94,7 @@ async function wipeOrders(tx: Prisma.TransactionClient, out: Wiped): Promise<voi
   await tx.purchaseRequest.updateMany({ where: { orderId: { not: null } }, data: { orderId: null } });
   await tx.stockMovement.updateMany({ where: { orderId: { not: null } }, data: { orderId: null } });
 
+  add(out, "orderMessage", (await tx.orderMessage.deleteMany({})).count);
   add(out, "orderPart", (await tx.orderPart.deleteMany({})).count);
   add(out, "orderWork", (await tx.orderWork.deleteMany({})).count);
   add(out, "orderStatusHistory", (await tx.orderStatusHistory.deleteMany({})).count);

@@ -14,6 +14,49 @@ import { Banner, Button } from "./ui";
  * и тут же лишний снимок можно удалить.
  */
 
+const KIND_LABEL: Record<string, string> = {
+  INTAKE: "При приёме",
+  COMPLETION: "После ремонта",
+  MESSAGE: "История ремонта",
+};
+
+const secondary =
+  "inline-flex min-h-[44px] items-center justify-center rounded-field border border-line px-4 text-[14px] font-semibold text-ink-soft transition-colors duration-150 hover:border-line-strong hover:text-ink disabled:opacity-60";
+
+/** Имя для сохранения: «Снимок-….jpg» как есть, без расширения — с .jpg. */
+function downloadName(name: string): string {
+  return /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name || "снимок"}.jpg`;
+}
+
+/** Буфер обмена для картинок есть не везде: старые браузеры и http по сети. */
+const canCopyImage = () =>
+  typeof navigator !== "undefined" && !!navigator.clipboard?.write && typeof ClipboardItem !== "undefined";
+
+/**
+ * Скопировать снимок в буфер обмена.
+ *
+ * Браузеры кладут в буфер только PNG — JPEG перерисовываем на холсте. Промис
+ * отдаём в ClipboardItem сразу, не дожидаясь картинки: Safari разрешает
+ * запись в буфер только прямо в обработчике нажатия.
+ */
+async function copyImage(url: string): Promise<void> {
+  const png = (async () => {
+    const blob = await (await fetch(url)).blob();
+    if (blob.type === "image/png") return blob;
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const out = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+    canvas.width = 0;
+    if (!out) throw new Error("Не удалось подготовить снимок");
+    return out;
+  })();
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
 export interface ViewerPhoto {
   id: string;
   fileName: string;
@@ -40,8 +83,27 @@ export function PhotoViewer({
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function copy(from: string) {
+    setCopying(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await copyImage(from);
+      setNotice("Снимок скопирован — вставьте его в мессенджер или документ");
+    } catch {
+      setError("Не удалось скопировать снимок — сохраните его кнопкой «Сохранить»");
+    } finally {
+      setCopying(false);
+    }
+  }
 
   const photo = photos[Math.min(index, photos.length - 1)];
+
+  // «Скопировано» относится к одному снимку — при листании убираем.
+  useEffect(() => setNotice(null), [index]);
 
   // Ссылку просим только на показанный снимок и соседей: листать без
   // ожидания, но и не тянуть сразу все.
@@ -121,7 +183,7 @@ export function PhotoViewer({
         </div>
 
         <p className="truncate text-[12.5px] text-ink-dim">
-          {photo.kind === "COMPLETION" ? "После ремонта" : "При приёме"} · {photo.fileName}
+          {KIND_LABEL[photo.kind] ?? "При приёме"} · {photo.fileName}
         </p>
 
         {confirm ? (
@@ -137,19 +199,31 @@ export function PhotoViewer({
             </div>
           </Banner>
         ) : (
-          <div className="flex flex-col gap-2 sm:flex-row-reverse">
-            {url && (
-              <a
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-h-[44px] items-center justify-center rounded-field border border-line px-4 text-[14px] font-semibold text-ink-soft hover:text-ink sm:flex-1"
-              >
-                Открыть в полном размере
-              </a>
-            )}
+          <div className="space-y-2">
+            {notice && <p className="text-center text-[13px] text-stage-done">{notice}</p>}
+            <div className="grid gap-2 sm:grid-cols-3">
+              {url && (
+                <a
+                  href={url}
+                  download={downloadName(photo.fileName)}
+                  className={secondary}
+                >
+                  Сохранить
+                </a>
+              )}
+              {url && canCopyImage() && (
+                <button type="button" className={secondary} disabled={copying} onClick={() => void copy(url)}>
+                  {copying ? "Копируем…" : "Скопировать"}
+                </button>
+              )}
+              {url && (
+                <a href={url} target="_blank" rel="noreferrer" className={secondary}>
+                  Открыть отдельно
+                </a>
+              )}
+            </div>
             {canDelete && (
-              <Button type="button" variant="ghost" onClick={() => setConfirm(true)} className="sm:flex-1">
+              <Button type="button" variant="ghost" onClick={() => setConfirm(true)} className="w-full">
                 Удалить снимок
               </Button>
             )}

@@ -89,6 +89,7 @@ model Tenant {
   orderStatusHistory  OrderStatusHistory[]
   orderWorks          OrderWork[]
   orderParts          OrderPart[]
+  orderMessages       OrderMessage[]
   attachments         Attachment[]
   purchaseRequests    PurchaseRequest[]
   purchaseItems       PurchaseRequestItem[]
@@ -290,6 +291,7 @@ model User {
   createdCustomers  Customer[]
   statusChanges     OrderStatusHistory[]
   works             OrderWork[]
+  orderMessages     OrderMessage[]
   attachments       Attachment[]
   purchaseCreated   PurchaseRequest[]    @relation("PurchaseCreatedBy")
   purchaseApproved  PurchaseRequest[]    @relation("PurchaseApprovedBy")
@@ -516,6 +518,7 @@ model Order {
 
   works            OrderWork[]
   parts            OrderPart[]
+  messages         OrderMessage[]
   attachments      Attachment[]
   statusHistory    OrderStatusHistory[]
   purchaseRequests PurchaseRequest[]
@@ -669,6 +672,7 @@ enum AttachmentKind {
   COMPLETION // фото после ремонта
   DOCUMENT
   OTHER
+  MESSAGE // фото в истории ремонта — к сообщению мастера
 }
 
 model Attachment {
@@ -676,6 +680,8 @@ model Attachment {
   tenantId          String
   orderId           String?
   purchaseRequestId String?
+  /// Сообщение в истории ремонта, к которому приложен снимок.
+  messageId         String?
   kind              AttachmentKind @default(OTHER)
   objectKey         String // ключ в S3/MinIO: tenantId/orderId/uuid.jpg
   fileName          String
@@ -687,9 +693,30 @@ model Attachment {
   tenant          Tenant           @relation(fields: [tenantId], references: [id])
   order           Order?           @relation(fields: [orderId], references: [id])
   purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id])
+  message         OrderMessage?    @relation(fields: [messageId], references: [id])
   uploadedBy      User?            @relation(fields: [uploadedById], references: [id])
 
   @@index([tenantId, orderId])
+  @@index([messageId])
+}
+
+/// История ремонта: сообщения мастеров в карточке заказа, как в чате.
+/// Удалённое сообщение не стирается, а помечается: история — это журнал.
+model OrderMessage {
+  id        String    @id @default(uuid())
+  tenantId  String
+  orderId   String
+  authorId  String?
+  text      String    @default("")
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  order       Order        @relation(fields: [orderId], references: [id])
+  author      User?        @relation(fields: [authorId], references: [id])
+  attachments Attachment[]
+
+  @@index([tenantId, orderId, createdAt])
 }
 
 // ------------------------------------------------------------

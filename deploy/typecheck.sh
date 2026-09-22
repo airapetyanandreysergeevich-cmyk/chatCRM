@@ -120,6 +120,12 @@ docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
   npx tsx test/storage-s3.ts
 "
 
+echo ">>> История ремонта: подписи дней"
+docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/messages.ts
+"
+
 echo ">>> Сжатие и пачки фотографий"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL

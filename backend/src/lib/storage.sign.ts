@@ -24,7 +24,12 @@ function sign(key: string, expires: number): string {
  * на адресе Основы в локальной сети.
  */
 export function link(key: string, seconds = 900): string {
-  const expires = Math.floor(Date.now() / 1000) + seconds;
+  const now = Math.floor(Date.now() / 1000);
+  // Срок округляем до десяти минут вперёд: в пределах этого окна ссылка на
+  // один и тот же снимок получается одной и той же, и браузер берёт его из
+  // кэша, а не качает заново при каждом обновлении истории ремонта.
+  // Короткие сроки (проверки, «уже просрочено») не трогаем.
+  const expires = seconds >= 600 ? Math.ceil((now + seconds) / 600) * 600 : now + seconds;
   return `/api/files/${key}?e=${expires}&s=${sign(key, expires)}`;
 }
 

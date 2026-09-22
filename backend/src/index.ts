@@ -13,6 +13,7 @@ import { customersRouter } from "./modules/customers/customers.routes";
 import { dataRouter } from "./modules/data/data.routes";
 import { financeRouter } from "./modules/finance/finance.routes";
 import { ordersRouter } from "./modules/orders/orders.routes";
+import { messagesRouter } from "./modules/orders/messages.routes";
 import { purchasesRouter } from "./modules/purchases/purchases.routes";
 import { stockRouter } from "./modules/stock/stock.routes";
 import { summaryRouter } from "./modules/summary/summary.routes";
@@ -74,6 +75,8 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/public", publicRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/platform", platformRouter);
+// История ремонта — раньше заказов: иначе /:id заказа перехватил бы адрес.
+app.use("/api/orders/:id/messages", messagesRouter);
 app.use("/api/orders", ordersRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/summary", summaryRouter);
