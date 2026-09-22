@@ -83,7 +83,7 @@ class Updater {
   /**
    * @param {object} o
    * @param {object} o.autoUpdater  electron-updater (в проверках — поддельный)
-   * @param {object} o.ui           ask/info/error/progress — окна программы
+   * @param {object} o.ui           ask/info/error/progress/installing/installFailed — окна программы
    * @param {() => Promise<{ok:boolean, error?:string}>} o.beforeInstall
    *        копия базы и остановка сервера; ok:false — не ставить
    * @param {string} o.currentVersion
@@ -209,8 +209,12 @@ class Updater {
   }
 
   async install() {
+    // Окно «устанавливаем обновление» — до копии базы: она сама по себе
+    // занимает время, и всё это время экран не должен молчать.
+    if (this.ui.installing) this.ui.installing(this.readyInfo && this.readyInfo.version);
     const prep = await this.beforeInstall();
     if (!prep.ok) {
+      if (this.ui.installFailed) this.ui.installFailed();
       await this.ui.error(
         "Обновление отложено",
         `${prep.error || "Не удалось подготовиться к обновлению."}\n\nПрограмма продолжит работать на прежней версии.`

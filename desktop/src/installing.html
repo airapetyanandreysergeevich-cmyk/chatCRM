@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Обновление FineCRM</title>
+    <!--
+      Окно на время установки обновления.
+
+      Без него обновление выглядит поломкой: программа исчезает с экрана,
+      минуту ничего не происходит, и человек успевает решить, что всё
+      сломалось, и начать щёлкать по ярлыку. Окно объясняет, что происходит
+      и чего ждать. Оно закрывается вместе с программой — дальше работает
+      установщик, а потом программа запускается сама.
+    -->
+    <style>
+      :root { --bg:#0f1117; --ink:#e7eaf2; --ink-muted:#9096a3; --brand:#2f8fe0; --line:#2c303a; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        background: var(--bg); color: var(--ink); padding: 28px;
+        font: 15px/1.5 "Segoe UI", system-ui, sans-serif; -webkit-user-select: none; cursor: default;
+      }
+      .box { max-width: 420px; text-align: center; }
+      h1 { margin: 0 0 10px; font-size: 19px; }
+      p { margin: 0 0 8px; color: var(--ink-muted); font-size: 13.5px; }
+      .bar { margin: 18px 0 14px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+      .bar i { display: block; height: 100%; width: 38%; border-radius: 99px; background: var(--brand); animation: run 1.4s ease-in-out infinite; }
+      @keyframes run { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+      strong { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1 id="title">Устанавливаем обновление</h1>
+      <div class="bar"><i></i></div>
+      <p>Сначала делается резервная копия базы, потом останавливается сервер, потом ставится новая версия.</p>
+      <p><strong>Это занимает около минуты.</strong> Окно закроется само, и программа запустится заново.</p>
+      <p>Не выключайте компьютер и не запускайте программу заново.</p>
+    </div>
+    <script>
+      // Номер версии подставляется адресом окна: своего кода у страницы нет.
+      const v = new URLSearchParams(location.search).get("v");
+      if (v) document.getElementById("title").textContent = "Устанавливаем версию " + v;
+    </script>
+  </body>
+</html>

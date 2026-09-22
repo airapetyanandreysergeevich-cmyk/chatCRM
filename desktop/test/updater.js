@@ -40,6 +40,8 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
     info: async (title) => (log.push(`info:${title}`), true),
     error: async (title, detail) => (log.push(`error:${title}:${detail}`), true),
     progress: (p) => log.push(`progress:${p}`),
+    installing: (v) => log.push(`installing:${v}`),
+    installFailed: () => log.push("installFailed"),
   };
   const beforeInstall = async () => (log.push("prepare"), prepare);
   const up = new Updater({ autoUpdater: au, ui, beforeInstall, currentVersion: "0.1.0" });
@@ -105,7 +107,7 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
     const r = await up.check({ manual: false });
     check(r.result === "installing", `обновление ставится после двух согласий (${r.result})`);
     const iPrep = log.indexOf("prepare");
-    const iInst = log.findIndex((l) => l.startsWith("install"));
+    const iInst = log.findIndex((l) => l.startsWith("install:"));
     check(iPrep !== -1 && iInst > iPrep, "копия и остановка сервера — строго до установщика");
     check(log.includes("install:true:true"), "установщик молча и с перезапуском программы");
     check(log.includes("progress:0.5") && log.includes("progress:-1"), "прогресс загрузки показан и потом убран");
@@ -124,7 +126,17 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
   {
     const { up, log } = setup({ answers: [true, true], prepare: { ok: false, error: "Нет свежей копии" } });
     const r = await up.check({ manual: false });
-    check(r.result === "prepare-failed" && !log.some((l) => l.startsWith("install")), "без копии и остановки установщик не запускается");
+    check(
+      r.result === "prepare-failed" && !log.some((l) => l.startsWith("install:")),
+      "без копии и остановки установщик не запускается"
+    );
+    // Окно «устанавливаем обновление» открывается до копии базы и убирается,
+    // когда установка не состоялась: иначе оно осталось бы висеть навсегда.
+    check(
+      log.indexOf("installing:0.2.0") >= 0 && log.indexOf("installing:0.2.0") < log.indexOf("prepare"),
+      "окно установки показано до резервной копии"
+    );
+    check(log.includes("installFailed"), "окно установки убрано, когда установка не состоялась");
     check(log.some((l) => l.startsWith("error:Обновление отложено") && l.includes("Нет свежей копии")), "и человек видит почему");
   }
 

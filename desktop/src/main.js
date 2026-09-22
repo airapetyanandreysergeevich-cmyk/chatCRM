@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, ipcMain, shell } = require("electron");
 const fs = require("fs");
 const net = require("net");
 const os = require("os");
@@ -36,6 +36,8 @@ let restartingBackend = false;
 let state = { step: "старт", error: null };
 /** Обновления программы через интернет (см. updater.js). */
 let updater = null;
+/** Окно «устанавливаем обновление» — живёт от начала установки до выхода. */
+let installWin = null;
 
 const userData = () => app.getPath("userData");
 
@@ -527,8 +529,78 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
 
 // ------------------------------------------------------------------- жизнь
 
+/**
+ * Сказать, что обновление состоялось.
+ *
+ * Установка идёт молча и заканчивается тем, что программа просто запускается
+ * заново. Со стороны это ничем не отличается от обычного запуска, и человек
+ * остаётся в сомнении, обновилось оно или нет. Поэтому номер версии
+ * запоминается и при первом запуске новой показывается уведомление.
+ */
+function noticeIfUpdated() {
+  const file = path.join(userData(), "version.json");
+  const now = app.getVersion();
+  let before = null;
+  try {
+    before = JSON.parse(fs.readFileSync(file, "utf8")).version;
+  } catch {
+    // Первый запуск после установки — сравнивать не с чем.
+  }
+  try {
+    if (before !== now) fs.writeFileSync(file, JSON.stringify({ version: now }));
+  } catch {
+    /* не записалось — в следующий раз просто не будет уведомления */
+  }
+  if (!before || before === now) return;
+  notify("FineCRM обновлён", `Установлена версия ${now}. База заказов и настройки на месте.`);
+}
+
+/** Уведомление Windows: в отличие от окна, оно переживает выход программы. */
+function notify(title, body) {
+  try {
+    if (Notification.isSupported()) new Notification({ title, body }).show();
+  } catch {
+    /* уведомления выключены в системе — не беда */
+  }
+}
+
+/**
+ * Окно на время установки обновления.
+ *
+ * Показывается до резервной копии и остаётся до самого выхода: дальше
+ * работает установщик, а от программы уже ничего не зависит. Уведомление
+ * дублирует его текстом, который останется в центре уведомлений Windows,
+ * когда окно исчезнет вместе с программой.
+ */
+function showInstalling(version) {
+  notify("FineCRM обновляется", "Программа закроется примерно на минуту и запустится сама.");
+  if (installWin && !installWin.isDestroyed()) return;
+  installWin = new BrowserWindow({
+    width: 480,
+    height: 300,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    title: "Обновление FineCRM",
+    backgroundColor: "#0F1117",
+    autoHideMenuBar: true,
+  });
+  installWin.setMenu(null);
+  void installWin.loadFile(path.join(__dirname, "installing.html"), {
+    search: `v=${encodeURIComponent(version || app.getVersion())}`,
+  });
+}
+
+/** Установка не состоялась: окно убираем, программа работает дальше. */
+function hideInstalling() {
+  if (installWin && !installWin.isDestroyed()) installWin.close();
+  installWin = null;
+}
+
 app.whenReady().then(async () => {
   createWindow();
+  noticeIfUpdated();
   createTray();
   startUpdater();
   await boot();
@@ -577,6 +649,8 @@ function startUpdater() {
         if (tray) tray.setToolTip(p >= 0 ? `FineCRM — загрузка обновления ${Math.round(p * 100)}%` : "FineCRM");
       },
     },
+    installing: showInstalling,
+    installFailed: hideInstalling,
     beforeInstall: prepareForUpdate,
     // В журнал рядом с настройками: у собранной программы консоли нет.
     log: (line) => {
