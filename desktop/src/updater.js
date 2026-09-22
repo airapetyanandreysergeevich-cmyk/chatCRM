@@ -63,6 +63,16 @@ function stripHtml(s) {
     .slice(0, 1200);
 }
 
+/**
+ * Настоящая причина — строкой под понятным текстом. Без неё «нет связи»
+ * одинаково выглядит и при выключенном интернете, и при чужом сертификате,
+ * и при 404, а разобраться по такому окну нельзя.
+ */
+function reason(err) {
+  const s = String((err && (err.message || err.code)) || err || "").split("\n")[0].trim();
+  return s ? `\n\nПричина: ${s.slice(0, 300)}` : "";
+}
+
 /** Сетевые ошибки при фоновой проверке — не повод тревожить человека. */
 function isOffline(err) {
   const s = String((err && (err.code || err.message)) || err);
@@ -132,9 +142,9 @@ class Updater {
       if (manual) {
         await this.ui.error(
           "Не удалось проверить обновления",
-          isOffline(err)
+          (isOffline(err)
             ? "Нет связи с сервером обновлений. Проверьте интернет и попробуйте позже."
-            : String((err && err.message) || err)
+            : "Сервер обновлений ответил ошибкой.") + reason(err)
         );
       }
       return { result: "error" };
@@ -170,10 +180,11 @@ class Updater {
       await this.au.downloadUpdate();
     } catch (err) {
       this.state = "idle";
+      this.log(`загрузка обновления: ${err && err.message}`);
       this.ui.progress(-1);
       await this.ui.error(
         "Обновление не загрузилось",
-        (isOffline(err) ? "Связь прервалась. " : "") + "Программа продолжит работать как прежде; попробуйте ещё раз позже."
+        (isOffline(err) ? "Связь прервалась. " : "") + "Программа продолжит работать как прежде; попробуйте ещё раз позже." + reason(err)
       );
       return { result: "download-failed" };
     }

@@ -10,8 +10,12 @@ set -a; . deploy/.env; set +a
 
 echo "=== $(date -Is) продление для $DOMAIN ==="
 
+# /webroot — для сертификатов, выпущенных HTTP-проверкой: acme.sh кладёт файл
+# проверки туда, а nginx отдаёт его по /.well-known/acme-challenge/.
+# Для DNS-проверки папка просто не используется.
 docker run --rm \
   -v "$PROJECT_DIR/deploy/acme:/acme.sh" \
+  -v "$PROJECT_DIR/deploy/certbot/www:/webroot" \
   -e TW_Token="${TIMEWEB_API_TOKEN:-}" \
   neilpang/acme.sh --cron
 

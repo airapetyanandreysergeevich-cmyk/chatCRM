@@ -578,7 +578,13 @@ function startUpdater() {
       },
     },
     beforeInstall: prepareForUpdate,
-    log: (line) => console.log(line),
+    // В журнал рядом с настройками: у собранной программы консоли нет.
+    log: (line) => {
+      console.log(line);
+      try {
+        fs.appendFileSync(path.join(app.getPath("userData"), "updater.log"), `${new Date().toISOString()} ${line}\n`);
+      } catch {}
+    },
   });
   updater.start();
   refreshTray();
