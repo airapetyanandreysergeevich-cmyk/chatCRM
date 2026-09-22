@@ -109,7 +109,7 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
     const iPrep = log.indexOf("prepare");
     const iInst = log.findIndex((l) => l.startsWith("install:"));
     check(iPrep !== -1 && iInst > iPrep, "копия и остановка сервера — строго до установщика");
-    check(log.includes("install:true:true"), "установщик молча и с перезапуском программы");
+    check(log.includes("install:false:true"), "установщик виден человеку и сам перезапускает программу");
     check(log.includes("progress:0.5") && log.includes("progress:-1"), "прогресс загрузки показан и потом убран");
   }
 

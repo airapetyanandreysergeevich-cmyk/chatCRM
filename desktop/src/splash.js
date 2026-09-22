@@ -34,8 +34,11 @@ function start(dir, version) {
     fs.writeFileSync(script, "\ufeff" + SPLASH_PS1, "utf8");
     const child = spawn(
       "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script, flagPath(dir)],
-      { detached: true, stdio: "ignore", windowsHide: true }
+      // Ни -WindowStyle Hidden, ни windowsHide: Windows передаёт «спрятать»
+      // первому окну, которое покажет программа, — и прятал заставку вместе
+      // с консолью. Консоль скрывает сам скрипт, уже после запуска.
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, flagPath(dir)],
+      { detached: true, stdio: "ignore", windowsHide: false }
     );
     child.unref();
   } catch {
@@ -55,6 +58,10 @@ function stop(dir) {
 /** Окно заставки: пока есть файл-метка, оно на экране. */
 const SPLASH_PS1 = [
   "param([string]$Marker)",
+  // Чёрное окно консоли за заставкой человеку ни к чему — прячем его сами.
+  "$hide = '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int n);'",
+  "Add-Type -MemberDefinition $hide -Name Win -Namespace Native | Out-Null",
+  "[void][Native.Win]::ShowWindow([Native.Win]::GetConsoleWindow(), 0)",
   "Add-Type -AssemblyName System.Windows.Forms",
   "Add-Type -AssemblyName System.Drawing",
   "$f = New-Object Windows.Forms.Form",
@@ -87,6 +94,8 @@ const SPLASH_PS1 = [
   "$timer.Interval = 1000",
   "$timer.Add_Tick({ if (-not (Test-Path $Marker) -or (Get-Date) -gt $deadline) { $timer.Stop(); $f.Close() } })",
   "$timer.Start()",
+  // Поверх всех окон и в фокусе: заставка должна попасться на глаза сразу.
+  "$f.Add_Shown({ $f.Activate() })",
   // Если обновление всё-таки не пошло — окно можно убрать клавишей Esc,
   // не дожидаясь, пока выйдет его срок.
   "$f.KeyPreview = $true",

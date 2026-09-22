@@ -15,7 +15,6 @@ const { freePort } = require("./postgres");
 const { Backups } = require("./backup");
 const network = require("./network");
 const { Updater } = require("./updater");
-const splash = require("./splash");
 
 /**
  * Оболочка локальной версии.
@@ -593,10 +592,6 @@ function showInstalling(version) {
   });
 }
 
-/** Заставка на время работы установщика — см. splash.js. */
-const startInstallSplash = (version) => splash.start(userData(), version);
-const stopInstallSplash = () => splash.stop(userData());
-
 /** Установка не состоялась: окно убираем, программа работает дальше. */
 function hideInstalling() {
   if (installWin && !installWin.isDestroyed()) installWin.close();
@@ -605,7 +600,6 @@ function hideInstalling() {
 
 app.whenReady().then(async () => {
   createWindow();
-  stopInstallSplash();
   noticeIfUpdated();
   createTray();
   startUpdater();
@@ -718,10 +712,6 @@ async function prepareForUpdate() {
     return { ok: false, error: err.message };
   }
 
-  // Последнее, что делает старая версия: оставляет на экране заставку. Дальше
-  // работает установщик, и до запуска новой версии показывать что-либо
-  // программе уже нечем.
-  startInstallSplash(app.getVersion());
   return { ok: true };
 }
 
