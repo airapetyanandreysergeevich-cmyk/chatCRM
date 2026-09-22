@@ -21,12 +21,12 @@ export interface Invite {
   key: string;
   /** Код в адресе: https://www.finecrm.ru/b/<code>/ */
   code: string;
-  /** Название — только чтобы показать человеку, к чему он подключается. */
-  name?: string;
+  /** Почта, на которую выдан доступ: видно, кому принадлежит фраза. */
+  email?: string;
 }
 
 export function encodeInvite(invite: Invite): string {
-  const payload = JSON.stringify({ v: 1, u: invite.url, k: invite.key, c: invite.code, n: invite.name });
+  const payload = JSON.stringify({ v: 1, u: invite.url, k: invite.key, c: invite.code, e: invite.email });
   return INVITE_PREFIX + Buffer.from(payload, "utf8").toString("base64url");
 }
 
@@ -51,10 +51,11 @@ export function parseInvite(raw: string, defaultUrl: string): Invite | null {
 
   try {
     const json = Buffer.from(found[0].slice(INVITE_PREFIX.length), "base64url").toString("utf8");
-    const data = JSON.parse(json) as { u?: string; k?: string; c?: string; n?: string };
+    const data = JSON.parse(json) as { u?: string; k?: string; c?: string; e?: string; n?: string };
     if (!data.k || !/^[\x21-\x7e]+$/.test(data.k)) return null;
     const url = typeof data.u === "string" && /^wss?:\/\//.test(data.u) ? data.u : defaultUrl;
-    return { url, key: data.k, code: typeof data.c === "string" ? data.c : "", name: data.n };
+    // n — от прежних фраз, где вместо почты стояло название мастерской.
+    return { url, key: data.k, code: typeof data.c === "string" ? data.c : "", email: data.e ?? data.n };
   } catch {
     return null;
   }

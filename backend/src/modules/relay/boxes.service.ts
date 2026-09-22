@@ -22,6 +22,33 @@ export function newKey(): string {
   return crypto.randomBytes(24).toString("base64url");
 }
 
+/**
+ * Код в адресе — из почты владельца.
+ *
+ * Доступ выдан человеку, а не безымянной коробке, поэтому и адрес делается из
+ * его почты: `masterskaya@example.ru` → `/b/masterskaya/`. Часть после
+ * собачки отбрасывается — она одинаковая у половины мастерских и в адресе
+ * только мешает.
+ *
+ * Если такой код уже занят (два `info@…` у разных людей — обычное дело),
+ * дописываем номер: `info-2`, `info-3`. Молча отдать второму человеку чужой
+ * адрес нельзя, а придумывать ему псевдоним не за что.
+ */
+export function codeFromEmail(email: string): string {
+  const local = email.trim().toLowerCase().split("@")[0] ?? "";
+  const code = normalizeCode(local.replace(/\+.*$/, ""));
+  return code.length >= 3 ? code.slice(0, 32) : "";
+}
+
+/** Свободный код: занят — дописываем номер, пока не найдём свободный. */
+export async function freeCode(base: string): Promise<string> {
+  for (let i = 1; i < 100; i += 1) {
+    const code = i === 1 ? base : `${base}-${i}`;
+    if (!(await prisma.box.findUnique({ where: { code }, select: { id: true } }))) return code;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
+
 /** Код в адресе: только то, что человек наберёт руками и не ошибётся. */
 export function normalizeCode(raw: string): string {
   return raw

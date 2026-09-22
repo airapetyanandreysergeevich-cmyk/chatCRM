@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { encodeInvite, publicAddress } from "./invite";
-import { fingerprint, newKey, normalizeCode } from "./boxes.service";
+import { codeFromEmail, fingerprint, freeCode, newKey, normalizeCode } from "./boxes.service";
 import { relayHub } from "./relay.instance";
 
 /**
@@ -34,7 +34,12 @@ function relayUrlFor(req: { headers: Record<string, unknown>; get(name: string):
 }
 
 const boxSchema = z.object({
-  name: z.string().trim().min(2, "Укажите название мастерской"),
+  /**
+   * Почта того, кто запросил доступ. Обязательна: по ней делается адрес, по
+   * ней видно, кому выдан ключ, и на неё по просьбе высылается фраза заново.
+   */
+  email: z.string().trim().toLowerCase().email("Похоже, это не email"),
+  /** Код в адресе — обычно из почты, но можно задать свой. */
   code: z.string().trim().min(3, "Код от 3 знаков").max(40).optional(),
   note: z.string().trim().max(500).optional(),
 });
@@ -43,7 +48,7 @@ const view = (
   box: {
     id: string;
     code: string;
-    name: string;
+    email: string;
     keyHint: string;
     note: string | null;
     isActive: boolean;
@@ -64,7 +69,7 @@ boxesRouter.get(
           {
             id: b.id,
             code: b.code,
-            name: b.name,
+            email: b.email,
             keyHint: b.keyHint,
             note: b.note,
             isActive: b.isActive,
@@ -82,15 +87,22 @@ boxesRouter.post(
   "/",
   ah(async (req, res) => {
     const body = boxSchema.parse(req.body);
-    const code = normalizeCode(body.code || body.name);
-    if (code.length < 3) throw badRequest("Из названия не вышло кода — задайте его сами, латиницей");
-    if (await prisma.box.findUnique({ where: { code } })) throw conflict("Такой код уже занят");
+
+    // Код задали руками — берём его как есть; нет — делаем из почты и, если
+    // занят, дописываем номер.
+    const asked = body.code ? normalizeCode(body.code) : "";
+    if (body.code && asked.length < 3) throw badRequest("Код должен быть из латинских букв и цифр");
+    if (asked && (await prisma.box.findUnique({ where: { code: asked } })))
+      throw conflict("Такой код уже занят");
+    const base = asked || codeFromEmail(body.email);
+    if (!base) throw badRequest("Из почты не вышло кода — задайте его сами, латиницей");
+    const code = asked || (await freeCode(base));
 
     const key = newKey();
     const box = await prisma.box.create({
       data: {
         code,
-        name: body.name,
+        email: body.email,
         note: body.note || null,
         keyHash: fingerprint(key),
         keyHint: key.slice(-4),
@@ -101,7 +113,8 @@ boxesRouter.post(
     res.status(201).json({
       id: box.id,
       code: box.code,
-      phrase: encodeInvite({ url, key, code: box.code, name: box.name }),
+      email: box.email,
+      phrase: encodeInvite({ url, key, code: box.code, email: box.email }),
       address: publicAddress(url, box.code),
     });
   })
@@ -122,7 +135,8 @@ boxesRouter.post(
     const url = relayUrlFor(req);
     res.json({
       code: box.code,
-      phrase: encodeInvite({ url, key, code: box.code, name: box.name }),
+      email: box.email,
+      phrase: encodeInvite({ url, key, code: box.code, email: box.email }),
       address: publicAddress(url, box.code),
     });
   })
@@ -142,7 +156,7 @@ boxesRouter.patch(
     const next = await prisma.box.update({
       where: { id: box.id },
       data: {
-        ...(body.name ? { name: body.name } : {}),
+        ...(body.email ? { email: body.email } : {}),
         ...(code ? { code } : {}),
         ...(body.note !== undefined ? { note: body.note || null } : {}),
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),

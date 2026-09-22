@@ -33,7 +33,8 @@ import { formatDateTime } from "../../lib/format";
 interface Box {
   id: string;
   code: string;
-  name: string;
+  /** Почта того, кто запросил доступ: она же имя мастерской в списке. */
+  email: string;
   keyHint: string;
   note: string | null;
   isActive: boolean;
@@ -48,7 +49,7 @@ export default function Boxes() {
   const [rows, setRows] = useState<Box[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [issued, setIssued] = useState<{ code: string; phrase: string; address: string } | null>(null);
+  const [issued, setIssued] = useState<{ code: string; email: string; phrase: string; address: string } | null>(null);
   const [confirmKey, setConfirmKey] = useState<Box | null>(null);
 
   const load = useCallback(async () => {
@@ -73,7 +74,7 @@ export default function Boxes() {
   }
 
   async function reissue(box: Box) {
-    const next = await api.post<{ code: string; phrase: string; address: string }>(
+    const next = await api.post<{ code: string; email: string; phrase: string; address: string }>(
       `/platform/boxes/${box.id}/key`,
       {}
     );
@@ -101,8 +102,8 @@ export default function Boxes() {
       {rows.length === 0 ? (
         <EmptyState title="Пока никому не открыт">
           Мастерская с коробочной версией работает у себя по локальной сети. Чтобы сотрудники могли
-          заходить и снаружи, выдайте ей фразу подключения — её вставляют в программе, в разделе
-          «Настройки → Доступ из интернета».
+          заходить и снаружи, выдайте доступ на почту владельца — он получит фразу подключения и
+          вставит её в программе, в разделе «Настройки → Доступ из интернета».
         </EmptyState>
       ) : (
         <List>
@@ -117,7 +118,7 @@ export default function Boxes() {
               }
               title={
                 <>
-                  <span className={b.isActive ? "truncate" : "truncate text-ink-muted line-through"}>{b.name}</span>
+                  <span className={b.isActive ? "truncate" : "truncate text-ink-muted line-through"}>{b.email}</span>
                   {b.online && <Badge tone="brand">на связи</Badge>}
                   {!b.isActive && <Badge tone="danger">выключен</Badge>}
                 </>
@@ -177,7 +178,7 @@ export default function Boxes() {
       )}
 
       {confirmKey && (
-        <Modal title={`Новая фраза для «${confirmKey.name}»`} onClose={() => setConfirmKey(null)}>
+        <Modal title={`Новая фраза для ${confirmKey.email}`} onClose={() => setConfirmKey(null)}>
           <div className="space-y-4">
             <Banner tone="warning">
               Прежняя фраза перестанет работать сразу, и мастерская отключится. Новую придётся вставить
@@ -205,9 +206,9 @@ function NewBoxModal({
   onDone,
 }: {
   onClose: () => void;
-  onDone: (b: { code: string; phrase: string; address: string }) => void;
+  onDone: (b: { code: string; email: string; phrase: string; address: string }) => void;
 }) {
-  const [form, setForm] = useState({ name: "", code: "", note: "" });
+  const [form, setForm] = useState({ email: "", code: "", note: "" });
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
@@ -218,7 +219,10 @@ function NewBoxModal({
     setBusy(true);
     setError(null);
     try {
-      const box = await api.post<{ code: string; phrase: string; address: string }>("/platform/boxes", form);
+      const box = await api.post<{ code: string; email: string; phrase: string; address: string }>(
+        "/platform/boxes",
+        form
+      );
       onDone(box);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
@@ -231,13 +235,28 @@ function NewBoxModal({
     <Modal title="Доступ из интернета" onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         {error && <Banner tone="error">{error.message}</Banner>}
-        <Field label="Мастерская" error={error?.field("name")} hint="Как называть её в этом списке">
-          <Input value={form.name} onChange={set("name")} invalid={!!error?.field("name")} />
+        <Field
+          label="Email владельца"
+          error={error?.field("email")}
+          hint="Доступ выдаётся на этот адрес: по нему делается адрес мастерской и видно, кому выдан ключ"
+        >
+          <Input
+            type="email"
+            value={form.email}
+            onChange={set("email")}
+            autoCapitalize="none"
+            invalid={!!error?.field("email")}
+            placeholder="master@servis.ru"
+          />
         </Field>
         <Field
           label="Код в адресе"
           error={error?.field("code")}
-          hint="Латиницей: он станет частью адреса. Пусто — сделаем из названия."
+          hint={
+            form.email.includes("@")
+              ? `Пусто — будет /b/${form.email.split("@")[0].toLowerCase().replace(/[^a-z0-9-]+/g, "-")}/`
+              : "Пусто — сделаем из почты. Можно задать свой, латиницей."
+          }
         >
           <Input value={form.code} onChange={set("code")} autoCapitalize="none" placeholder="servis-na-lenina" />
         </Field>
@@ -268,7 +287,7 @@ function PhraseModal({
   issued,
   onClose,
 }: {
-  issued: { code: string; phrase: string; address: string };
+  issued: { code: string; email: string; phrase: string; address: string };
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -291,6 +310,10 @@ function PhraseModal({
           Фраза показывается один раз: у нас хранится только отпечаток ключа. Передайте её мастерской —
           там её вставляют в «Настройки → Доступ из интернета» и нажимают «Подключить».
         </Banner>
+
+        <p className="text-[13.5px] text-ink-muted">
+          Доступ выдан на почту <span className="font-semibold text-ink">{issued.email}</span>.
+        </p>
 
         <div>
           <span className="text-[13px] font-semibold text-ink-soft">Фраза подключения</span>

@@ -139,9 +139,12 @@ model Impersonation {
  */
 model Box {
   id   String @id @default(uuid())
-  /// Код в адресе: https://www.finecrm.ru/b/<code>
+  /// Код в адресе: https://www.finecrm.ru/b/<code>. Делается из почты владельца.
   code String @unique
-  name String
+
+  /// Почта того, кто запросил доступ. Она же имя мастерской в списке: по ней
+  /// доступ и выдан, на неё же по просьбе высылается фраза подключения.
+  email String
 
   /// Отпечаток ключа. Самого ключа у нас нет — как и пароля сотрудника.
   keyHash String
@@ -157,6 +160,7 @@ model Box {
   updatedAt  DateTime  @updatedAt
 
   @@index([keyHash])
+  @@index([email])
 }
 
 model PlatformSetting {

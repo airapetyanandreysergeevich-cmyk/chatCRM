@@ -4,6 +4,7 @@ import http from "http";
 import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
 import { encodeInvite, parseInvite, publicAddress } from "../src/modules/relay/invite";
+import { codeFromEmail } from "../src/modules/relay/boxes.service";
 
 /**
  * Туннель целиком: запрос из интернета → узел связи → Основа → и обратно.
@@ -144,9 +145,14 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
 
   // Фраза подключения: то, что собственник передаёт мастерской одной строкой.
   const DEFAULT_URL = "wss://www.finecrm.ru/relay/agent";
-  const phrase = encodeInvite({ url: DEFAULT_URL, key: KEY, code: CODE, name: "Сервис на Ленина" });
+  const phrase = encodeInvite({ url: DEFAULT_URL, key: KEY, code: CODE, email: "master@servis.ru" });
   const parsed = parseInvite(phrase, "wss://другой/relay/agent");
-  check(parsed?.key === KEY && parsed?.code === CODE && parsed?.url === DEFAULT_URL, "фраза разбирается обратно целиком");
+  check(
+    parsed?.key === KEY && parsed?.code === CODE && parsed?.url === DEFAULT_URL && parsed?.email === "master@servis.ru",
+    "фраза разбирается обратно целиком, вместе с почтой"
+  );
+  check(codeFromEmail("Masterskaya.Servis+crm@example.ru") === "masterskaya-servis", "код в адресе делается из почты");
+  check(codeFromEmail("ы@example.ru") === "", "из почты без латиницы код не выдумывается");
   check(
     parseInvite(`  Держите:\n${phrase}\n\nвопросы — пишите  `, DEFAULT_URL)?.key === KEY,
     "фраза вынимается из письма с лишним текстом"

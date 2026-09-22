@@ -273,6 +273,7 @@ settingsRouter.get(
       connected: Boolean(saved?.key),
       keyHint: saved?.key ? saved.key.slice(-4) : "",
       code: saved?.code ?? "",
+      email: saved?.email ?? "",
       address: publicAddress(url, saved?.code ?? ""),
       state: agent.state,
       detail: agent.detail ?? null,
@@ -295,9 +296,10 @@ settingsRouter.put(
     const key = invite?.key ?? saved?.key ?? "";
     const url = invite?.url ?? saved?.url ?? defaultRelayUrl();
     const code = invite?.code || saved?.code || "";
+    const email = invite?.email || saved?.email || "";
     if (body.enabled && !key) throw badRequest("Вставьте фразу подключения — её выдаёт поставщик программы");
 
-    await saveRemoteAccess({ enabled: body.enabled, url, key, code });
+    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email });
     const agent = applyRemoteAccess(body.enabled ? { url, key } : null);
 
     await withTenant(tenantOf(req), (tx) =>
@@ -318,6 +320,7 @@ settingsRouter.put(
       connected: Boolean(key),
       keyHint: key.slice(-4),
       code,
+      email,
       address: publicAddress(url, code),
       state: agent.state,
     });

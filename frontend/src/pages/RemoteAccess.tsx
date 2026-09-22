@@ -32,6 +32,8 @@ interface State {
   connected: boolean;
   keyHint: string;
   code: string;
+  /** Почта, на которую поставщик выдал доступ. */
+  email: string;
   address: string;
   state: "off" | "connecting" | "online" | "error";
   detail: string | null;
@@ -120,6 +122,7 @@ export default function RemoteAccess() {
         {data.connected && (
           <p className="mt-2 text-[13px] text-ink-dim">
             Фраза подключена, ключ …{data.keyHint}
+            {data.email && ` · выдана на ${data.email}`}
           </p>
         )}
 
