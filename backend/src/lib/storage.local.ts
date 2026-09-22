@@ -1,7 +1,9 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { env } from "./env";
+import { link, validKey } from "./storage.sign";
 
 /**
  * Хранилище файлов на диске — для локальной версии, где нет ни S3, ни MinIO.
@@ -16,8 +18,6 @@ import { env } from "./env";
  * клиент с гостевым вайфаем.
  */
 
-const KEY_RE = /^[0-9a-zA-Z._-]+(?:\/[0-9a-zA-Z._-]+)*$/;
-
 /** Корень хранилища. Абсолютный путь из настроек — рядом с базой мастерской. */
 const root = () => path.resolve(env.storageDir);
 
@@ -30,8 +30,7 @@ const root = () => path.resolve(env.storageDir);
  * проще, чем двух.
  */
 export function resolveKey(key: string): string | null {
-  if (!key || key.length > 300 || !KEY_RE.test(key)) return null;
-  if (key.split("/").some((part) => part === "." || part === "..")) return null;
+  if (!validKey(key)) return null;
 
   const full = path.resolve(root(), key);
   const base = root() + path.sep;
@@ -63,34 +62,22 @@ export async function remove(key: string): Promise<void> {
   await rm(full, { force: true });
 }
 
-// ------------------------------------------------------------------- подпись
+// ------------------------------------------------------------------- чтение
 
-/**
- * Подпись ссылки.
- *
- * Берём тот же секрет, что у токенов доступа: отдельный ключ здесь ничего не
- * добавил бы — кто добрался до одного, добрался и до второго, они лежат в
- * одном файле настроек.
- */
-function sign(key: string, expires: number): string {
-  return createHmac("sha256", env.jwtAccessSecret).update(`${key}:${expires}`).digest("hex");
+/** Открыть файл для отдачи. null — нет такого. */
+export async function open(key: string): Promise<{ body: NodeJS.ReadableStream; size: number } | null> {
+  const full = resolveKey(key);
+  if (!full) return null;
+  try {
+    const st = await stat(full);
+    if (!st.isFile()) return null;
+    return { body: createReadStream(full), size: st.size };
+  } catch {
+    return null;
+  }
 }
 
-/** Ссылка живёт 15 минут: хватает открыть, мало чтобы разойтись по чужим рукам. */
+/** Подписанная ссылка — общая с облаком, см. storage.sign.ts. */
 export async function url(key: string, seconds = 900): Promise<string> {
-  const expires = Math.floor(Date.now() / 1000) + seconds;
-  const sig = sign(key, expires);
-  // Относительный адрес: программа живёт то на localhost, то на адресе
-  // Основы в локальной сети, и вписывать туда имя хоста неоткуда.
-  return `/api/files/${key}?e=${expires}&s=${sig}`;
-}
-
-/** Проверка подписи. Сравнение постоянного времени — чтобы подпись не подбиралась побайтно. */
-export function verify(key: string, expires: number, sig: string): boolean {
-  if (!Number.isFinite(expires) || expires < Math.floor(Date.now() / 1000)) return false;
-
-  const expected = Buffer.from(sign(key, expires), "utf8");
-  const given = Buffer.from(String(sig), "utf8");
-  if (expected.length !== given.length) return false;
-  return timingSafeEqual(expected, given);
+  return link(key, seconds);
 }

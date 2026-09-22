@@ -27,7 +27,7 @@ import { plateRouter } from "./modules/plate/plate.routes";
 import { servicesRouter } from "./modules/services/services.routes";
 import { settingsRouter } from "./modules/settings/settings.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
-import { ensureBucket, isLocalStorage } from "./lib/storage";
+import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
 
@@ -83,7 +83,9 @@ app.use("/api/finance", financeRouter);
 app.use("/api/reference", referenceRouter);
 // Только в локальной версии: в облаке файлы отдаёт S3, и открытого
 // маршрута к ним быть не должно.
-if (isLocalStorage) app.use("/api/files", filesRouter);
+// Файлы по подписанным ссылкам — и в облаке, и в локальной версии: браузер
+// получает их от нас, а не от хранилища напрямую.
+app.use("/api/files", filesRouter);
 app.use("/api/feedback", feedbackRouter);
 app.use("/api/hints", hintsRouter);
 app.use("/api/quick-picks", quickPicksRouter);

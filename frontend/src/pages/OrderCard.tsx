@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { IconPlus } from "../components/icons";
+import { IconCamera, IconPlus } from "../components/icons";
+import { PhotoShooter } from "../components/PhotoShooter";
+import { PhotoViewer } from "../components/PhotoViewer";
 import {
   Banner,
   Button,
@@ -33,7 +35,17 @@ import { IssueDialog } from "../components/IssueDialog";
 import { PAYMENT_LABEL } from "../lib/debt";
 
 /** Ссылка на файл подписанная и живёт недолго, поэтому запрашиваем её при показе. */
-function Photo({ orderId, attachmentId, name }: { orderId: string; attachmentId: string; name: string }) {
+function Photo({
+  orderId,
+  attachmentId,
+  name,
+  onOpen,
+}: {
+  orderId: string;
+  attachmentId: string;
+  name: string;
+  onOpen: () => void;
+}) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -47,19 +59,18 @@ function Photo({ orderId, attachmentId, name }: { orderId: string; attachmentId:
   }, [orderId, attachmentId]);
 
   return (
-    <a
-      href={url ?? undefined}
-      target="_blank"
-      rel="noreferrer"
+    <button
+      type="button"
+      onClick={onOpen}
       title={name}
       className="block h-[92px] w-[92px] overflow-hidden rounded-card border border-line bg-surface-input transition-all duration-150 hover:border-line-strong"
     >
       {url ? (
-        <img src={url} alt={name} className="h-full w-full object-cover" />
+        <img src={url} alt={name} loading="lazy" className="h-full w-full object-cover" />
       ) : (
         <span className="flex h-full items-center justify-center text-[11px] text-ink-dim">…</span>
       )}
-    </a>
+    </button>
   );
 }
 
@@ -313,7 +324,9 @@ export default function OrderCard() {
   const [issuing, setIssuing] = useState(false);
   /** null — блок удаления свёрнут, строка — набранная причина. */
   const [deleteReason, setDeleteReason] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const [shooting, setShooting] = useState(false);
+  /** Какой снимок открыт в просмотре: номер в общем списке. */
+  const [viewing, setViewing] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -363,6 +376,8 @@ export default function OrderCard() {
   const seesMoney = order.total !== undefined;
   const intake = order.attachments.filter((a) => a.kind === "INTAKE");
   const completion = order.attachments.filter((a) => a.kind === "COMPLETION");
+  /** Все снимки подряд — для листания: сначала при приёме, потом после ремонта. */
+  const photos = [...intake, ...completion];
 
   return (
     <div className="space-y-5">
@@ -530,26 +545,15 @@ export default function OrderCard() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <SectionLabel>Фотографии</SectionLabel>
               {canEditWork && (
-                <>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    hidden
-                    onChange={(e) => {
-                      const files = e.target.files;
-                      if (files?.length) {
-                        const kind = order.completedAt ? "COMPLETION" : "INTAKE";
-                        void run(() => ordersApi.upload(order.id, files, kind), "Фотографии загружены");
-                      }
-                      e.target.value = "";
-                    }}
-                  />
-                  <Button type="button" variant="secondary" className="px-4 text-[13px]" onClick={() => fileInput.current?.click()}>
-                    Добавить фото
-                  </Button>
-                </>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  icon={<IconCamera />}
+                  className="px-4 text-[13px]"
+                  onClick={() => setShooting(true)}
+                >
+                  Добавить фото
+                </Button>
               )}
             </div>
 
@@ -560,8 +564,8 @@ export default function OrderCard() {
                   <p className="text-[13.5px] text-ink-dim">Фотографий нет</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {intake.map((a) => (
-                      <Photo key={a.id} orderId={order.id} attachmentId={a.id} name={a.fileName} />
+                    {intake.map((a, i) => (
+                      <Photo key={a.id} orderId={order.id} attachmentId={a.id} name={a.fileName} onOpen={() => setViewing(i)} />
                     ))}
                   </div>
                 )}
@@ -570,8 +574,14 @@ export default function OrderCard() {
                 <div>
                   <p className="mb-2 text-[13px] font-semibold text-ink-muted">После ремонта</p>
                   <div className="flex flex-wrap gap-2">
-                    {completion.map((a) => (
-                      <Photo key={a.id} orderId={order.id} attachmentId={a.id} name={a.fileName} />
+                    {completion.map((a, i) => (
+                      <Photo
+                        key={a.id}
+                        orderId={order.id}
+                        attachmentId={a.id}
+                        name={a.fileName}
+                        onOpen={() => setViewing(intake.length + i)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -866,6 +876,33 @@ export default function OrderCard() {
             </div>
           )}
         </Card>
+      )}
+
+      {shooting && (
+        <PhotoShooter
+          orderId={order.id}
+          defaultKind={order.completedAt ? "COMPLETION" : "INTAKE"}
+          onClose={() => setShooting(false)}
+          onDone={(count) => {
+            setShooting(false);
+            void run(async () => undefined, count === 1 ? "Снимок загружен" : `Загружено снимков: ${count}`);
+          }}
+        />
+      )}
+
+      {viewing !== null && photos.length > 0 && (
+        <PhotoViewer
+          orderId={order.id}
+          photos={photos}
+          start={Math.min(viewing, photos.length - 1)}
+          canDelete={canEditWork}
+          onClose={() => setViewing(null)}
+          onDeleted={() => {
+            // Последний снимок удалён — смотреть больше нечего.
+            if (photos.length <= 1) setViewing(null);
+            void run(async () => undefined, "Снимок удалён");
+          }}
+        />
       )}
     </div>
   );

@@ -21,10 +21,13 @@ export function Modal({
   title,
   onClose,
   children,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** Широкое окно — для фотографий. */
+  wide?: boolean;
 }) {
   return (
     // Подложка закрывает и нижнее меню (переход по нему потерял бы набранное
@@ -35,7 +38,10 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-[calc(100dvh-var(--bottom-nav,0px)-24px)] w-full overflow-y-auto rounded-t-[20px] border border-line bg-surface p-5 shadow-modal sm:max-w-[520px] sm:rounded-panel sm:p-7"
+        className={
+          "max-h-[calc(100dvh-var(--bottom-nav,0px)-24px)] w-full overflow-y-auto rounded-t-[20px] border border-line bg-surface p-5 shadow-modal sm:rounded-panel sm:p-7 " +
+          (wide ? "sm:max-w-[900px]" : "sm:max-w-[520px]")
+        }
       >
         <div className="mx-auto mb-4 h-[4px] w-10 rounded-full bg-line-strong sm:hidden" />
         <div className="mb-4 flex items-start justify-between gap-3">

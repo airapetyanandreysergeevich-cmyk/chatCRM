@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
+import { originalName } from "../../lib/uploadName";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
@@ -39,25 +40,6 @@ dataRouter.use(
 
 const tenantOf = (req: Request) => currentTenantId(req)!;
 
-/**
- * Имя приложенного файла по-человечески.
- *
- * В многочастной форме имя едет байтами в utf-8, а разбор формы отдаёт его
- * побайтово как latin1 — и «Заказы-2026-09-18.csv» превращается в
- * «Ð—Ð°ÐºÐ°Ð·Ñ‹-2026-09-18.csv». Сам файл при этом цел, испорчено только имя,
- * но человек видит на экране кракозябры и справедливо решает, что программа
- * не поняла его файл.
- *
- * Чиним только то, что действительно приехало побайтово: в такой строке нет
- * ни одного символа выше 0xFF, потому что каждый байт стал отдельным
- * символом. Имя, дошедшее целым, содержит кириллицу настоящими буквами — та
- * же починка превратила бы его в мусор, и это было бы хуже исходной беды.
- */
-function originalName(raw: string): string {
-  if (/[^\u0000-\u00ff]/.test(raw)) return raw;
-  const fixed = Buffer.from(raw, "latin1").toString("utf8");
-  return fixed.includes("\ufffd") ? raw : fixed;
-}
 
 const upload = multer({
   storage: multer.memoryStorage(),

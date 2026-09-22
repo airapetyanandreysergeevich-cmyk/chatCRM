@@ -1,3 +1,4 @@
+import { chunks } from "./photos";
 import { api, type Page } from "./api";
 import type { PaymentMethod } from "./debt";
 import type { Service } from "./services";
@@ -234,12 +235,31 @@ export const ordersApi = {
     }),
   /** Мягкое удаление: заказ уходит из списков, но остаётся в базе и в журнале. */
   remove: (id: string, reason: string) => api.del(`/orders/${id}?reason=${encodeURIComponent(reason)}`),
-  upload: (orderId: string, files: FileList | File[], kind: "INTAKE" | "COMPLETION") => {
-    const form = new FormData();
-    form.append("kind", kind);
-    for (const f of Array.from(files)) form.append("files", f);
-    return api.upload<Array<{ id: string }>>(`/orders/${orderId}/attachments`, form);
+  /**
+   * Загрузить снимки пачками по десять: один огромный запрос с двадцатью
+   * фотографиями по мобильному интернету легко обрывается целиком, а так
+   * пропадёт в худшем случае последняя пачка — и прогресс видно.
+   */
+  upload: async (
+    orderId: string,
+    files: FileList | File[],
+    kind: "INTAKE" | "COMPLETION",
+    onProgress?: (done: number, total: number) => void
+  ) => {
+    const all = Array.from(files);
+    const saved: Array<{ id: string }> = [];
+    onProgress?.(0, all.length);
+    for (const part of chunks(all)) {
+      const form = new FormData();
+      form.append("kind", kind);
+      for (const f of part) form.append("files", f, f.name);
+      saved.push(...(await api.upload<Array<{ id: string }>>(`/orders/${orderId}/attachments`, form)));
+      onProgress?.(saved.length, all.length);
+    }
+    return saved;
   },
+  removeAttachment: (orderId: string, attachmentId: string) =>
+    api.del(`/orders/${orderId}/attachments/${attachmentId}`),
   attachmentUrl: (orderId: string, attachmentId: string) =>
     api.get<{ url: string }>(`/orders/${orderId}/attachments/${attachmentId}/url`),
   /**

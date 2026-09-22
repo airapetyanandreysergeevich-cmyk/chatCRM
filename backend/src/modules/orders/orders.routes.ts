@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import multer from "multer";
+import { originalName } from "../../lib/uploadName";
 import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
@@ -70,7 +71,9 @@ function notifyLimit(
 /** Фото приходят с телефона мастера, поэтому держим их в памяти и сразу кладём в хранилище. */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: env.maxFileSizeMb * 1024 * 1024, files: 10 },
+  // Двадцать за раз: серия снимков при приёме — обычное дело, а браузер
+  // всё равно шлёт их пачками по десять (см. ordersApi.upload).
+  limits: { fileSize: env.maxFileSizeMb * 1024 * 1024, files: 20 },
 });
 
 // ---------------------------------------------------------------- список
@@ -821,7 +824,7 @@ ordersRouter.post(
 
 ordersRouter.post(
   "/:id/attachments",
-  upload.array("files", 10),
+  upload.array("files", 20),
   ah(async (req, res) => {
     const kind = z
       .enum(["INTAKE", "COMPLETION", "DOCUMENT", "OTHER"])
@@ -860,7 +863,8 @@ ordersRouter.post(
             orderId,
             kind,
             objectKey: key,
-            fileName: file.originalname.slice(0, 200),
+            // Имя — по-русски, а не «Ð¤Ð¾Ñ‚Ð¾.jpg» (см. lib/uploadName).
+            fileName: originalName(file.originalname).slice(0, 200),
             mimeType: file.mimetype,
             sizeBytes: file.size,
             uploadedById: actorUserId(req),

@@ -55,6 +55,7 @@ export const signedUrl = (key: string, seconds = 900): Promise<string> =>
 
 export const removeFile = (key: string): Promise<void> => driver.remove(key);
 
-// Локальной раздаче нужны разбор ключа и проверка подписи; в облаке этим
-// занимается сам S3, и наружу они не нужны.
-export const localFile = { resolveKey: local.resolveKey, verify: local.verify };
+/** Файл для раздачи по подписанной ссылке — из папки или из бакета. */
+export const openFile = (key: string) => driver.open(key);
+
+export { verify as verifyLink } from "./storage.sign";

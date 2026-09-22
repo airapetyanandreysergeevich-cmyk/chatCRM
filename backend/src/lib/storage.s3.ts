@@ -7,8 +7,8 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "./env";
+import { link, validKey } from "./storage.sign";
 
 /**
  * Хранилище файлов в S3 (у нас — MinIO) для облачной версии.
@@ -53,11 +53,25 @@ export async function put(params: {
   return key;
 }
 
-/** Ссылка живёт 15 минут: хватает открыть, мало чтобы разойтись по чужим рукам. */
-export function url(key: string, seconds = 900): Promise<string> {
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: env.s3Bucket, Key: key }), {
-    expiresIn: seconds,
-  });
+/**
+ * Ссылка — на наш сервер, а не на MinIO: адрес MinIO внутренний, браузеру он
+ * неизвестен (см. storage.sign.ts). Подписанные ссылки самого S3 больше не
+ * выдаём.
+ */
+export async function url(key: string, seconds = 900): Promise<string> {
+  return link(key, seconds);
+}
+
+/** Открыть файл для отдачи через наш сервер. null — нет такого. */
+export async function open(key: string): Promise<{ body: NodeJS.ReadableStream; size?: number } | null> {
+  if (!validKey(key)) return null;
+  try {
+    const out = await s3.send(new GetObjectCommand({ Bucket: env.s3Bucket, Key: key }));
+    if (!out.Body) return null;
+    return { body: out.Body as NodeJS.ReadableStream, size: out.ContentLength };
+  } catch {
+    return null;
+  }
 }
 
 export async function remove(key: string): Promise<void> {

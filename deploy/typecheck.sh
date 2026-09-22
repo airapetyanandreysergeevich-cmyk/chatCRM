@@ -112,6 +112,20 @@ docker run --rm -v "$(pwd):/repo" -w /repo/frontend node:20-alpine sh -c "
   npx tsx test/ocr-engine.ts
 "
 
+# Фотографии в облаке отдаёт наш сервер: ссылки прямо на MinIO вели по
+# внутреннему адресу, и снимков не было видно.
+echo ">>> Раздача фотографий из облачного хранилища"
+docker run --rm -v "$(pwd)/backend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/storage-s3.ts
+"
+
+echo ">>> Сжатие и пачки фотографий"
+docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/photos.ts
+"
+
 echo ">>> Подстановка шильдика в бланк"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL
