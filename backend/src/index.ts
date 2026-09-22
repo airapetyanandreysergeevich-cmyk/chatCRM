@@ -44,7 +44,24 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
-app.use(pinoHttp({ level: env.nodeEnv === "production" ? "info" : "debug" }));
+app.use(
+  pinoHttp({
+    level: env.nodeEnv === "production" ? "info" : "debug",
+    // Журнал читают при разборе сбоев и пересылают друг другу — токены и
+    // куки в нём не нужны никому, кроме того, кто их украдёт. Токен живёт
+    // 15 минут, куки обновления — недели: этого хватает, чтобы войти от
+    // чужого имени по строчке из присланного журнала.
+    redact: {
+      paths: [
+        "req.headers.authorization",
+        "req.headers.cookie",
+        'req.headers["x-api-key"]',
+        'res.headers["set-cookie"]',
+      ],
+      censor: "[скрыто]",
+    },
+  })
+);
 
 app.get("/api/health", async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
