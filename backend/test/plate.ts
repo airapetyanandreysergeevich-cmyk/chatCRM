@@ -82,6 +82,39 @@ check(dell.brand?.value === "Dell", `Dell: бренд (${dell.brand?.value})`);
 check(dell.model?.value === "Inspiron 15 3000", `Dell: модель с пробелами (${dell.model?.options.join(" | ")})`);
 check(dell.serial?.value === "7XK2L23", `Dell: Service Tag как серийный (${dell.serial?.options.join(" | ")})`);
 
+// Лишнее, прилипшее к модели: соседние надписи распознаватель сливает в одну строку.
+const glued = parsePlate({
+  lines: [
+    { text: "SAMSUNG" },
+    { text: "MODEL : NP-R710H Made in China" },
+    { text: "MODEL CODE:NP-RV520-S0HRUMadeinChina" },
+    { text: "Model: X-AC12 Rated 19V" },
+  ],
+  barcodes: [],
+});
+check(glued.model?.value === "NP-R710H", `«Made in China» отрезано от модели (${glued.model?.options.join(" | ")})`);
+check(!!glued.model?.options.includes("NP-RV520-S0HRU"), "и без пробелов тоже («…S0HRUMadeinChina»)");
+check(!!glued.model?.options.includes("X-AC12"), "«AC» внутри модели не режется, «Rated 19V» — режется");
+
+// Словарь платформы: своя марка и своя лишняя фраза.
+const custom = { brands: [{ name: "Haier", aliases: ["Haier Electronics"] }], noise: ["Energy Star"] };
+const haier = parsePlate(
+  { lines: [{ text: "Haier" }, { text: "Model: HB-15 Pro Energy Star" }, { text: "S/N: HA12345678" }], barcodes: [] },
+  { dictionary: custom }
+);
+check(haier.brand?.value === "Haier", `марка из словаря платформы (${haier.brand?.value})`);
+check(haier.model?.value === "HB-15 Pro", `лишняя фраза из словаря отрезана (${haier.model?.value})`);
+const noDict = parsePlate({ lines: [{ text: "Haier" }, { text: "Model: HB-15 Pro Energy Star" }], barcodes: [] });
+check(!noDict.brand, "без словаря незнакомая марка не угадывается");
+
+// Марки мастерской из памяти бланка.
+const own = parsePlate({ lines: [{ text: "RAYBOOK" }, { text: "Model: RB-14" }], barcodes: [] }, { knownBrands: ["Raybook", "Бытовая техника"] });
+check(own.brand?.value === "Raybook", `марка из памяти мастерской (${own.brand?.value})`);
+
+// Синоним к встроенной марке, а не новая марка.
+const alias = parsePlate({ lines: [{ text: "HEWLETTPACKARDENTERPRISE" }], barcodes: [] }, { dictionary: { brands: [{ name: "hp", aliases: ["HPE"] }], noise: [] } });
+check(alias.brand?.value === "HP" && alias.brand.options.length === 1, `синоним добавляется к встроенной марке (${alias.brand?.options.join(", ")})`);
+
 // Чужой штрихкод (ключ Windows у Samsung RV520) не подменяет серийный номер.
 const rv = parsePlate(fixtures["samsung-rv520"]);
 check(rv.serial?.value !== "00192486829429", "чужой штрихкод не становится серийным номером");

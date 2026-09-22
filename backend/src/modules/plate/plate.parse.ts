@@ -144,7 +144,111 @@ const BRANDS: Brand[] = [
   { name: "Realme", words: [], short: ["REALME"] },
 ];
 
-function detectBrand(lines: string[]): { brand: Brand | null; options: string[] } {
+// ----------------------------------------------------------------- словарь
+
+/**
+ * Словарь платформы: марки и лишние слова, которые собственник правит в
+ * панели «Мастерские → Словарь шильдиков», не дожидаясь обновления программы.
+ */
+export interface PlateDictionary {
+  /** Марка и её другие написания: «Hewlett-Packard» → HP. */
+  brands: Array<{ name: string; aliases: string[] }>;
+  /** Фразы, на которых модель обрывается: «Made in China», «Rated». */
+  noise: string[];
+}
+
+export interface ParseOptions {
+  dictionary?: PlateDictionary;
+  /** Марки, которые мастерская уже вводила сама (память полей бланка). */
+  knownBrands?: string[];
+}
+
+/**
+ * Лишнее, что прилипает к модели, когда распознаватель сливает соседние
+ * надписи в одну строку: «NP-R710H Made in China». Модель обрывается на
+ * первой такой фразе — всё, что правее, к ней не относится.
+ */
+const NOISE = [
+  "Made in", "Manufactured", "Assembled in", "Product of", "Designed by", "Designed in",
+  "Rated", "Rating", "Input", "Output", "Class B", "RoHS", "CAN ICES",
+  "Notebook PC", "Laptop", "Serial", "Warranty", "Mfg Date", "MFD",
+  // Короткие «DC», «AC», «CE» сюда нарочно не входят: они встречаются
+  // внутри настоящих моделей (X-AC12), и обрезка съела бы модель.
+];
+
+/**
+ * Фраза — в выражения, нечувствительные к пробелам: «Made in» найдёт и
+ * «MadeinChina».
+ *
+ * Два выражения. Первое — с границей слева: «Rated» не должно резать
+ * «Generated». Второе — для слипшегося «…S0HRUMadeinChina», где слева
+ * заглавная буква модели: там фраза ищется в своём написании, с заглавной и
+ * строчными, — именно так она и отличается от модели.
+ */
+function phrase(p: string): RegExp[] {
+  const letters = [...p.replace(/\s+/g, "")].map((ch) => ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
+  if (letters.length < 2) return [];
+  const body = letters.join("\\s*");
+  const out = [new RegExp(`(^|[^A-Za-z])${body}`, "i")];
+  if (/^[A-Z][a-z]/.test(p)) out.push(new RegExp(`([A-Z0-9])${body}`));
+  return out;
+}
+
+interface Dict {
+  brands: Brand[];
+  noise: RegExp[];
+}
+
+const brandByName = (brands: Brand[], name: string) => brands.find((b) => b.name === name) ?? null;
+
+/** Встроенные марки плюс словарь платформы плюс марки мастерской. */
+export function buildDictionary(options: ParseOptions = {}): Dict {
+  const brands: Brand[] = BRANDS.map((b) => ({ ...b, words: [...b.words], short: [...(b.short ?? [])] }));
+  const byUpper = (name: string) => brands.find((b) => b.name.toUpperCase() === name.trim().toUpperCase());
+
+  const addNames = (b: Brand, names: string[]) => {
+    for (const raw of names) {
+      const n = compact(raw).toUpperCase();
+      if (n.length < 2) continue;
+      // Длинное и заметное — ищем подстрокой, короткое — только целиком.
+      if (n.length >= 6) {
+        if (!b.words.includes(n)) b.words.push(n);
+      } else if (!(b.short ?? []).includes(n)) {
+        (b.short ??= []).push(n);
+      }
+    }
+  };
+
+  for (const entry of options.dictionary?.brands ?? []) {
+    const name = entry.name.replace(/\s+/g, " ").trim();
+    if (name.length < 2) continue;
+    const b = byUpper(name) ?? (brands.push({ name, words: [], short: [] }), brands[brands.length - 1]);
+    addNames(b, [name, ...entry.aliases]);
+  }
+
+  // Марки из памяти бланка — только целой строкой или в начале: «Бытовая
+  // техника» подстрокой нашлась бы где угодно.
+  for (const raw of options.knownBrands ?? []) {
+    const name = raw.replace(/\s+/g, " ").trim();
+    const n = compact(name).toUpperCase();
+    if (n.length < 3 || !/^[A-Z0-9-]+$/.test(n)) continue;
+    const b = byUpper(name);
+    if (b) continue;
+    brands.push({ name, words: [], short: [n] });
+  }
+
+  const noise = [...NOISE, ...(options.dictionary?.noise ?? [])]
+    .flatMap((p) => phrase(p));
+  return { brands, noise };
+}
+
+/** Что встроено в программу — панель показывает это рядом со словарём. */
+export const BUILTIN = {
+  brands: BRANDS.map((b) => b.name),
+  noise: NOISE,
+};
+
+function detectBrand(lines: string[], BRANDS: Brand[]): { brand: Brand | null; options: string[] } {
   const score = new Map<Brand, number>();
   const add = (b: Brand, n: number) => score.set(b, (score.get(b) ?? 0) + n);
 
@@ -164,9 +268,11 @@ function detectBrand(lines: string[]): { brand: Brand | null; options: string[] 
       if (/MANUFACTUREDFOR|PRODUCTOF|TRADEMARKSOF/.test(c) && b.words.concat(b.short ?? []).some((w) => c.includes(w))) add(b, 3);
     }
     // Логотип ASUS с обрезанной «A» — частый случай на краю кадра.
-    if (c === "SUS") add(BRANDS[0], 2);
+    const asus = brandByName(BRANDS, "ASUS");
+    if (c === "SUS" && asus) add(asus, 2);
     // Модели Samsung начинаются с «NP-».
-    if (/MODEL.*:NP-/.test(keyOf(c))) add(BRANDS[3], 2);
+    const samsung = brandByName(BRANDS, "Samsung");
+    if (samsung && /MODEL.*:NP-/.test(keyOf(c))) add(samsung, 2);
   }
 
   const ranked = [...score.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
@@ -291,17 +397,29 @@ function serialCandidates(lines: string[], barcodes: OcrBarcode[]) {
 // ----------------------------------------------------------------- модель
 
 /** «HP 250 G7 Notebook PC» → «250 G7»: бренд уже в своём поле, вид — в своём. */
-function cleanModel(v: string, brand: Brand | null): string {
+function cleanModel(v: string, brand: Brand | null, noise: RegExp[] = []): string {
   let s = v.trim();
+  // Обрезаем по первой лишней фразе. Совпадение в самом начале не режет:
+  // модель «Power 5» — это модель, а не надпись о питании.
+  let cut = s.length;
+  for (const re of noise) {
+    const m = re.exec(s);
+    if (m) {
+      const at = m.index + m[1].length;
+      if (at > 0 && at < cut) cut = at;
+    }
+  }
+  s = s.slice(0, cut).replace(/[\s,;:/-]+$/, "");
   for (const name of brand ? [brand.name, ...(brand.short ?? [])] : []) {
     if (s.toUpperCase().startsWith(name.toUpperCase() + " ")) s = s.slice(name.length + 1);
   }
   return s.replace(/\s+(Notebook(\s+PC)?|Laptop|Series|Touch\s*Screen)$/i, "").trim();
 }
 
-function modelCandidates(lines: string[], brand: Brand | null): Candidate[] {
+function modelCandidates(lines: string[], brand: Brand | null, dict: Dict): Candidate[] {
   const list: Candidate[] = [];
-  const families = BRANDS.flatMap((b) => (b.families ?? []).map((f) => ({ f, b })));
+  const clean = (v: string) => cleanModel(v, brand, dict.noise);
+  const families = dict.brands.flatMap((b) => (b.families ?? []).map((f) => ({ f, b })));
   let official = "";
 
   for (const line of lines) {
@@ -312,7 +430,7 @@ function modelCandidates(lines: string[], brand: Brand | null): Candidate[] {
     // Между меткой и двоеточием бывает что угодно: «Model/型號：», «MODEL(MODELO/Модель):».
     const m = /^(REG)?MODEL(CODE|NAME|NO\.?|NUMBER)?[^A-Z0-9:(]*(?:\([^)]*\))?[^A-Z0-9:]*:/.exec(k);
     if (m) {
-      const v = cleanModel(valueAfter(tailAfter(line, m[0].length), true), brand);
+      const v = clean(valueAfter(tailAfter(line, m[0].length), true));
       if (v && hasDigit(v)) {
         const kind = (m[2] ?? "").replace(".", "");
         let weight = kind === "CODE" ? 6 : 10;
@@ -333,7 +451,8 @@ function modelCandidates(lines: string[], brand: Brand | null): Candidate[] {
       const series = /\s*series$/i.test(p);
       const raw = p.replace(/\s*series$/i, "");
       if (!hasDigit(raw) || raw.length > 40) continue;
-      push(list, respace(raw, f), series ? 11 : 7);
+      const value = clean(respace(raw, f));
+      if (value && hasDigit(value)) push(list, value, series ? 11 : 7);
     }
 
     // Бренд и модель одной строкой: «Lenovo G580», «LenovoS20-30Touch».
@@ -344,7 +463,7 @@ function modelCandidates(lines: string[], brand: Brand | null): Candidate[] {
         if (!/^[A-Z0-9]/.test(rest) || !hasDigit(rest) || rest.length > 25) continue;
         if (/COMPUTER|INC|ELECTRON|CORP|MODEL|TEK/i.test(rest)) continue;
         // Из исходной строки: «HP 250 G7» с пробелами, «LenovoS20-30Touch» — без.
-        const value = cleanModel(plain(tailAfter(line, name.length)), brand);
+        const value = clean(plain(tailAfter(line, name.length)));
         if (value) push(list, respace(value), brand.name === "Lenovo" ? 12 : 8);
       }
     }
@@ -386,11 +505,12 @@ function detectKind(lines: string[]): string | null {
 
 // ----------------------------------------------------------------- сборка
 
-export function parsePlate(ocr: OcrResult): PlateResult {
+export function parsePlate(ocr: OcrResult, options: ParseOptions = {}): PlateResult {
+  const dict = buildDictionary(options);
   const lines = ocr.lines.map((l) => normalize(l.text)).filter(Boolean);
-  const { brand, options: brandOptions } = detectBrand(lines);
+  const { brand, options: brandOptions } = detectBrand(lines, dict.brands);
   const serial = serialCandidates(lines, ocr.barcodes ?? []);
-  const model = ranked(modelCandidates(lines, brand));
+  const model = ranked(modelCandidates(lines, brand, dict));
 
   return {
     brand: brand ? { value: brand.name, options: brandOptions } : null,

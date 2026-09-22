@@ -132,7 +132,8 @@ export interface Reference {
   features: { plateOcr: boolean };
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
-  masters: Array<{ id: string; fullName: string }>;
+  /** Мастера и владелец мастерской — он тоже может взяться за ремонт. */
+  masters: Array<{ id: string; fullName: string; isOwner?: boolean }>;
   /** Прайс мастерской — для подсказок при наборе выполненных работ. */
   services: Service[];
 }
@@ -207,12 +208,17 @@ export interface CustomerHit {
 export const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toLocaleString("ru-RU")} ₽`;
 
+/** Как показать мастера в списке: владельца — с пометкой. */
+export const masterLabel = (m: { fullName: string; isOwner?: boolean }) =>
+  m.isOwner ? `${m.fullName} (владелец)` : m.fullName;
+
 export const ordersApi = {
   reference: () => api.get<Reference>("/reference"),
   list: (params: Record<string, string>) =>
     api.get<Page<Order>>(`/orders?${new URLSearchParams(params).toString()}`),
   get: (id: string) => api.get<Order>(`/orders/${id}`),
   create: (body: unknown) => api.post<{ id: string; number: string }>("/orders", body),
+  assignMaster: (id: string, masterId: string | null) => api.patch(`/orders/${id}`, { assignedMasterId: masterId }),
   setStatus: (id: string, statusId: string, comment?: string) =>
     api.post(`/orders/${id}/status`, { statusId, comment }),
   saveWorks: (id: string, works: OrderWork[]) => api.put(`/orders/${id}/works`, { works }),

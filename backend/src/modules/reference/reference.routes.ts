@@ -3,6 +3,7 @@ import { prisma, withTenant } from "../../lib/db";
 import { env } from "../../lib/env";
 import { DEVICE_KINDS, ORDER_KINDS } from "../../lib/dictionaries";
 import { listQuickPicks } from "../quickpicks/quickpicks.service";
+import { listMasters } from "../staff/masters";
 import { ah } from "../../lib/errors";
 import { authenticate, currentTenantId, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
@@ -22,11 +23,7 @@ referenceRouter.get(
   ah(async (req, res) => {
     const [statuses, masters, services, completeness, appearance, complaint] = await withTenant(tenantOf(req), async (tx) => [
       await tx.orderStatus.findMany({ orderBy: { sortOrder: "asc" } }),
-      await tx.user.findMany({
-        where: { deletedAt: null, isActive: true, role: { code: "MASTER" } },
-        orderBy: { fullName: "asc" },
-        select: { id: true, fullName: true },
-      }),
+      await listMasters(tx),
       // Прайс едет вместе со справочниками, чтобы подсказки в карточке
       // заказа работали мгновенно и не ходили на сервер на каждую букву.
       await tx.service.findMany({ orderBy: { name: "asc" } }),

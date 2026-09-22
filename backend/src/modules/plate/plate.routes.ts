@@ -1,11 +1,12 @@
 import { Router, type Request } from "express";
 import multer from "multer";
-import { prisma } from "../../lib/db";
+import { prisma, withTenant } from "../../lib/db";
 import { env } from "../../lib/env";
 import { AppError, ah, badRequest, forbidden } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import { authenticate, currentTenantId, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
+import { loadDictionary } from "./plate.dictionary";
 import { parsePlate, type OcrResult } from "./plate.parse";
 
 /**
@@ -86,6 +87,20 @@ plateRouter.post(
       waiting -= 1;
     }
 
-    res.json(parsePlate(ocr));
+    // Марки, которые мастерская уже вводила не раз, — тоже словарь: мастерская
+    // по кофемашинам знает свои марки лучше любого встроенного списка.
+    const [dictionary, hints] = await Promise.all([
+      loadDictionary(),
+      withTenant(tenantOf(req), (tx) =>
+        tx.deviceHint.findMany({
+          where: { field: "brand", uses: { gte: 2 } },
+          orderBy: { uses: "desc" },
+          take: 300,
+          select: { value: true },
+        })
+      ),
+    ]);
+
+    res.json(parsePlate(ocr, { dictionary, knownBrands: hints.map((h) => h.value) }));
   })
 );

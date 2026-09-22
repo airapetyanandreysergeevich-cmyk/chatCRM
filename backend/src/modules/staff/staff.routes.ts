@@ -9,6 +9,7 @@ import { ALL_PERMISSIONS, PERMISSION_GROUPS, PERMISSIONS } from "../../lib/permi
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { isEmailTaken, revokeAllForUser } from "../auth/auth.service";
+import { listMasters } from "./masters";
 
 export const staffRouter = Router();
 staffRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -77,14 +78,7 @@ staffRouter.get(
   "/staff/masters",
   requirePermission(PERMISSIONS.ORDERS_CREATE, PERMISSIONS.ORDERS_EDIT, PERMISSIONS.STAFF_MANAGE),
   ah(async (req, res) => {
-    const users = await withTenant(tenantOf(req), (tx) =>
-      tx.user.findMany({
-        where: { deletedAt: null, isActive: true, role: { code: "MASTER" } },
-        orderBy: { fullName: "asc" },
-        select: { id: true, fullName: true },
-      })
-    );
-    res.json(users);
+    res.json(await withTenant(tenantOf(req), (tx) => listMasters(tx)));
   })
 );
 

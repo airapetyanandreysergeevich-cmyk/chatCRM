@@ -17,6 +17,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDate, formatDateTime } from "../lib/format";
 import {
+  masterLabel,
   money,
   ORDER_KIND_LABEL,
   ordersApi,
@@ -588,7 +589,40 @@ export default function OrderCard() {
                   { label: "Принят", value: formatDateTime(order.acceptedAt) },
                   { label: "Приёмщик", value: order.acceptedBy?.fullName },
                   { label: "Срок готовности", value: formatDate(order.dueAt) },
-                  { label: "Мастер", value: order.assignedMaster?.fullName ?? "не назначен" },
+                  {
+                    label: "Мастер",
+                    // Мастера меняет тот, кто вправе править заказ: «взялся
+                    // сам владелец» или «передали коллеге» — прямо здесь, без
+                    // пересоздания заказа.
+                    value:
+                      can("orders.edit") && ref ? (
+                        <Select
+                          aria-label="Мастер"
+                          value={order.assignedMaster?.id ?? ""}
+                          disabled={saving}
+                          onChange={(e) =>
+                            void run(
+                              () => ordersApi.assignMaster(order.id, e.target.value || null),
+                              e.target.value ? "Мастер назначен" : "Мастер снят с заказа"
+                            )
+                          }
+                        >
+                          <option value="">Не назначен</option>
+                          {/* Назначенный раньше мог сменить роль или уволиться —
+                              он всё равно должен быть виден в поле. */}
+                          {order.assignedMaster && !ref.masters.some((m) => m.id === order.assignedMaster?.id) && (
+                            <option value={order.assignedMaster.id}>{order.assignedMaster.fullName}</option>
+                          )}
+                          {ref.masters.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {masterLabel(m)}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        (order.assignedMaster?.fullName ?? "не назначен")
+                      ),
+                  },
                   { label: "Место хранения", value: order.storageLocation },
                   { label: "Пароль устройства", value: order.devicePasscode },
                   {

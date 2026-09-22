@@ -11,6 +11,8 @@ import { authenticate } from "../../middleware/auth";
 import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
 import { removeTenantForever } from "../../services/tenant-remove";
+import { dictionarySchema, loadDictionary, saveDictionary } from "../plate/plate.dictionary";
+import { BUILTIN } from "../plate/plate.parse";
 
 export const platformRouter = Router();
 
@@ -190,6 +192,33 @@ platformRouter.patch(
     });
     await logPlatform(req, "TENANT_UPDATE", tenant.id, body);
     res.json(updated);
+  })
+);
+
+// ---------- словарь распознавания шильдиков ----------
+
+/**
+ * Словарь один на всю платформу: марка, распознанная у одной мастерской,
+ * пригодится и остальным. Смотреть могут все администраторы, править —
+ * собственник, как и включать само распознавание.
+ */
+platformRouter.get(
+  "/plate-dictionary",
+  ah(async (_req, res) => {
+    res.json({ dictionary: await loadDictionary(), builtin: BUILTIN });
+  })
+);
+
+platformRouter.put(
+  "/plate-dictionary",
+  requireOwner,
+  ah(async (req, res) => {
+    const saved = await saveDictionary(dictionarySchema.parse(req.body));
+    await logPlatform(req, "PLATE_DICTIONARY_UPDATE", null, {
+      brands: saved.brands.length,
+      noise: saved.noise.length,
+    });
+    res.json({ dictionary: saved, builtin: BUILTIN });
   })
 );
 

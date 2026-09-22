@@ -125,6 +125,14 @@ model Impersonation {
   @@index([tenantId, startedAt])
 }
 
+/// Настройки платформы, общие для всех мастерских: ключ — значение.
+/// Сейчас здесь один ключ — plateDictionary, словарь распознавания шильдиков.
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
 model PlatformAuditLog {
   id             String   @id @default(uuid())
   platformUserId String?

@@ -26,7 +26,7 @@ import { useAuth } from "../lib/auth";
 import type { QuickPick, QuickPickField } from "../lib/quickPicks";
 import { plural } from "../lib/format";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
-import { ordersApi, type CustomerHit, type Reference } from "../lib/orders";
+import { masterLabel, ordersApi, type CustomerHit, type Reference } from "../lib/orders";
 
 const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(",", ".")));
 
@@ -619,7 +619,7 @@ export default function OrderNew() {
               <option value="">Не назначен</option>
               {ref.masters.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.fullName}
+                  {masterLabel(m)}
                 </option>
               ))}
             </Select>

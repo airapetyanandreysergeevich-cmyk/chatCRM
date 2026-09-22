@@ -1,9 +1,28 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Modal } from "../../components/Modal";
-import { Banner, Button, Card, Checkbox, Field, Input, SectionLabel, Select, Spinner, StatusChip } from "../../components/ui";
+import {
+  Banner,
+  Button,
+  Card,
+  Checkbox,
+  Field,
+  Input,
+  SectionLabel,
+  Select,
+  Spinner,
+  StatusChip,
+  Textarea,
+} from "../../components/ui";
 import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { formatDate, plural } from "../../lib/format";
+import {
+  brandsFromText,
+  brandsToText,
+  noiseFromText,
+  plateDictionaryApi,
+  type DictionaryReply,
+} from "../../lib/plateDictionary";
 
 interface TenantRow {
   id: string;
@@ -39,6 +58,7 @@ export default function Tenants() {
   const [removing, setRemoving] = useState<TenantRow | null>(null);
   /** Ошибка действия — над списком, а не вместо него. */
   const [notice, setNotice] = useState<string | null>(null);
+  const [dictionary, setDictionary] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -90,7 +110,12 @@ export default function Tenants() {
             {rows.length ? plural(rows.length, "мастерская", "мастерские", "мастерских") : "Пока ни одной"}
           </p>
         </div>
-        <Button onClick={() => setCreating(true)}>Новая мастерская</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setDictionary(true)}>
+            Словарь шильдиков
+          </Button>
+          <Button onClick={() => setCreating(true)}>Новая мастерская</Button>
+        </div>
       </div>
 
       {notice && <Banner tone="error">{notice}</Banner>}
@@ -183,6 +208,8 @@ export default function Tenants() {
           ))}
         </div>
       )}
+
+      {dictionary && <DictionaryModal canEdit={isOwner} onClose={() => setDictionary(false)} />}
 
       {creating && (
         <CreateTenantModal
@@ -423,6 +450,116 @@ function ImpersonateModal({
           </Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * Словарь распознавания шильдиков: марки и лишние слова.
+ *
+ * Встроенное показано рядом, но не правится: оно проверено на настоящих
+ * шильдиках тестами. Словарь дополняет встроенное — новая марка, другое
+ * написание знакомой («Hewlett-Packard: HP»), фраза, которую надо отрезать
+ * от модели («Made in China»).
+ */
+function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () => void }) {
+  const [reply, setReply] = useState<DictionaryReply | null>(null);
+  const [brands, setBrands] = useState("");
+  const [noise, setNoise] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const fill = (r: DictionaryReply) => {
+    setReply(r);
+    setBrands(brandsToText(r.dictionary.brands));
+    setNoise(r.dictionary.noise.join("\n"));
+  };
+
+  useEffect(() => {
+    plateDictionaryApi
+      .get()
+      .then(fill)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить словарь"));
+  }, []);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      fill(await plateDictionaryApi.save({ brands: brandsFromText(brands), noise: noiseFromText(noise) }));
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось сохранить словарь");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Словарь шильдиков" onClose={onClose}>
+      {!reply && !error ? (
+        <Spinner />
+      ) : (
+        <form onSubmit={save} className="space-y-4">
+          {error && <Banner tone="error">{error}</Banner>}
+          {saved && <Banner>Сохранено. Приёмщики получат словарь в течение минуты.</Banner>}
+
+          <Field
+            label="Марки"
+            hint="По одной в строке. Другие написания — через двоеточие и запятые: «Hewlett-Packard: HP, HPE»"
+          >
+            <Textarea
+              value={brands}
+              onChange={(e) => setBrands(e.target.value)}
+              rows={7}
+              readOnly={!canEdit}
+              placeholder={"Haier\nRaybook\nHewlett-Packard: HP"}
+              className="font-mono text-[13.5px]"
+            />
+          </Field>
+          <Field label="Лишние слова" hint="По одной фразе в строке. Модель обрывается на первой такой фразе">
+            <Textarea
+              value={noise}
+              onChange={(e) => setNoise(e.target.value)}
+              rows={4}
+              readOnly={!canEdit}
+              placeholder={"Energy Star\nTUV Rheinland"}
+              className="font-mono text-[13.5px]"
+            />
+          </Field>
+
+          {reply && (
+            <details className="rounded-field border border-line px-3 py-2 text-[13px]">
+              <summary className="cursor-pointer font-semibold text-ink-muted">Уже встроено в программу</summary>
+              <p className="mt-2 text-ink-dim">
+                <span className="font-semibold text-ink-soft">Марки: </span>
+                {reply.builtin.brands.join(", ")}
+              </p>
+              <p className="mt-2 text-ink-dim">
+                <span className="font-semibold text-ink-soft">Лишние слова: </span>
+                {reply.builtin.noise.join(", ")}
+              </p>
+              <p className="mt-2 text-ink-dim">
+                Сверх того каждая мастерская узнаёт марки, которые сама вводила в бланке не меньше двух раз.
+              </p>
+            </details>
+          )}
+
+          <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
+            {canEdit && (
+              <Button type="submit" disabled={busy} className="sm:flex-1">
+                {busy ? "Сохраняем…" : "Сохранить"}
+              </Button>
+            )}
+            <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
+              {canEdit ? "Закрыть" : "Закрыть (правит собственник)"}
+            </Button>
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }

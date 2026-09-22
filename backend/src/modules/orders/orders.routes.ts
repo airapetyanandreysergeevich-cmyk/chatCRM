@@ -25,6 +25,7 @@ import {
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { rememberDevice } from "../hints/hints.service";
 import { countQuickPicks } from "../quickpicks/quickpicks.service";
+import { assertAssignable } from "../staff/masters";
 import {
   assertOrderAccess,
   limitExceeded,
@@ -273,6 +274,7 @@ ordersRouter.post(
 
       const number = await nextOrderNumber(tx, tenantId);
 
+      if (body.assignedMasterId) await assertAssignable(tx, body.assignedMasterId);
       const order = await tx.order.create({
         data: {
           tenantId,
@@ -410,6 +412,7 @@ ordersRouter.patch(
     const assigned = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
+      if (body.assignedMasterId) await assertAssignable(tx, body.assignedMasterId);
 
       await tx.order.update({
         where: { id: order.id },
