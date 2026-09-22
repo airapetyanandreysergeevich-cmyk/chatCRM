@@ -14,6 +14,7 @@ const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
 const { Backups } = require("./backup");
 const network = require("./network");
+const { Updater } = require("./updater");
 
 /**
  * Оболочка локальной версии.
@@ -33,6 +34,8 @@ let running = null;
 /** Пока сервер перезапускают намеренно, его уход — не повод пугать человека. */
 let restartingBackend = false;
 let state = { step: "старт", error: null };
+/** Обновления программы через интернет (см. updater.js). */
+let updater = null;
 
 const userData = () => app.getPath("userData");
 
@@ -433,6 +436,13 @@ function refreshTray() {
         },
       },
       { type: "separator" },
+      { label: `Версия ${app.getVersion()}`, enabled: false },
+      {
+        label: "Проверить обновления",
+        enabled: !!updater,
+        click: () => void (updater && updater.check({ manual: true })),
+      },
+      { type: "separator" },
       { label: "Выйти", click: () => app.quit() },
     ])
   );
@@ -520,8 +530,109 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
 app.whenReady().then(async () => {
   createWindow();
   createTray();
+  startUpdater();
   await boot();
 });
+
+// ------------------------------------------------------------- обновления
+
+/**
+ * Обновления включаются только в собранной программе: при запуске из
+ * репозитория (`electron .`) обновлять нечего — и незачем пугать
+ * разработчика окнами про версию.
+ */
+function startUpdater() {
+  if (!app.isPackaged && !process.env.FINECRM_UPDATE_DEV) return;
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch {
+    return; // сборка без модуля обновлений — работаем как раньше
+  }
+
+  const box = (type) => (title, detail, buttons) =>
+    dialog
+      .showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+        type,
+        title,
+        message: title,
+        detail,
+        buttons: buttons ?? ["Понятно"],
+        defaultId: 0,
+        cancelId: buttons ? 1 : 0,
+        noLink: true,
+      })
+      .then((r) => r.response === 0);
+
+  updater = new Updater({
+    autoUpdater,
+    currentVersion: app.getVersion(),
+    ui: {
+      ask: box("question"),
+      info: box("info"),
+      error: box("warning"),
+      // Прогресс — на значке в панели задач: видно, даже когда окно свёрнуто.
+      progress: (p) => {
+        if (win && !win.isDestroyed()) win.setProgressBar(p);
+        if (tray) tray.setToolTip(p >= 0 ? `FineCRM — загрузка обновления ${Math.round(p * 100)}%` : "FineCRM");
+      },
+    },
+    beforeInstall: prepareForUpdate,
+    log: (line) => console.log(line),
+  });
+  updater.start();
+  refreshTray();
+}
+
+/**
+ * Подготовка к установке обновления: копия базы, затем честная остановка —
+ * та же, что при выходе. Установщик после этого застаёт папку программы
+ * свободной, а базу — аккуратно закрытой.
+ */
+async function prepareForUpdate() {
+  if (backups) {
+    const report = await backups.run("перед обновлением");
+    refreshTray();
+    if (!report.ok) {
+      const answer = await dialog.showMessageBox(win, {
+        type: "warning",
+        title: "Копия перед обновлением не сделана",
+        message: "Не удалось сделать резервную копию базы",
+        detail: `${report.error}\n\nОбновление обычно проходит без потерь, но без свежей копии откатиться будет не к чему. Лучше сначала разобраться с копией.`,
+        buttons: ["Отложить обновление", "Обновить без копии"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (answer.response !== 1) return { ok: false, error: "Обновление отложено: нет свежей резервной копии." };
+    }
+  }
+
+  // Дальше программа закрывается: помечаем выход, чтобы обработчик
+  // before-quit не начал ту же остановку второй раз.
+  app.isQuitting = true;
+  shuttingDown = true;
+  try {
+    if (backups) backups.stop();
+    if (updater) updater.stop();
+    if (backend) await backend.stop();
+    if (postgres) await postgres.stop();
+  } catch (err) {
+    // Не остановилось — не ставим: установщик застал бы базу работающей.
+    // Часть служб уже погашена, поэтому просто перезапускаемся на прежней
+    // версии: так программа гарантированно вернётся в рабочее состояние.
+    await dialog.showMessageBox(win, {
+      type: "error",
+      title: "Обновление отложено",
+      message: "Не удалось остановить сервер перед обновлением",
+      detail: `${err.message}\n\nПрограмма перезапустится на прежней версии.`,
+    });
+    app.relaunch();
+    app.exit(0);
+    return { ok: false, error: err.message };
+  }
+  return { ok: true };
+}
 
 /**
  * Выключение.

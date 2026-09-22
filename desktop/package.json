@@ -14,10 +14,13 @@
     "check-network": "node test/network.js",
     "check-db": "node test/local-db.js",
     "check-backup": "node test/backup.js",
-    "check": "npm run check-paths && npm run check-tool && npm run check-backend && npm run check-network && npm run check-db && npm run check-backup",
+    "check": "npm run check-paths && npm run check-tool && npm run check-backend && npm run check-network && npm run check-db && npm run check-backup && npm run check-updater",
     "build-parts": "cd ../backend && npx prisma generate && npm run build && cd ../frontend && npm run build && cd ../desktop && node scripts/ocr-assets.js",
     "predist": "npm run build-parts && node test/before-dist.js",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "check-updater": "node test/updater.js",
+    "release": "npm version patch --no-git-tag-version && npm run dist",
+    "publish-release": "node scripts/publish.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -100,7 +103,21 @@
       "createStartMenuShortcut": true,
       "shortcutName": "FineCRM",
       "runAfterFinish": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://finecrm.ru/download/desktop/",
+        "channel": "latest"
+      }
+    ],
+    "releaseInfo": {
+      "releaseNotesFile": "release-notes.md"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }

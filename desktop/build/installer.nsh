@@ -23,13 +23,25 @@
 ;
 ; electron-builder читает начальную папку из этой записи реестра, поэтому
 ; подменяем её до того, как установщик нарисует своё окно.
+;
+; Только если записи ещё нет. Обновление ставится туда же, где стоит
+; программа, и берёт этот путь из той же записи: перезапиши мы её всегда,
+; программа, установленная в D:\FineCRM, после обновления оказалась бы
+; второй копией в C:\FineCRM — со своим ярлыком и без прежних настроек.
+!macro finecrmDefaultLocation ROOT
+  ClearErrors
+  ReadRegStr $0 ${ROOT} "${INSTALL_REGISTRY_KEY}" InstallLocation
+  StrCmp $0 "" 0 +2
+  WriteRegExpandStr ${ROOT} "${INSTALL_REGISTRY_KEY}" InstallLocation "$%SystemDrive%\FineCRM"
+!macroend
+
 !macro preInit
   SetRegView 64
-  WriteRegExpandStr HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation "$%SystemDrive%\FineCRM"
-  WriteRegExpandStr HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation "$%SystemDrive%\FineCRM"
+  !insertmacro finecrmDefaultLocation HKLM
+  !insertmacro finecrmDefaultLocation HKCU
   SetRegView 32
-  WriteRegExpandStr HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation "$%SystemDrive%\FineCRM"
-  WriteRegExpandStr HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation "$%SystemDrive%\FineCRM"
+  !insertmacro finecrmDefaultLocation HKLM
+  !insertmacro finecrmDefaultLocation HKCU
 !macroend
 
 !macro customInstall

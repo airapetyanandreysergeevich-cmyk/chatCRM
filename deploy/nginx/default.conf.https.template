@@ -1,3 +1,11 @@
+# Кэш раздачи файлов. latest.yml — список версий для обновления программы:
+# его нельзя держать в кэше, иначе новая версия доходила бы до программ
+# с часовой задержкой. Установщики и карты блоков неизменны — их можно.
+map $uri $finecrm_download_cache {
+    ~\.yml$  "no-cache";
+    default  "public, max-age=3600";
+}
+
 server {
     listen 80;
     server_name ${SERVER_NAMES};
@@ -32,7 +40,7 @@ server {
     location /download/ {
         alias /srv/downloads/;
         autoindex off;
-        add_header Cache-Control "public, max-age=3600";
+        add_header Cache-Control $finecrm_download_cache;
     }
 
     location /api/ {

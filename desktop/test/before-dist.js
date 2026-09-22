@@ -60,6 +60,16 @@ const needed = [
       : "cd frontend && npm install, затем cd ..\\desktop && node scripts/ocr-assets.js",
   })),
   {
+    file: path.join(here, "node_modules", "electron-updater", "package.json"),
+    what: "Модуль обновлений",
+    fix: "cd desktop && npm install",
+  },
+  {
+    file: path.join(here, "release-notes.md"),
+    what: "Описание версии для окна «Доступна новая версия»",
+    fix: "Создайте desktop\\release-notes.md — по пункту на строку, что изменилось",
+  },
+  {
     file: path.join(repo, "frontend", "dist", "index.html"),
     what: "Собранный интерфейс",
     fix: "cd frontend && npm install && npm run build",
