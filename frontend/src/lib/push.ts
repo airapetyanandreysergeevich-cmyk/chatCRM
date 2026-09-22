@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { BASE, url } from "./basePath";
 
 /**
  * Подписка браузера на оповещения.
@@ -33,7 +34,7 @@ let registration: ServiceWorkerRegistration | null = null;
 
 async function ensureWorker(): Promise<ServiceWorkerRegistration> {
   if (registration) return registration;
-  registration = await navigator.serviceWorker.register("/sw.js");
+  registration = await navigator.serviceWorker.register(url("sw.js"), { scope: BASE });
   await navigator.serviceWorker.ready;
   return registration;
 }

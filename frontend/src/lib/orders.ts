@@ -139,7 +139,7 @@ export interface Reference {
   appearance: Array<{ key: string; label: string; locked?: boolean }>;
   complaint: Array<{ key: string; label: string; locked?: boolean }>;
   /** Что включено у мастерской. */
-  features: { plateOcr: boolean; plateOcrMode?: "server" | "browser" };
+  features: { plateOcr: boolean; plateOcrMode?: "server" | "browser"; remoteAccess?: boolean };
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   /** Мастера и владелец мастерской — он тоже может взяться за ремонт. */

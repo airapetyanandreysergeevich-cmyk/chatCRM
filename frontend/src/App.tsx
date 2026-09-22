@@ -6,6 +6,7 @@ import { useAuth } from "./lib/auth";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
+import Boxes from "./pages/platform/Boxes";
 import FeedbackPage from "./pages/Feedback";
 import PlatformFeedback from "./pages/platform/Feedback";
 import Clients from "./pages/Clients";
@@ -15,6 +16,7 @@ import Finance from "./pages/Finance";
 import InterfacePage from "./pages/Interface";
 import NotificationsPage from "./pages/Notifications";
 import SettingsPage from "./pages/Settings";
+import RemoteAccess from "./pages/RemoteAccess";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import OrderPrint from "./pages/OrderPrint";
@@ -68,6 +70,7 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/notifications" element={<NotificationsPage />} />
           <Route path="/settings/data" element={<DataPage />} />
+          <Route path="/settings/remote-access" element={<RemoteAccess />} />
           <Route path="/settings/services" element={<ServicesPage />} />
           <Route path="/settings/interface" element={<InterfacePage />} />
           <Route path="/settings/feedback" element={<FeedbackPage />} />
@@ -76,6 +79,7 @@ export default function App() {
           <Route path="/notifications" element={<Navigate to="/settings/notifications" replace />} />
           <Route path="/platform/tenants" element={<Tenants />} />
           <Route path="/platform/applications" element={<Applications />} />
+          <Route path="/platform/boxes" element={<Boxes />} />
           <Route path="/platform/feedback" element={<PlatformFeedback />} />
           <Route path="/platform/admins" element={<Soon title="Администраторы платформы" />} />
           <Route path="/platform/audit" element={<Soon title="Журнал платформы" />} />

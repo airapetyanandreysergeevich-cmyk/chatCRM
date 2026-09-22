@@ -11,6 +11,7 @@ import { authenticate } from "../../middleware/auth";
 import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
 import { removeTenantForever } from "../../services/tenant-remove";
+import { boxesRouter } from "../relay/boxes.routes";
 import { dictionarySchema, loadDictionary, saveDictionary } from "../plate/plate.dictionary";
 import { BUILTIN } from "../plate/plate.parse";
 
@@ -58,6 +59,10 @@ async function logPlatform(
 }
 
 platformRouter.use(authenticate, requirePlatform);
+
+// Коробочные мастерские и их доступ из интернета — отдельным файлом: к
+// арендаторам они отношения не имеют, у них своя база на своём компьютере.
+platformRouter.use("/boxes", boxesRouter);
 
 // ---------- мастерские ----------
 

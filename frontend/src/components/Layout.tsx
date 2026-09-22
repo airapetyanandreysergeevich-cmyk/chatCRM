@@ -21,6 +21,7 @@ import {
   IconSettings,
   IconStaff,
   IconStock,
+  IconBox,
   IconWorkshops,
 } from "./icons";
 
@@ -143,6 +144,9 @@ export default function Layout() {
     { to: "/platform/tenants", label: "Мастерские", icon: <IconWorkshops /> },
     { to: "/platform/applications", label: "Заявки", icon: <IconApplications />, badge: pending },
     { to: "/platform/feedback", label: "Замечания", icon: <IconFeedback />, badge: feedback },
+    // Коробочные мастерские с доступом из интернета — отдельной строкой:
+    // это услуга, которую включают и выключают, а не свойство арендатора.
+    { to: "/platform/boxes", label: "Коробки", icon: <IconBox /> },
     { to: "/platform/admins", label: "Администраторы", icon: <IconAdmins /> },
     { to: "/platform/audit", label: "Журнал", icon: <IconJournal /> },
     { to: "/settings/notifications", label: "Оповещения", icon: <IconBell /> },

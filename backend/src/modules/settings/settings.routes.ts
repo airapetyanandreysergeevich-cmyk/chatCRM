@@ -2,7 +2,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { ah } from "../../lib/errors";
+import { ah, badRequest } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
   actorUserId,
@@ -23,6 +23,9 @@ import { enforceTenantStatus } from "../../middleware/tenantStatus";
  * вовсе — она живёт в его браузере. Сервер хранит только палитру, потому
  * что цвет колонки «Ремонт» должен значить одно и то же для всех.
  */
+
+import { applyRemoteAccess, relayAgentState } from "../relay/relay.instance";
+import { defaultRelayUrl, readRemoteAccess, saveRemoteAccess } from "../relay/remoteAccess";
 
 export const settingsRouter = Router();
 settingsRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -232,5 +235,70 @@ settingsRouter.delete(
     });
 
     res.json({ ok: true });
+  })
+);
+
+// ---------- доступ из интернета (коробочная версия) ----------
+
+/**
+ * Доступ к Основе снаружи.
+ *
+ * Ключ выдаёт собственник платформы: он же в любой момент его отзывает. Здесь
+ * владелец мастерской только вставляет выданный ключ и видит, есть ли связь.
+ *
+ * Наружу ключ не отдаётся никогда — только последние четыре знака, чтобы было
+ * видно, тот ли ключ вставлен. Показывать его целиком незачем: тот, кто имеет
+ * право его менять, может просто вставить новый.
+ */
+const remoteAccessSchema = z.object({
+  enabled: z.boolean(),
+  /** Пусто — оставить прежний: поле в окне показывает только хвост ключа. */
+  key: z.string().trim().max(200).optional(),
+  url: z.string().trim().max(300).optional(),
+});
+
+settingsRouter.get(
+  "/remote-access",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (_req, res) => {
+    const saved = await readRemoteAccess();
+    const agent = relayAgentState();
+    res.json({
+      enabled: saved?.enabled ?? false,
+      keyHint: saved?.key ? saved.key.slice(-4) : "",
+      url: saved?.url || defaultRelayUrl(),
+      state: agent.state,
+      detail: agent.detail ?? null,
+    });
+  })
+);
+
+settingsRouter.put(
+  "/remote-access",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const body = remoteAccessSchema.parse(req.body);
+    const saved = await readRemoteAccess();
+    const key = body.key ? body.key : (saved?.key ?? "");
+    const url = body.url || saved?.url || defaultRelayUrl();
+    if (body.enabled && !key) throw badRequest("Вставьте ключ доступа — его выдаёт поставщик программы");
+
+    await saveRemoteAccess({ enabled: body.enabled, url, key });
+    const agent = applyRemoteAccess(body.enabled ? { url, key } : null);
+
+    await withTenant(tenantOf(req), (tx) =>
+      writeAudit(tx, {
+        tenantId: tenantOf(req),
+        userId: actorUserId(req),
+        entity: "Tenant",
+        entityId: tenantOf(req),
+        action: "UPDATE",
+        // Ключ в журнал не пишем ни при каких обстоятельствах.
+        diff: { remoteAccess: body.enabled ? "включён" : "выключен", keyChanged: !!body.key },
+        ip: clientIp(req),
+      })
+    );
+
+    res.json({ enabled: body.enabled, keyHint: key.slice(-4), state: agent.state });
   })
 );

@@ -81,6 +81,24 @@ export const IconWorkshops = (p: IconProps) => (
   </Icon>
 );
 
+/** Земной шар: выход наружу, в интернет. */
+export const IconGlobe = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3.2 9.5h17.6M3.2 14.5h17.6" />
+    <path d="M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z" />
+  </Icon>
+);
+
+/** Коробка: коробочная версия, стоящая у мастерской на своём компьютере. */
+export const IconBox = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 8.2v7.6a2 2 0 0 1-1 1.7l-7 3.9a2 2 0 0 1-2 0l-7-3.9a2 2 0 0 1-1-1.7V8.2a2 2 0 0 1 1-1.7l7-3.9a2 2 0 0 1 2 0l7 3.9a2 2 0 0 1 1 1.7z" />
+    <path d="M3.3 7.3 12 12l8.7-4.7" />
+    <path d="M12 12v9.2" />
+  </Icon>
+);
+
 export const IconApplications = (p: IconProps) => (
   <Icon {...p}>
     <path d="M3 13.5h4l1.5 2.5h7l1.5-2.5h4" />

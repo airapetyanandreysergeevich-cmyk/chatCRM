@@ -48,6 +48,10 @@ referenceRouter.get(
         plateOcr: Boolean((env.ocrUrl || env.ocrModelsDir) && tenant?.plateOcr),
         // Облачный распознаватель важнее: если есть он, снимок идёт на сервер.
         plateOcrMode: env.ocrUrl ? "server" : "browser",
+        // Доступ из интернета настраивают только в коробочной версии: в
+        // облаке мастерская и так открыта по своему адресу. Признак коробки —
+        // интерфейс раздаёт сам сервер, значит nginx рядом нет.
+        remoteAccess: Boolean(env.staticDir),
       },
       statuses: statuses.map((s) => ({
         id: s.id,

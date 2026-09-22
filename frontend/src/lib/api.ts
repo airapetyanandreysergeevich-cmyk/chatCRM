@@ -27,12 +27,14 @@ export class ApiError extends Error {
   }
 }
 
+import { url } from "./basePath";
+
 let refreshing: Promise<boolean> | null = null;
 
 /** Обновление токена идёт одним запросом, даже если 401 прилетел сразу из нескольких мест. */
 function refreshOnce(): Promise<boolean> {
   if (!refreshing) {
-    refreshing = fetch("/api/auth/refresh", { method: "POST", credentials: "include" })
+    refreshing = fetch(url("api/auth/refresh"), { method: "POST", credentials: "include" })
       .then(async (res) => {
         if (!res.ok) return false;
         const data = await res.json();
@@ -56,7 +58,7 @@ async function request<T>(path: string, init: RequestInit = {}, allowRetry = tru
   }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
-  const res = await fetch(`/api${path}`, { ...init, headers, credentials: "include" });
+  const res = await fetch(url(`api${path}`), { ...init, headers, credentials: "include" });
 
   if (res.status === 401 && allowRetry && !path.startsWith("/auth/refresh") && !path.startsWith("/auth/login")) {
     if (await refreshOnce()) return request<T>(path, init, false);
@@ -121,11 +123,11 @@ export const api = {
     const headers: Record<string, string> = {};
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
-    let res = await fetch(`/api${path}`, { headers, credentials: "include" });
+    let res = await fetch(url(`api${path}`), { headers, credentials: "include" });
     if (res.status === 401 && (await refreshOnce())) {
       const retry: Record<string, string> = {};
       if (accessToken) retry.Authorization = `Bearer ${accessToken}`;
-      res = await fetch(`/api${path}`, { headers: retry, credentials: "include" });
+      res = await fetch(url(`api${path}`), { headers: retry, credentials: "include" });
     }
 
     if (!res.ok) {

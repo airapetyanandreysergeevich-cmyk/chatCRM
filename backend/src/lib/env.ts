@@ -61,6 +61,19 @@ export const env = {
   // Папка с моделями распознавателя для локальной версии. Задана — модели
   // раздаются по /ocr-models/, и снимок распознаётся прямо в окне программы.
   ocrModelsDir: process.env.OCR_MODELS_DIR ?? "",
+
+  /**
+   * Доступ к Основе из интернета (см. modules/relay).
+   *
+   * В облаке включается RELAY_ENABLED=1: сервер начинает принимать соединения
+   * от Основ и раздавать их по /b/<код>/. В мастерской заполняются RELAY_URL и
+   * RELAY_KEY — тогда сервер Основы сам соединяется с облаком. Одна и та же
+   * программа, разные концы провода.
+   */
+  relayEnabled: process.env.RELAY_ENABLED === "1",
+  relayPath: process.env.RELAY_PATH ?? "/relay/agent",
+  relayUrl: process.env.RELAY_URL ?? "",
+  relayKey: process.env.RELAY_KEY ?? "",
 };
 
 export const pushConfigured = Boolean(env.vapidPublicKey && env.vapidPrivateKey);

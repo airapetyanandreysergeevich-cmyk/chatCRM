@@ -57,6 +57,39 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Доступ к коробочным Основам: /b/<код>/… и соединение от самой Основы.
+    #
+    # Тела здесь бывают большие (фотографии заказа), а ответ приходит из
+    # мастерской по её же интернету — поэтому сроки ожидания щедрые, а буферы
+    # выключены: страница должна начинать грузиться сразу, а не после того,
+    # как nginx соберёт её целиком.
+    location /b/ {
+        proxy_pass http://backend:4000;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Постоянное соединение с Основой: живёт часами, поэтому срок ожидания
+    # сутки — иначе nginx рвал бы его каждый час и мастерская переподключалась
+    # бы на ровном месте.
+    location /relay/ {
+        proxy_pass http://backend:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
     location / {
         proxy_pass http://frontend:80;
         proxy_set_header Host $host;

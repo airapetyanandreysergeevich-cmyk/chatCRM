@@ -31,11 +31,28 @@ import { staffRouter } from "./modules/staff/staff.routes";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
+import { relayHub, startRelayAgent, startRelayHub } from "./modules/relay/relay.instance";
 
 const app = express();
 
 // За nginx: без этого в лог и в счётчик попыток входа попадёт IP прокси, а не клиента.
 app.set("trust proxy", 1);
+
+/**
+ * Доступ к коробочным Основам: /b/<код>/…
+ *
+ * Стоит первым, раньше разбора тела и заголовков безопасности, и это важно:
+ * тело запроса надо переслать в мастерскую как есть, а не разобранным в
+ * объект, а заголовки ответа (в том числе правила безопасности) должна
+ * задавать сама Основа, а не облако.
+ */
+app.use("/b/:code", (req, res, next) => {
+  const hub = relayHub();
+  if (!hub) return next();
+  const code = String(req.params.code ?? "");
+  if (!/^[a-z0-9-]{3,40}$/.test(code)) return next();
+  hub.handleRequest(code, req.url || "/", req, res);
+});
 
 app.use(securityHeaders());
 app.use(
@@ -132,7 +149,13 @@ else console.warn("Оповещения выключены: не заданы VA
 
 const server = app.listen(env.port, env.bindHost, () => {
   console.log(`RepairShop API слушает ${env.bindHost}:${env.port}`);
+  // Сторона мастерской — только после того, как свой сервер поднялся:
+  // запросы из интернета пойдут в него же.
+  startRelayAgent();
 });
+
+// Облачная сторона туннеля — на том же сервере, отдельным путём.
+startRelayHub(server);
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {

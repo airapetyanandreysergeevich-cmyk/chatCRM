@@ -14,8 +14,9 @@
 
 import type { InferenceSession, Tensor } from "onnxruntime-web";
 import { charactersFrom, recognizeText, type OcrLine, type RunModel } from "./engine";
+import { url } from "../basePath";
 
-const BASE = "/ocr-models/";
+const BASE = url("ocr-models/");
 
 const MODELS = {
   det: "ch_PP-OCRv4_det_infer.onnx",

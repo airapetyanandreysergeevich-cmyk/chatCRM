@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconFeedback, IconPalette, IconServices } from "../components/icons";
+import { IconBell, IconDatabase, IconFeedback, IconPalette, IconServices, IconGlobe } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
+import { ordersApi } from "../lib/orders";
 
 interface Section {
   to: string;
@@ -16,6 +18,8 @@ interface Section {
    * со своим замечанием идёт к владельцу.
    */
   ownerOnly?: boolean;
+  /** Только в коробочной версии — в облаке такого раздела нет. */
+  boxOnly?: boolean;
 }
 
 const SECTIONS: Section[] = [
@@ -46,6 +50,15 @@ const SECTIONS: Section[] = [
     need: "settings.manage",
   },
   {
+    to: "/settings/remote-access",
+    title: "Доступ из интернета",
+    text: "Чтобы заходить в свою Основу не только из мастерской: с телефона, из дома, из второй точки.",
+    icon: <IconGlobe />,
+    need: "settings.manage",
+    // Только в коробочной версии: облачная мастерская и так открыта по своему адресу.
+    boxOnly: true,
+  },
+  {
     to: "/settings/feedback",
     title: "Обратная связь",
     text: "Написать разработчику: что мешает, чего не хватает, что сломалось. Ответа в программе не будет.",
@@ -60,7 +73,18 @@ export default function Settings() {
   // Раздел виден всем, но внутри у каждого своё: мастеру — только
   // оповещения, владельцу ещё и базы. Показывать недоступное с замочком
   // бессмысленно: сотрудник всё равно ничего с этим не сделает.
-  const visible = SECTIONS.filter((s) => (!s.need || can(s.need)) && (!s.ownerOnly || isOwner));
+  // Коробочная это версия или облачная, знает сервер — по нему и решаем.
+  const [isBox, setIsBox] = useState(false);
+  useEffect(() => {
+    ordersApi
+      .reference()
+      .then((r) => setIsBox(Boolean(r.features.remoteAccess)))
+      .catch(() => setIsBox(false));
+  }, []);
+
+  const visible = SECTIONS.filter(
+    (s) => (!s.need || can(s.need)) && (!s.ownerOnly || isOwner) && (!s.boxOnly || isBox)
+  );
 
   return (
     <div className="space-y-5">

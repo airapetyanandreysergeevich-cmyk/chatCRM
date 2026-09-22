@@ -1,4 +1,5 @@
 import { useTheme } from "../lib/useTheme";
+import { url } from "../lib/basePath";
 
 /**
  * Знак в левом верхнем углу.
@@ -29,7 +30,7 @@ export function BrandMark({ size = 36 }: { size?: number }) {
       className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-white"
       style={{ width: size, height: size }}
     >
-      <img src="/logo-mark.png" alt="" style={{ width: size - 8 }} />
+      <img src={url("logo-mark.png")} alt="" style={{ width: size - 8 }} />
     </span>
   );
 }
@@ -37,7 +38,7 @@ export function BrandMark({ size = 36 }: { size?: number }) {
 export function BrandLogo({ width = 190 }: { width?: number }) {
   return (
     <span className="inline-block rounded-panel bg-white px-5 py-4">
-      <img src="/logo-full.png" alt="FineCRM" style={{ width }} />
+      <img src={url("logo-full.png")} alt="FineCRM" style={{ width }} />
     </span>
   );
 }

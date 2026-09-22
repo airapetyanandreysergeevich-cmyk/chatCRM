@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Modal } from "./Modal";
 import { IconDesktopDownload, IconPhoneDownload, IconPhoneShare } from "./icons";
 import { APK_URL } from "../lib/androidApp";
+import { url } from "../lib/basePath";
 
 /**
  * Откуда взять программу.
@@ -65,7 +66,7 @@ function PlatformMark({ file, fallback }: { file: string; fallback: ReactNode })
   if (failed) return <>{fallback}</>;
   return (
     <img
-      src={`/brands/${file}`}
+      src={url(`brands/${file}`)}
       alt=""
       className="h-[23px] w-[23px] object-contain"
       onError={() => setFailed(true)}

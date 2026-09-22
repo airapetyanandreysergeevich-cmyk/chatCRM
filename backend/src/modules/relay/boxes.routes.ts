@@ -1,0 +1,143 @@
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../../lib/db";
+import { ah, badRequest, conflict, notFound } from "../../lib/errors";
+import { fingerprint, newKey, normalizeCode } from "./boxes.service";
+import { relayHub } from "./relay.instance";
+
+/**
+ * Панель собственника: кому открыт доступ из интернета.
+ *
+ * Здесь выдают и отзывают ключи коробочных мастерских. Это же и рубильник
+ * услуги: выключили — Основа отвалилась, и адрес перестал работать, хотя сама
+ * программа в мастерской продолжает работать как ни в чём не бывало, по
+ * локальной сети. Отключение доступа не трогает ни базу, ни заказы.
+ *
+ * Подключается внутрь platformRouter, поэтому проверок прав здесь нет: до
+ * сюда доходит только собственник платформы.
+ */
+
+export const boxesRouter = Router();
+
+const boxSchema = z.object({
+  name: z.string().trim().min(2, "Укажите название мастерской"),
+  code: z.string().trim().min(3, "Код от 3 знаков").max(40).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+const view = (
+  box: {
+    id: string;
+    code: string;
+    name: string;
+    keyHint: string;
+    note: string | null;
+    isActive: boolean;
+    lastSeenAt: Date | null;
+    createdAt: Date;
+  },
+  online: boolean
+) => ({ ...box, online });
+
+boxesRouter.get(
+  "/",
+  ah(async (_req, res) => {
+    const boxes = await prisma.box.findMany({ orderBy: { createdAt: "desc" } });
+    const hub = relayHub();
+    res.json(
+      boxes.map((b) =>
+        view(
+          {
+            id: b.id,
+            code: b.code,
+            name: b.name,
+            keyHint: b.keyHint,
+            note: b.note,
+            isActive: b.isActive,
+            lastSeenAt: b.lastSeenAt,
+            createdAt: b.createdAt,
+          },
+          hub?.online(b.code) ?? false
+        )
+      )
+    );
+  })
+);
+
+boxesRouter.post(
+  "/",
+  ah(async (req, res) => {
+    const body = boxSchema.parse(req.body);
+    const code = normalizeCode(body.code || body.name);
+    if (code.length < 3) throw badRequest("Из названия не вышло кода — задайте его сами, латиницей");
+    if (await prisma.box.findUnique({ where: { code } })) throw conflict("Такой код уже занят");
+
+    const key = newKey();
+    const box = await prisma.box.create({
+      data: {
+        code,
+        name: body.name,
+        note: body.note || null,
+        keyHash: fingerprint(key),
+        keyHint: key.slice(-4),
+      },
+    });
+    // Ключ целиком — единственный раз в жизни. Дальше только его хвост.
+    res.status(201).json({ id: box.id, code: box.code, key });
+  })
+);
+
+/** Перевыпуск ключа: старый перестаёт работать сразу, Основу отключаем. */
+boxesRouter.post(
+  "/:id/key",
+  ah(async (req, res) => {
+    const box = await prisma.box.findUnique({ where: { id: req.params.id } });
+    if (!box) throw notFound("Мастерская не найдена");
+    const key = newKey();
+    await prisma.box.update({
+      where: { id: box.id },
+      data: { keyHash: fingerprint(key), keyHint: key.slice(-4) },
+    });
+    relayHub()?.disconnect(box.code, "ключ перевыпущен");
+    res.json({ key });
+  })
+);
+
+boxesRouter.patch(
+  "/:id",
+  ah(async (req, res) => {
+    const body = boxSchema.partial().extend({ isActive: z.boolean().optional() }).parse(req.body);
+    const box = await prisma.box.findUnique({ where: { id: req.params.id } });
+    if (!box) throw notFound("Мастерская не найдена");
+
+    const code = body.code ? normalizeCode(body.code) : undefined;
+    if (code && code !== box.code && (await prisma.box.findUnique({ where: { code } })))
+      throw conflict("Такой код уже занят");
+
+    const next = await prisma.box.update({
+      where: { id: box.id },
+      data: {
+        ...(body.name ? { name: body.name } : {}),
+        ...(code ? { code } : {}),
+        ...(body.note !== undefined ? { note: body.note || null } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+      },
+    });
+    // Выключили или переименовали код — прежнее соединение больше не годится.
+    if (body.isActive === false || (code && code !== box.code)) {
+      relayHub()?.disconnect(box.code, body.isActive === false ? "доступ выключен" : "код изменён");
+    }
+    res.json({ id: next.id, code: next.code, isActive: next.isActive });
+  })
+);
+
+boxesRouter.delete(
+  "/:id",
+  ah(async (req, res) => {
+    const box = await prisma.box.findUnique({ where: { id: req.params.id } });
+    if (!box) throw notFound("Мастерская не найдена");
+    await prisma.box.delete({ where: { id: box.id } });
+    relayHub()?.disconnect(box.code, "доступ удалён");
+    res.json({ ok: true });
+  })
+);
