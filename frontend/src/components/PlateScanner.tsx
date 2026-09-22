@@ -7,6 +7,7 @@ import {
   toJpeg,
   type DeviceFields,
   type PlateKey,
+  type PlateMode,
   type PlateResult,
 } from "../lib/plate";
 import { IconCamera } from "./icons";
@@ -37,11 +38,14 @@ const FIELDS: Array<{ key: PlateKey; label: string }> = [
 
 export function PlateScanner({
   current,
+  mode = "server",
   onApply,
   onClose,
 }: {
   /** Что сейчас в бланке — чтобы предупредить о замене. */
   current: DeviceFields;
+  /** Где распознавать: на сервере или здесь, в окне (локальная версия). */
+  mode?: PlateMode;
   onApply: (draft: DeviceFields) => void;
   onClose: () => void;
 }) {
@@ -113,6 +117,11 @@ export function PlateScanner({
     return () => stop();
   }, [start, stop]);
 
+  // Пока наводят камеру, распознаватель уже грузится.
+  useEffect(() => {
+    void plateApi.warmUp(mode).catch(() => {});
+  }, [mode]);
+
   // После «Переснять» окно видео появляется заново, а поток уже включён —
   // подключаем его к новому окну.
   useEffect(() => {
@@ -132,7 +141,7 @@ export function PlateScanner({
     setStage("busy");
     setError(null);
     try {
-      const r = await plateApi.recognize(image);
+      const r = await plateApi.recognize(image, mode);
       setResult(r);
       setDraft(draftOf(r));
       setTarget(r.serial ? (r.model ? "brand" : "model") : "serial");
@@ -257,7 +266,9 @@ export function PlateScanner({
           {shot && <img src={shot} alt="Снимок шильдика" className="w-full rounded-field opacity-60" />}
           <div className="flex items-center justify-center gap-3 text-ink-muted" role="status">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-line-strong border-t-brand" />
-            Распознаём — обычно пару секунд…
+            {mode === "browser"
+              ? "Распознаём на этом компьютере — несколько секунд…"
+              : "Распознаём — обычно пару секунд…"}
           </div>
         </div>
       )}

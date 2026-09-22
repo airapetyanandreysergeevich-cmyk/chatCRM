@@ -35,11 +35,32 @@ export function cspDirectives(httpsExpected: boolean): Directives {
   return httpsExpected ? {} : { upgradeInsecureRequests: null };
 }
 
+/**
+ * Распознавание шильдиков в окне программы (локальная версия) — это
+ * WebAssembly и отдельные потоки для него. Браузер разрешает первое только
+ * с 'wasm-unsafe-eval' в CSP (это не eval для JavaScript — только компиляция
+ * wasm), а второе — только на изолированной странице: для этого нужен
+ * Cross-Origin-Embedder-Policy. Всё, что грузит страница Основы, лежит на
+ * ней же, поэтому изоляция ничего не ломает. В облаке это не включается.
+ */
+export function ocrDirectives(inBrowser: boolean): Directives {
+  return inBrowser
+    ? {
+        scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
+        workerSrc: ["'self'", "blob:"],
+        // Снимок шильдика показывается в окне как blob:-картинка.
+        imgSrc: ["'self'", "data:", "blob:"],
+      }
+    : {};
+}
+
 export function securityHeaders() {
+  const inBrowser = Boolean(env.ocrModelsDir);
   return helmet({
     contentSecurityPolicy: {
       useDefaults: true,
-      directives: cspDirectives(env.cookieSecure),
+      directives: { ...cspDirectives(env.cookieSecure), ...ocrDirectives(inBrowser) },
     },
+    crossOriginEmbedderPolicy: inBrowser,
   });
 }

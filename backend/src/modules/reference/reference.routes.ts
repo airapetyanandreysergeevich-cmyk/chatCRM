@@ -44,7 +44,11 @@ referenceRouter.get(
       orderKinds: ORDER_KINDS,
       // Что включено у этой мастерской. Кнопка с камерой видна, только когда
       // распознаватель есть на сервере и собственник платформы его не выключил.
-      features: { plateOcr: Boolean(env.ocrUrl && tenant?.plateOcr) },
+      features: {
+        plateOcr: Boolean((env.ocrUrl || env.ocrModelsDir) && tenant?.plateOcr),
+        // Облачный распознаватель важнее: если есть он, снимок идёт на сервер.
+        plateOcrMode: env.ocrUrl ? "server" : "browser",
+      },
       statuses: statuses.map((s) => ({
         id: s.id,
         name: s.name,

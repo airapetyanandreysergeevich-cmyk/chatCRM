@@ -129,7 +129,7 @@ export interface Reference {
   appearance: Array<{ key: string; label: string; locked?: boolean }>;
   complaint: Array<{ key: string; label: string; locked?: boolean }>;
   /** Что включено у мастерской. */
-  features: { plateOcr: boolean };
+  features: { plateOcr: boolean; plateOcrMode?: "server" | "browser" };
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   /** Мастера и владелец мастерской — он тоже может взяться за ремонт. */
@@ -208,9 +208,8 @@ export interface CustomerHit {
 export const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toLocaleString("ru-RU")} ₽`;
 
-/** Как показать мастера в списке: владельца — с пометкой. */
-export const masterLabel = (m: { fullName: string; isOwner?: boolean }) =>
-  m.isOwner ? `${m.fullName} (владелец)` : m.fullName;
+/** Как показать мастера в списке — просто по имени, владельца тоже. */
+export const masterLabel = (m: { fullName: string }) => m.fullName;
 
 export const ordersApi = {
   reference: () => api.get<Reference>("/reference"),

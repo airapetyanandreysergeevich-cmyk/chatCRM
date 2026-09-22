@@ -50,6 +50,15 @@ const needed = [
     what: "Командная строка Prisma",
     fix: "cd backend && npm install",
   },
+  // Распознавание шильдиков: модели лежат в репозитории, файлы движка
+  // копирует scripts/ocr-assets.js из node_modules интерфейса.
+  ...require("../src/paths").OCR_FILES.map((f) => ({
+    file: path.join(here, "ocr-models", f),
+    what: `Распознаватель шильдиков: ${f}`,
+    fix: f.endsWith(".onnx") || f.endsWith(".txt")
+      ? "Файл модели должен лежать в репозитории, в desktop\\ocr-models — заберите его командой git pull"
+      : "cd frontend && npm install, затем cd ..\\desktop && node scripts/ocr-assets.js",
+  })),
   {
     file: path.join(repo, "frontend", "dist", "index.html"),
     what: "Собранный интерфейс",

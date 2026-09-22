@@ -104,6 +104,14 @@ docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   npx tsx test/pager.ts
 "
 
+# Распознаватель локальной версии: те же шильдики, те же модели, что в
+# desktop/ocr-models. Монтируем весь репозиторий — модели лежат не в frontend.
+echo ">>> Распознаватель локальной версии"
+docker run --rm -v "$(pwd):/repo" -w /repo/frontend node:20-alpine sh -c "
+  $INSTALL
+  npx tsx test/ocr-engine.ts
+"
+
 echo ">>> Подстановка шильдика в бланк"
 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:20-alpine sh -c "
   $INSTALL

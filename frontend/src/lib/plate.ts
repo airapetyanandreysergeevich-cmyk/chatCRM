@@ -26,11 +26,29 @@ export type PlateKey = "kind" | "brand" | "model" | "serial";
 
 export type DeviceFields = Record<PlateKey, string>;
 
+/**
+ * Где распознаётся снимок: на сервере (облако, сервис ocr) или прямо в
+ * окне программы (локальная версия, модели раздаёт Основа).
+ */
+export type PlateMode = "server" | "browser";
+
 export const plateApi = {
-  recognize: (image: Blob) => {
+  recognize: async (image: Blob, mode: PlateMode = "server") => {
+    if (mode === "browser") {
+      // Модуль с распознавателем грузится только здесь: в облаке его никто
+      // не скачивает.
+      const { recognizeHere } = await import("./ocr/browser");
+      const ocr = await recognizeHere(image);
+      return api.post<PlateResult>("/plate/parse", ocr);
+    }
     const form = new FormData();
     form.append("image", image, "plate.jpg");
     return api.upload<PlateResult>("/plate/recognize", form);
+  },
+  warmUp: async (mode: PlateMode) => {
+    if (mode !== "browser") return;
+    const { warmUp } = await import("./ocr/browser");
+    warmUp();
   },
 };
 

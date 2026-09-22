@@ -101,6 +101,12 @@ app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не н
 // Файлы приложения кэшируются надолго: их имена содержат отпечаток сборки.
 // index.html — никогда, иначе после обновления останется старая страница,
 // ссылающаяся на файлы, которых уже нет.
+// Модели распознавателя шильдиков — только в локальной версии (см. lib/plate
+// во фронтенде). Раньше интерфейса: иначе запрос модели получил бы index.html.
+if (env.ocrModelsDir) {
+  app.use("/ocr-models", express.static(env.ocrModelsDir, { index: false, maxAge: "30d", fallthrough: false }));
+}
+
 if (env.staticDir) {
   app.use(express.static(env.staticDir, { index: false, maxAge: "365d", immutable: true }));
   app.get(/^\/(?!api\/).*/, (_req, res) => {

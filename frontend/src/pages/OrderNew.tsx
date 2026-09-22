@@ -679,6 +679,7 @@ export default function OrderNew() {
     {scanning && (
       <PlateScanner
         current={device}
+        mode={ref?.features.plateOcrMode ?? "server"}
         onClose={() => setScanning(false)}
         onApply={(draft) => {
           setDevice((d) => mergeDevice(d, draft));

@@ -85,3 +85,7 @@ deploy/downloads/*
 /node_modules/
 deploy/package.json
 deploy/package-lock.json
+
+# Движки распознавателя: копируются из frontend/node_modules перед сборкой
+desktop/ocr-models/*.wasm
+desktop/ocr-models/*.mjs

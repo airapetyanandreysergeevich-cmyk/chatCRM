@@ -117,7 +117,34 @@ function frontendDir() {
   );
 }
 
+/**
+ * Модели распознавателя шильдиков. Необязательны: без них программа работает
+ * как раньше, просто без кнопки с камерой, — поэтому здесь не ошибка, а null.
+ * Папка считается найденной, только если в ней есть всё нужное: модели из
+ * репозитория и файлы движка, которые кладёт scripts/ocr-assets.js.
+ */
+const OCR_FILES = [
+  "ch_PP-OCRv4_det_infer.onnx",
+  "ch_ppocr_mobile_v2.0_cls_infer.onnx",
+  "ch_PP-OCRv4_rec_infer.onnx",
+  "ppocr_keys.txt",
+  "ort-wasm-simd-threaded.wasm",
+  "zxing_reader.wasm",
+];
+
+function ocrModelsDir() {
+  if (process.env.FINECRM_OCR_MODELS) return process.env.FINECRM_OCR_MODELS;
+  const candidates = [
+    process.resourcesPath && path.join(process.resourcesPath, "ocr-models"),
+    path.join(appDir(), "ocr-models"),
+  ];
+  for (const dir of candidates) {
+    if (dir && OCR_FILES.every((f) => fs.existsSync(path.join(dir, f)))) return dir;
+  }
+  return null;
+}
+
 /** Имя исполняемого файла с учётом системы. */
 const exe = (name) => (process.platform === "win32" ? `${name}.exe` : name);
 
-module.exports = { layout, ensureLayout, postgresBinDir, backendDir, frontendDir, exe };
+module.exports = { layout, ensureLayout, postgresBinDir, backendDir, frontendDir, ocrModelsDir, OCR_FILES, exe };

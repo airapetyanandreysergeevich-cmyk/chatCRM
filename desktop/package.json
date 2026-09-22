@@ -15,7 +15,7 @@
     "check-db": "node test/local-db.js",
     "check-backup": "node test/backup.js",
     "check": "npm run check-paths && npm run check-tool && npm run check-backend && npm run check-network && npm run check-db && npm run check-backup",
-    "build-parts": "cd ../backend && npx prisma generate && npm run build && cd ../frontend && npm run build",
+    "build-parts": "cd ../backend && npx prisma generate && npm run build && cd ../frontend && npm run build && cd ../desktop && node scripts/ocr-assets.js",
     "predist": "npm run build-parts && node test/before-dist.js",
     "dist": "electron-builder --win"
   },
@@ -79,6 +79,10 @@
       {
         "from": "../frontend/dist",
         "to": "frontend"
+      },
+      {
+        "from": "ocr-models",
+        "to": "ocr-models"
       }
     ],
     "win": {

@@ -8,7 +8,7 @@ const path = require("path");
 
 const config = require("./config");
 const location = require("./location");
-const { ensureLayout, backendDir, frontendDir } = require("./paths");
+const { ensureLayout, backendDir, frontendDir, ocrModelsDir } = require("./paths");
 const { prepareMain, backendEnv } = require("./bootstrap");
 const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
@@ -39,6 +39,19 @@ const userData = () => app.getPath("userData");
 // Две копии на одном компьютере подрались бы за базу: вторая не поднимется, а
 // первая покажет своё окно.
 if (!app.requestSingleInstanceLock()) app.quit();
+
+// Камера для шильдиков на компьютерах сотрудников. Они открывают Основу по
+// сетевому адресу (http://192.168…), а браузер даёт камеру только надёжным
+// адресам — https или своему компьютеру. Адрес Основы программа знает сама
+// и считает его надёжным; ключ задаётся до запуска окна, иначе не действует.
+try {
+  const saved = JSON.parse(fs.readFileSync(path.join(userData(), "location.json"), "utf8"));
+  if (saved && saved.mode === config.MODE.CLIENT && typeof saved.connectTo === "string") {
+    app.commandLine.appendSwitch("unsafely-treat-insecure-origin-as-secure", new URL(saved.connectTo).origin);
+  }
+} catch {
+  // Первый запуск или адрес не задан — камеры по сети просто не будет.
+}
 
 app.on("second-instance", () => {
   if (win) {
@@ -175,7 +188,13 @@ async function startBackend(cfg, l) {
     dir: backendDir(),
     port,
     logDir: l.logs,
-    env: { ...backendEnv(cfg, l), PORT: String(port), STATIC_DIR: frontendDir() },
+    env: {
+      ...backendEnv(cfg, l),
+      PORT: String(port),
+      STATIC_DIR: frontendDir(),
+      // Распознавание шильдиков в окне программы. Нет моделей — нет кнопки.
+      ...(ocrModelsDir() ? { OCR_MODELS_DIR: ocrModelsDir() } : {}),
+    },
   });
 
   backend.onExit = (code) => {

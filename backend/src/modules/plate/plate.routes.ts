@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 import multer from "multer";
+import { z } from "zod";
 import { prisma, withTenant } from "../../lib/db";
 import { env } from "../../lib/env";
 import { AppError, ah, badRequest, forbidden } from "../../lib/errors";
@@ -49,8 +50,7 @@ plateRouter.post(
   ah(async (req, res) => {
     if (!env.ocrUrl) throw new AppError(503, "Распознавание шильдиков на этом сервере не установлено");
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true } });
-    if (!tenant?.plateOcr) throw forbidden("Распознавание шильдиков для мастерской выключено");
+    await assertEnabled(req);
 
     const file = req.file;
     if (!file || !file.buffer.length) throw badRequest("Нет снимка");
@@ -87,20 +87,55 @@ plateRouter.post(
       waiting -= 1;
     }
 
-    // Марки, которые мастерская уже вводила не раз, — тоже словарь: мастерская
-    // по кофемашинам знает свои марки лучше любого встроенного списка.
-    const [dictionary, hints] = await Promise.all([
-      loadDictionary(),
-      withTenant(tenantOf(req), (tx) =>
-        tx.deviceHint.findMany({
-          where: { field: "brand", uses: { gte: 2 } },
-          orderBy: { uses: "desc" },
-          take: 300,
-          select: { value: true },
-        })
-      ),
-    ]);
-
-    res.json(parsePlate(ocr, { dictionary, knownBrands: hints.map((h) => h.value) }));
+    res.json(await parseFor(req, ocr));
   })
 );
+
+/**
+ * Разбор строк, распознанных прямо в окне программы (локальная версия).
+ *
+ * Снимок сюда не приходит — только текст и штрихкоды. Разбор тот же, что у
+ * облачного пути: одни правила, один словарь, одни тесты.
+ */
+const parseSchema = z.object({
+  lines: z
+    .array(
+      z.object({
+        text: z.string().max(300),
+        score: z.number().optional(),
+        box: z.array(z.number()).max(8).optional(),
+      })
+    )
+    .max(400),
+  barcodes: z.array(z.object({ format: z.string().max(40), text: z.string().max(500) })).max(20).default([]),
+});
+
+plateRouter.post(
+  "/parse",
+  ah(async (req, res) => {
+    await assertEnabled(req);
+    res.json(await parseFor(req, parseSchema.parse(req.body)));
+  })
+);
+
+async function assertEnabled(req: Request): Promise<void> {
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true } });
+  if (!tenant?.plateOcr) throw forbidden("Распознавание шильдиков для мастерской выключено");
+}
+
+async function parseFor(req: Request, ocr: OcrResult) {
+  // Марки, которые мастерская уже вводила не раз, — тоже словарь: мастерская
+  // по кофемашинам знает свои марки лучше любого встроенного списка.
+  const [dictionary, hints] = await Promise.all([
+    loadDictionary(),
+    withTenant(tenantOf(req), (tx) =>
+      tx.deviceHint.findMany({
+        where: { field: "brand", uses: { gte: 2 } },
+        orderBy: { uses: "desc" },
+        take: 300,
+        select: { value: true },
+      })
+    ),
+  ]);
+  return parsePlate(ocr, { dictionary, knownBrands: hints.map((h) => h.value) });
+}

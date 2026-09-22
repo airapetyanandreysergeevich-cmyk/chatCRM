@@ -58,6 +58,9 @@ export const env = {
   // с камерой на бланке не показывается. Так в локальной версии, где своего
   // распознавателя нет.
   ocrUrl: (process.env.OCR_URL ?? "").replace(/\/+$/, ""),
+  // Папка с моделями распознавателя для локальной версии. Задана — модели
+  // раздаются по /ocr-models/, и снимок распознаётся прямо в окне программы.
+  ocrModelsDir: process.env.OCR_MODELS_DIR ?? "",
 };
 
 export const pushConfigured = Boolean(env.vapidPublicKey && env.vapidPrivateKey);

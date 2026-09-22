@@ -165,6 +165,26 @@ export default function Layout() {
     to === "/" ? location.pathname === "/" : location.pathname === to || location.pathname.startsWith(to + "/");
 
   const stripRef = useRef<HTMLDivElement>(null);
+
+  // Высота нижнего меню — в переменную --bottom-nav: окна-листы снизу
+  // заканчиваются над меню, а не прячут под ним свои кнопки. На широком
+  // экране меню скрыто, высота нулевая, и окна стоят как обычно.
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const put = () => root.style.setProperty("--bottom-nav", `${el.offsetHeight}px`);
+    put();
+    const watch = new ResizeObserver(put);
+    watch.observe(el);
+    window.addEventListener("resize", put);
+    return () => {
+      watch.disconnect();
+      window.removeEventListener("resize", put);
+      root.style.removeProperty("--bottom-nav");
+    };
+  }, []);
   useEffect(() => {
     // Лента шире экрана, и раздел, в который человек только что перешёл,
     // может оказаться за краем. Подвозим его к середине — иначе непонятно,
@@ -387,7 +407,7 @@ export default function Layout() {
             Панель прибита к низу и не ездит: отступ снизу берётся из env(),
             иначе на телефонах с полоской жеста нижний ряд оказывается под ней.
           */}
-          <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
+          <nav ref={navRef} className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
             <div ref={stripRef} className="no-scrollbar flex gap-0.5 overflow-x-auto px-2">
               {items.map((i) => (
                 <NavLink
