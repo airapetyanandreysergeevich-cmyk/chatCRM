@@ -24,6 +24,11 @@ export type RemoteAccess = {
   code?: string;
   /** Почта, на которую выдан доступ: видно, чья это фраза. */
   email?: string;
+  /**
+   * Кому выдавали ключи сотрудников. Сами ключи не храним: они ничего не
+   * открывают, а только говорят, куда идти. Список — память владельца.
+   */
+  staff?: Array<{ id: string; label: string; issuedAt: string }>;
 };
 
 const KEY = "remoteAccess";
@@ -43,6 +48,7 @@ export async function readRemoteAccess(): Promise<RemoteAccess | null> {
     key: typeof raw.key === "string" ? raw.key : "",
     code: typeof raw.code === "string" ? raw.code : "",
     email: typeof raw.email === "string" ? raw.email : "",
+    staff: Array.isArray(raw.staff) ? (raw.staff as RemoteAccess["staff"]) : [],
   };
 }
 

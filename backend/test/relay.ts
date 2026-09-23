@@ -3,8 +3,8 @@ import express from "express";
 import http from "http";
 import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
-import { encodeInvite, parseInvite, publicAddress } from "../src/modules/relay/invite";
-import { codeFromEmail } from "../src/modules/relay/boxes.service";
+import { encodeInvite, encodeStaffKey, parseInvite, parseStaffKey, publicAddress } from "../src/modules/relay/invite";
+import { newCode } from "../src/modules/relay/boxes.service";
 
 /**
  * Туннель целиком: запрос из интернета → узел связи → Основа → и обратно.
@@ -28,6 +28,11 @@ const CODE = "servis-na-lenina";
 /** Поддельная Основа: отвечает так же, как настоящий сервер мастерской. */
 function startBox(): Promise<{ url: string; close: () => void }> {
   const app = express();
+  // Страница Основы приходит со своими правилами безопасности — как в жизни.
+  app.use((_req, res, next) => {
+    res.setHeader("content-security-policy", "default-src 'self';script-src 'self' 'wasm-unsafe-eval'");
+    next();
+  });
   // Так выглядит настоящая страница приложения: с <base href="/"> и
   // относительными путями к файлам сборки.
   app.get("/", (_req, res) => {
@@ -151,8 +156,20 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
     parsed?.key === KEY && parsed?.code === CODE && parsed?.url === DEFAULT_URL && parsed?.email === "master@servis.ru",
     "фраза разбирается обратно целиком, вместе с почтой"
   );
-  check(codeFromEmail("Masterskaya.Servis+crm@example.ru") === "masterskaya-servis", "код в адресе делается из почты");
-  check(/^box-[0-9a-f]{6}$/.test(codeFromEmail("ы@почта.рф")), "из почты без латиницы код всё равно получается");
+  check(/^[a-z2-9]{14}$/.test(newCode()), "код в адресе случайный и ни о чём не говорит");
+  check(newCode() !== newCode(), "два кода подряд не совпадают");
+
+  // Ключ сотрудника: внутри только адрес мастерской, ни ключа туннеля, ни пароля.
+  const staff = encodeStaffKey({ address: "https://www.finecrm.ru/b/kn7tuw2m4p9xzq/", workshop: "Сервис на Ленина", label: "Сергей" });
+  const staffBack = parseStaffKey(`Серёж, вот доступ:\n${staff}\nвходи своим логином`);
+  check(staffBack?.address === "https://www.finecrm.ru/b/kn7tuw2m4p9xzq/", "ключ сотрудника разбирается из письма");
+  check(staffBack?.workshop === "Сервис на Ленина" && staffBack?.label === "Сергей", "в ключе видно мастерскую и кому выдан");
+  check(!staff.includes(KEY), "ключа туннеля в ключе сотрудника нет");
+  check(
+    parseStaffKey("https://www.finecrm.ru/b/kn7tuw2m4p9xzq/")?.address === "https://www.finecrm.ru/b/kn7tuw2m4p9xzq/",
+    "вставленный адрес тоже принимается"
+  );
+  check(parseStaffKey("здравствуйте") === null, "обычный текст ключом не считается");
   check(
     parseInvite(`  Держите:\n${phrase}\n\nвопросы — пишите  `, DEFAULT_URL)?.key === KEY,
     "фраза вынимается из письма с лишним текстом"
@@ -197,6 +214,11 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
     "приложение узнаёт свой адрес из страницы"
   );
   check(Number(page.headers["content-length"]) === page.body.length, "длина ответа пересчитана после дописывания");
+  // Без отпечатка браузер молча не выполнит наш скрипт, и приложение решит,
+  // что живёт в корне сайта, — ровно та поломка, что была на живом сервере.
+  const csp = String(page.headers["content-security-policy"] ?? "");
+  check(/script-src 'self' 'wasm-unsafe-eval' 'sha256-[A-Za-z0-9+/=]+'/.test(csp), "наш скрипт разрешён по отпечатку");
+  check(!csp.includes("unsafe-inline"), "остальные встроенные скрипты остались запрещёнными");
 
   const asset = await ask(cloud.port, `/b/${CODE}/assets/app.js`);
   check(asset.status === 200 && asset.body.toString() === "console.log(1)", "файлы приложения доходят как есть");

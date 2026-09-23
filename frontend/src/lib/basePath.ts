@@ -16,10 +16,33 @@ declare global {
   }
 }
 
+/**
+ * Откуда берётся приставка.
+ *
+ * Главный источник — тег <base> в странице: его правит узел связи, и он
+ * работает всегда. Переменная оставлена запасным путём и стоит первой только
+ * потому, что её ставит тот же узел связи: если однажды <base> исчезнет,
+ * приложение всё равно найдёт свой адрес.
+ *
+ * Почему не наоборот: встроенные скрипты запрещены правилами безопасности
+ * (script-src 'self'), и переменная доезжает не всегда — а тег доезжает.
+ */
 function read(): string {
-  const raw = typeof window !== "undefined" ? window.__FINECRM_BASE__ : "";
+  const declared = typeof window !== "undefined" ? window.__FINECRM_BASE__ : "";
+  const raw = declared || baseTag();
   if (!raw || !raw.startsWith("/")) return "/";
   return raw.endsWith("/") ? raw : raw + "/";
+}
+
+function baseTag(): string {
+  if (typeof document === "undefined") return "/";
+  const href = document.querySelector("base")?.href;
+  if (!href) return "/";
+  try {
+    return new URL(href, document.location.href).pathname;
+  } catch {
+    return "/";
+  }
 }
 
 /** Всегда со слешами по краям: «/» или «/b/servis-na-lenina/». */

@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Modal } from "../components/Modal";
 import {
   Banner,
   Button,
   Card,
   Checkbox,
+  Input,
   PageHeader,
   SectionLabel,
   Spinner,
   Textarea,
 } from "../components/ui";
 import { ApiError, api } from "../lib/api";
+import { formatDateTime } from "../lib/format";
 
 /**
  * Доступ к Основе из интернета — экран владельца мастерской.
@@ -26,6 +29,13 @@ import { ApiError, api } from "../lib/api";
  * показывается никогда — видно только четыре последних знака ключа.
  */
 
+/** Кому владелец уже выдавал ключ — список для памяти, а не для проверки. */
+interface StaffEntry {
+  id: string;
+  label: string;
+  issuedAt: string;
+}
+
 interface State {
   enabled: boolean;
   /** Фраза уже вставлена: можно просто двигать переключатель. */
@@ -35,6 +45,7 @@ interface State {
   /** Почта, на которую поставщик выдал доступ. */
   email: string;
   address: string;
+  staff: StaffEntry[];
   state: "off" | "connecting" | "online" | "error";
   detail: string | null;
 }
@@ -145,6 +156,8 @@ export default function RemoteAccess() {
         </p>
       </Card>
 
+      <StaffKeys data={data} onChange={load} />
+
       <Card>
         <SectionLabel>{data.connected ? "Новая фраза подключения" : "Фраза подключения"}</SectionLabel>
         <form
@@ -196,8 +209,158 @@ export default function RemoteAccess() {
             Фраза — это пароль от входа снаружи. Передавайте её так же бережно и не пересылайте в
             общие чаты.
           </li>
+          <li>
+            Ключ сотрудника — не пароль: в нём только адрес вашей мастерской. Потерял телефон —
+            отключите его учётную запись в разделе «Сотрудники», и ключ станет бесполезен.
+          </li>
         </ul>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Ключи для сотрудников.
+ *
+ * Адрес мастерской теперь случайный — /b/kn7tuw2m4p9xzq, и продиктовать его
+ * по телефону нельзя: ошибутся на третьем знаке. Поэтому владелец выдаёт
+ * каждому строку, а сотрудник вставляет её на странице «Подключение» — в
+ * программе для Windows, на телефоне или на сайте, — и попадает на экран
+ * входа своей мастерской.
+ *
+ * Прав такой ключ не даёт никаких: вход остаётся прежним, логином и паролем.
+ * Поэтому и «отозвать» его нечем — отзывается учётная запись сотрудника.
+ * Список выданных нужен только владельцу: вспомнить, кому уже отправлял.
+ */
+function StaffKeys({ data, onChange }: { data: State; onChange: () => Promise<void> }) {
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ key: string; label: string } | null>(null);
+
+  async function issue(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.post<{ key: string }>("/settings/remote-access/staff-key", {
+        label: label.trim(),
+      });
+      setIssued({ key: res.key, label: label.trim() });
+      setLabel("");
+      await onChange();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось выдать ключ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function forget(id: string) {
+    await api.del(`/settings/remote-access/staff-key/${id}`);
+    await onChange();
+  }
+
+  return (
+    <Card>
+      <SectionLabel>Ключи для сотрудников</SectionLabel>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
+        Чтобы сотруднику не диктовать адрес, выдайте ему ключ. Он вставит его в программе или на
+        сайте, в разделе «Подключение», — и дальше войдёт своим логином и паролем, как обычно.
+      </p>
+
+      {!data.connected ? (
+        <p className="mt-3 text-[12.5px] text-ink-dim">
+          Ключи появятся, когда мастерская будет подключена: адрес для них берётся отсюда же.
+        </p>
+      ) : (
+        <>
+          {error && (
+            <div className="mt-3">
+              <Banner tone="error">{error}</Banner>
+            </div>
+          )}
+          <form onSubmit={issue} className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Кому: Иван, приёмщик"
+              aria-label="Кому выдаётся ключ"
+              maxLength={60}
+            />
+            <Button type="submit" disabled={busy || !label.trim()} className="sm:min-w-[170px]">
+              {busy ? "Выдаём…" : "Выдать ключ"}
+            </Button>
+          </form>
+
+          {data.staff.length > 0 && (
+            <ul className="mt-4 divide-y divide-line border-t border-line">
+              {data.staff.map((s) => (
+                <li key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="min-w-0">
+                    <span className="block truncate text-[14px] font-semibold">{s.label}</span>
+                    <span className="text-[12.5px] text-ink-dim">выдан {formatDateTime(s.issuedAt)}</span>
+                  </span>
+                  <Button
+                    variant="secondary"
+                    className="min-h-[34px] shrink-0 px-3 text-[13px]"
+                    onClick={() => void forget(s.id)}
+                  >
+                    Убрать
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">
+            Ключ можно выдать ещё раз в любой момент: он один и тот же для всех — это просто адрес
+            вашей мастерской. «Убрать» стирает запись из списка, у сотрудника ничего не меняется.
+          </p>
+        </>
+      )}
+
+      {issued && <StaffKeyModal issued={issued} onClose={() => setIssued(null)} />}
+    </Card>
+  );
+}
+
+/** Ключ целиком — чтобы скопировать одной кнопкой и отправить человеку. */
+function StaffKeyModal({
+  issued,
+  onClose,
+}: {
+  issued: { key: string; label: string };
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(issued.key);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <Modal title={`Ключ для: ${issued.label}`} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-[13.5px] leading-relaxed text-ink-muted">
+          Отправьте эту строку сотруднику. Он откроет программу или сайт, выберет «Подключение к
+          мастерской», вставит её целиком — и увидит привычный вход.
+        </p>
+        <div className="break-all rounded-field border border-line bg-surface-input px-3 py-2.5 font-mono text-[13px]">
+          {issued.key}
+        </div>
+        {copied && <p className="text-center text-[13px] text-state-done">Скопировано</p>}
+        <Button type="button" onClick={() => void copy()} className="w-full">
+          Скопировать ключ
+        </Button>
+        <Button type="button" variant="secondary" onClick={onClose} className="w-full">
+          Готово
+        </Button>
+      </div>
+    </Modal>
   );
 }

@@ -17,6 +17,7 @@ import InterfacePage from "./pages/Interface";
 import NotificationsPage from "./pages/Notifications";
 import SettingsPage from "./pages/Settings";
 import RemoteAccess from "./pages/RemoteAccess";
+import Connect from "./pages/Connect";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import OrderPrint from "./pages/OrderPrint";
@@ -50,6 +51,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={status === "ready" ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/connect" element={<Connect />} />
       <Route path="/register" element={status === "ready" ? <Navigate to="/" replace /> : <Register />} />
 
       <Route element={<ProtectedRoute />}>

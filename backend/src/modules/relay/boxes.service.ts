@@ -23,33 +23,38 @@ export function newKey(): string {
 }
 
 /**
- * Код в адресе — из почты владельца.
+ * Код в адресе — случайный.
  *
- * Доступ выдан человеку, а не безымянной коробке, поэтому и адрес делается из
- * его почты: `masterskaya@example.ru` → `/b/masterskaya/`. Часть после
- * собачки отбрасывается — она одинаковая у половины мастерских и в адресе
- * только мешает.
+ * Сначала он делался из почты владельца: `master@servis.ru` → `/b/master/`.
+ * Читается приятно, но это вывеска: зная почту человека, чужой знает и адрес
+ * его мастерской, а дальше остаётся подобрать только пароль сотрудника.
+ * Адрес — не пароль, но и справочником быть не должен.
  *
- * Если такой код уже занят (два `info@…` у разных людей — обычное дело),
- * дописываем номер: `info-2`, `info-3`. Молча отдать второму человеку чужой
- * адрес нельзя, а придумывать ему псевдоним не за что.
+ * Поэтому код ни о чём не говорит: четырнадцать случайных знаков из алфавита
+ * без похожих букв (ни `l`, ни `1`, ни `0`, ни `o`), чтобы его можно было
+ * продиктовать голосом и не ошибиться.
  */
-export function codeFromEmail(email: string): string {
-  const local = email.trim().toLowerCase().split("@")[0] ?? "";
-  const code = normalizeCode(local.replace(/\+.*$/, ""));
-  if (code.length >= 3) return code.slice(0, 32);
-  // Почта целиком не латиницей — адрес всё равно должен получиться, и
-  // спрашивать человека не о чем: делаем короткий код из самой почты.
-  return `box-${crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 6)}`;
+const CODE_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
+const CODE_LENGTH = 14;
+
+export function newCode(): string {
+  const bytes = crypto.randomBytes(CODE_LENGTH);
+  let out = "";
+  for (const b of bytes) out += CODE_ALPHABET[b % CODE_ALPHABET.length];
+  return out;
 }
 
-/** Свободный код: занят — дописываем номер, пока не найдём свободный. */
-export async function freeCode(base: string): Promise<string> {
-  for (let i = 1; i < 100; i += 1) {
-    const code = i === 1 ? base : `${base}-${i}`;
+/**
+ * Свободный код. Совпадение на четырнадцати знаках невероятно, но проверка
+ * стоит один запрос: получить отказ по уникальному ключу базы в середине
+ * выдачи доступа — куда неприятнее.
+ */
+export async function freeCode(): Promise<string> {
+  for (let i = 0; i < 5; i += 1) {
+    const code = newCode();
     if (!(await prisma.box.findUnique({ where: { code }, select: { id: true } }))) return code;
   }
-  return `${base}-${Date.now().toString(36)}`;
+  return `${newCode()}${Date.now().toString(36)}`;
 }
 
 /** Код в адресе: только то, что человек наберёт руками и не ошибётся. */

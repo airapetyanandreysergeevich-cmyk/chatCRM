@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { encodeInvite, publicAddress } from "./invite";
-import { codeFromEmail, fingerprint, freeCode, newKey, normalizeCode } from "./boxes.service";
+import { fingerprint, freeCode, newKey, normalizeCode } from "./boxes.service";
 import { relayHub } from "./relay.instance";
 
 /**
@@ -39,7 +39,7 @@ const boxSchema = z.object({
    * ней видно, кому выдан ключ, и на неё по просьбе высылается фраза заново.
    */
   email: z.string().trim().toLowerCase().email("Похоже, это не email"),
-  /** Код в адресе — обычно из почты, но можно задать свой. */
+  /** Код в адресе. Обычно случайный; задать свой можно, но незачем. */
   code: z.string().trim().min(3, "Код от 3 знаков").max(40).optional(),
   note: z.string().trim().max(500).optional(),
 });
@@ -94,7 +94,7 @@ boxesRouter.post(
     if (body.code && asked.length < 3) throw badRequest("Код должен быть из латинских букв и цифр");
     if (asked && (await prisma.box.findUnique({ where: { code: asked } })))
       throw conflict("Такой код уже занят");
-    const code = asked || (await freeCode(codeFromEmail(body.email)));
+    const code = asked || (await freeCode());
 
     const key = newKey();
     const box = await prisma.box.create({

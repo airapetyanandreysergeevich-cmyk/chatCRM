@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "http";
 import type { Duplex } from "stream";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -148,7 +149,13 @@ export function createRelayHub(opts: RelayOptions) {
       return;
     }
     if (p.html) {
-      const body = withBase(Buffer.concat(p.html), `/b/${conn.code}/`);
+      const base = `/b/${conn.code}/`;
+      const body = withBase(Buffer.concat(p.html), base);
+      // Встроенный скрипт с приставкой запрещён правилами безопасности самой
+      // Основы (script-src 'self'), и браузер молча его не выполняет. Поэтому
+      // разрешаем ровно его — по отпечатку содержимого, как это и задумано в
+      // стандарте: остальные встроенные скрипты остаются запрещёнными.
+      p.headers = allowInlineBase(p.headers, base);
       sendHead(conn, p, body.length);
       p.res.end(body);
     } else {
@@ -295,6 +302,30 @@ export function withCookiePath(cookie: string, prefix: string): string {
 }
 
 /**
+ * Разрешить наш единственный встроенный скрипт — по отпечатку.
+ *
+ * Правила безопасности задаёт Основа, и ослаблять их целиком («разрешить все
+ * встроенные скрипты») ради одной строки нельзя: это ровно та дыра, от
+ * которой правила и защищают. Отпечаток разрешает одну конкретную строку и
+ * ничего больше.
+ */
+export function allowInlineBase(
+  headers: Record<string, string | string[]>,
+  base: string
+): Record<string, string | string[]> {
+  const name = Object.keys(headers).find((h) => h.toLowerCase() === "content-security-policy");
+  if (!name) return headers;
+  const value = String(headers[name]);
+  if (!/script-src/i.test(value)) return headers;
+  const hash = createHash("sha256").update(baseScript(base), "utf8").digest("base64");
+  const patched = value.replace(/script-src([^;]*)/i, (m, rest) => `script-src${rest} 'sha256-${hash}'`);
+  return { ...headers, [name]: patched };
+}
+
+/** Один и тот же текст скрипта и для страницы, и для отпечатка — иначе не совпадёт. */
+const baseScript = (base: string) => `window.__FINECRM_BASE__=${JSON.stringify(base)}`;
+
+/**
  * Дописать в страницу приставку адреса.
  *
  * Приложение собрано для корня сайта: скрипты оно просит по «/assets/…», а
@@ -306,7 +337,7 @@ export function withBase(html: Buffer, base: string): Buffer {
   const text = html.toString("utf8");
   if (!/<head[^>]*>/i.test(text)) return html;
 
-  const marker = `<script>window.__FINECRM_BASE__=${JSON.stringify(base)}</script>`;
+  const marker = `<script>${baseScript(base)}</script>`;
   // В странице приложения <base> уже есть и указывает на корень — его
   // достаточно подменить. У чужой страницы (скажем, у старой сборки) его
   // может не быть вовсе: тогда дописываем свой.
