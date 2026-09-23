@@ -111,11 +111,7 @@ export default function Login() {
             <p className="mt-2.5 text-[13px] leading-relaxed text-ink-muted">
               База в вашей мастерской? Входите этой же формой, дописав к почте имя мастерской:{" "}
               <span className="whitespace-nowrap font-mono text-[12.5px] text-ink">anton@repair.ru.local20</span>.
-              Имя подскажет владелец. Или{" "}
-              <Link to="/connect" className="font-semibold text-brand hover:text-brand-ink">
-                войдите по ключу
-              </Link>
-              .
+              Имя подскажет владелец.
             </p>
           )}
           <p className="mt-2.5 text-[12.5px] text-ink-dim">

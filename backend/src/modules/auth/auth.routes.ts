@@ -19,10 +19,20 @@ const loginLimiter = rateLimit({
   message: { error: "Слишком много попыток входа. Попробуйте через 15 минут." },
 });
 
+/**
+ * Почту проверяем в два приёма.
+ *
+ * Сотрудник коробочной мастерской пишет её с хвостом — `ivan@mail.ru.local4`,
+ * — и обычная проверка такую строку отвергает: в последней части домена
+ * оказываются цифры, а настоящих доменов такого вида не бывает. Поэтому
+ * сначала отрезаем хвост и только потом смотрим, почта ли осталась.
+ */
 const loginSchema = z.object({
-  email: z.string().min(1, "Укажите email").email("Похоже, это не email"),
+  email: z.string().trim().min(1, "Укажите email"),
   password: z.string().min(1, "Укажите пароль"),
 });
+
+const emailOnly = z.object({ email: z.string().email("Похоже, это не email") });
 
 /**
  * Вход один на всех: и для сотрудников мастерских, и для команды платформы.
@@ -92,6 +102,7 @@ authRouter.post(
     const body = loginSchema.parse(req.body);
 
     const split = splitTag(body.email);
+    emailOnly.parse({ email: split ? split.email : body.email });
     if (split && (await loginThroughBox(split.tag, split.email, body.password, res))) return;
 
     const { accessToken, refresh, kind } = await login({ ...body, req });

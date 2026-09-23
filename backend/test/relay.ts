@@ -3,6 +3,7 @@ import express from "express";
 import http from "http";
 import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
+import { z } from "zod";
 import { isTag, splitTag } from "../src/modules/relay/boxes.service";
 import { encodeInvite, encodeStaffKey, parseInvite, parseStaffKey, publicAddress } from "../src/modules/relay/invite";
 import { newCode } from "../src/modules/relay/boxes.service";
@@ -306,6 +307,14 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   check(splitTag("anton@repair.ru.localhost") === null, "похожий хвост не считается именем");
   check(splitTag("anton.local20") === null, "строка без собаки почтой не считается");
   check(isTag("local20") && !isTag("local") && !isTag("local20a"), "имя мастерской — слово и число, и только");
+  // Обычная проверка почты отвергает mail.ru.local4: цифры в последней части
+  // домена. Поэтому хвост отрезается до проверки, а не после.
+  const asEmail = z.string().email();
+  check(!asEmail.safeParse("ivan@mail.ru.local4").success, "почта с хвостом обычную проверку не проходит");
+  check(
+    asEmail.safeParse(splitTag("ivan@mail.ru.local4")?.email ?? "").success,
+    "а без хвоста — проходит, поэтому отрезаем первым делом"
+  );
 
   const entered = await hub.request(CODE, "/api/auth/login", {
     method: "POST",

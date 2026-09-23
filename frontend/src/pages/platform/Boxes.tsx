@@ -62,6 +62,7 @@ export default function Boxes() {
   const [creating, setCreating] = useState(false);
   const [issued, setIssued] = useState<Issued | null>(null);
   const [confirmKey, setConfirmKey] = useState<Box | null>(null);
+  const [confirmDrop, setConfirmDrop] = useState<Box | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -88,6 +89,19 @@ export default function Boxes() {
     const next = await api.post<Issued>(`/platform/boxes/${box.id}/key`, {});
     setConfirmKey(null);
     setIssued(next);
+    await load();
+  }
+
+  /**
+   * Удалить доступ совсем.
+   *
+   * Выключатель рядом — это пауза: мастерская отвалилась, но запись осталась,
+   * и включить обратно можно одним нажатием. Удаление — насовсем: освобождает
+   * и код, и имя в облаке, а мастерской придётся выдавать доступ заново.
+   */
+  async function drop(box: Box) {
+    await api.del(`/platform/boxes/${box.id}`);
+    setConfirmDrop(null);
     await load();
   }
 
@@ -168,6 +182,13 @@ export default function Boxes() {
                   >
                     {b.isActive ? "Выключить" : "Включить"}
                   </Button>
+                  <Button
+                    variant="secondary"
+                    className="min-h-[34px] px-3 text-[13px]"
+                    onClick={() => setConfirmDrop(b)}
+                  >
+                    Удалить
+                  </Button>
                 </div>
               }
             />
@@ -198,6 +219,30 @@ export default function Boxes() {
                 Выпустить новую
               </Button>
               <Button variant="secondary" onClick={() => setConfirmKey(null)} className="sm:flex-1">
+                Отмена
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDrop && (
+        <Modal title={`Удалить доступ для ${confirmDrop.email}?`} onClose={() => setConfirmDrop(null)}>
+          <div className="space-y-4">
+            <Banner tone="warning">
+              Мастерская отключится сразу, её адрес и имя в облаке освободятся, а сотрудники перестанут
+              входить с общего сайта. Заказы и база при этом останутся на компьютере мастерской —
+              программа продолжит работать по локальной сети.
+            </Banner>
+            <p className="text-[13.5px] text-ink-muted">
+              Если нужно просто приостановить услугу, лучше «Выключить»: запись останется, и доступ
+              вернётся одним нажатием.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row-reverse">
+              <Button variant="danger" onClick={() => void drop(confirmDrop)} className="sm:flex-1">
+                Удалить насовсем
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmDrop(null)} className="sm:flex-1">
                 Отмена
               </Button>
             </div>
