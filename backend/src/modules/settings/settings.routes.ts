@@ -275,6 +275,8 @@ settingsRouter.get(
       keyHint: saved?.key ? saved.key.slice(-4) : "",
       code: saved?.code ?? "",
       email: saved?.email ?? "",
+      /** Имя мастерской в облаке: по нему входят её сотрудники. */
+      tag: saved?.tag ?? "",
       address: publicAddress(url, saved?.code ?? ""),
       staff: saved?.staff ?? [],
       state: agent.state,
@@ -299,9 +301,12 @@ settingsRouter.put(
     const url = invite?.url ?? saved?.url ?? defaultRelayUrl();
     const code = invite?.code || saved?.code || "";
     const email = invite?.email || saved?.email || "";
+    // Имя в облаке приходит во фразе, а у прежних фраз его нет — тогда его
+    // пришлёт узел связи при подключении (см. relay.instance).
+    const tag = invite?.tag || saved?.tag || "";
     if (body.enabled && !key) throw badRequest("Вставьте фразу подключения — её выдаёт поставщик программы");
 
-    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email });
+    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email, tag, staff: saved?.staff ?? [] });
     const agent = applyRemoteAccess(body.enabled ? { url, key } : null);
 
     await withTenant(tenantOf(req), (tx) =>
@@ -323,6 +328,7 @@ settingsRouter.put(
       keyHint: key.slice(-4),
       code,
       email,
+      tag,
       address: publicAddress(url, code),
       state: agent.state,
     });

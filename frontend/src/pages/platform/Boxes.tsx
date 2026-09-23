@@ -33,6 +33,8 @@ import { formatDateTime } from "../../lib/format";
 interface Box {
   id: string;
   code: string;
+  /** Имя мастерской в облаке: по нему входят её сотрудники (почта.local20). */
+  tag: string;
   /** Почта того, кто запросил доступ: она же имя мастерской в списке. */
   email: string;
   keyHint: string;
@@ -45,11 +47,20 @@ interface Box {
 
 const addressOf = (code: string) => `${window.location.origin}/b/${code}/`;
 
+/** Что выдаётся мастерской одним разом: фраза, адрес и имя в облаке. */
+interface Issued {
+  code: string;
+  tag: string;
+  email: string;
+  phrase: string;
+  address: string;
+}
+
 export default function Boxes() {
   const [rows, setRows] = useState<Box[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [issued, setIssued] = useState<{ code: string; email: string; phrase: string; address: string } | null>(null);
+  const [issued, setIssued] = useState<Issued | null>(null);
   const [confirmKey, setConfirmKey] = useState<Box | null>(null);
 
   const load = useCallback(async () => {
@@ -74,10 +85,7 @@ export default function Boxes() {
   }
 
   async function reissue(box: Box) {
-    const next = await api.post<{ code: string; email: string; phrase: string; address: string }>(
-      `/platform/boxes/${box.id}/key`,
-      {}
-    );
+    const next = await api.post<Issued>(`/platform/boxes/${box.id}/key`, {});
     setConfirmKey(null);
     setIssued(next);
     await load();
@@ -134,6 +142,7 @@ export default function Boxes() {
                   >
                     /b/{b.code}/
                   </a>
+                  <span className="text-ink-dim"> · имя в облаке {b.tag}</span>
                   <span className="text-ink-dim"> · ключ …{b.keyHint}</span>
                   {b.note && <span className="text-ink-dim"> · {b.note}</span>}
                 </>
@@ -214,7 +223,7 @@ function NewBoxModal({
   onDone,
 }: {
   onClose: () => void;
-  onDone: (b: { code: string; email: string; phrase: string; address: string }) => void;
+  onDone: (b: Issued) => void;
 }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<ApiError | null>(null);
@@ -225,10 +234,7 @@ function NewBoxModal({
     setBusy(true);
     setError(null);
     try {
-      const box = await api.post<{ code: string; email: string; phrase: string; address: string }>(
-        "/platform/boxes",
-        { email }
-      );
+      const box = await api.post<Issued>("/platform/boxes", { email });
       onDone(box);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
@@ -280,7 +286,7 @@ function PhraseModal({
   issued,
   onClose,
 }: {
-  issued: { code: string; email: string; phrase: string; address: string };
+  issued: Issued;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -316,6 +322,15 @@ function PhraseModal({
         <div>
           <span className="text-[13px] font-semibold text-ink-soft">Адрес мастерской после подключения</span>
           <div className={box}>{issued.address}</div>
+        </div>
+
+        {/* Имя в облаке владелец увидит и у себя, в «Доступе из интернета», —
+            но пусть будет и здесь: с ним сразу понятно, как войдут его люди. */}
+        <div>
+          <span className="text-[13px] font-semibold text-ink-soft">Имя мастерской в облаке</span>
+          <div className={box}>
+            {issued.tag} — сотрудники входят на общем сайте как anton@repair.ru.{issued.tag}
+          </div>
         </div>
 
         {copied && <p className="text-center text-[13px] text-state-done">Скопировано: {copied}</p>}

@@ -26,8 +26,25 @@ import { cleanHeaders, decodeControl, decodeFrame, encodeControl, encodeFrame, F
  *      картинки искались с приставкой.
  */
 
+/**
+ * Куда писать ответ мастерской.
+ *
+ * Обычно это ответ браузеру, но тем же путём облако ходит в Основу само —
+ * когда проверяет пароль сотрудника, вошедшего с общего сайта. Тогда вместо
+ * ответа браузеру подставляется сборщик, и запрос ничем не отличается от
+ * обычного: те же кадры, те же поправки заголовков.
+ */
+export interface Sink {
+  headersSent: boolean;
+  writeHead(status: number, headers?: Record<string, string | string[]>): unknown;
+  write(chunk: Buffer): unknown;
+  end(body?: Buffer | string): unknown;
+  destroy(): unknown;
+  on(event: "close", fn: () => void): unknown;
+}
+
 interface Pending {
-  res: ServerResponse;
+  res: Sink;
   /** Тело ответа собираем целиком только у страницы — ради <base>. */
   html: Buffer[] | null;
   headers: Record<string, string | string[]>;
@@ -46,8 +63,8 @@ interface Connection {
 }
 
 export interface RelayOptions {
-  /** Проверка ключа Основы: вернуть код мастерской или null. */
-  authenticate: (key: string) => Promise<{ code: string } | null>;
+  /** Проверка ключа Основы: вернуть код и имя мастерской или null. */
+  authenticate: (key: string) => Promise<{ code: string; tag: string } | null>;
   /** Путь, на котором Основа устанавливает соединение. */
   path?: string;
   /** Сколько ждать ответ Основы. Загрузка фотографий по мобильному интернету бывает долгой. */
@@ -56,6 +73,15 @@ export interface RelayOptions {
   log?: (line: string, extra?: Record<string, unknown>) => void;
   /** Отметка «был на связи» — чтобы собственнику было видно, кто живой. */
   onSeen?: (code: string) => void;
+}
+
+/** Ответ мастерской, полученный облаком для себя. */
+export interface RelayReply {
+  status: number;
+  headers: Record<string, string | string[]>;
+  body: Buffer;
+  /** Мастерской нет на связи вовсе — это не её ответ, а наш. */
+  offline?: boolean;
 }
 
 const HTML = (title: string, text: string) =>
@@ -195,7 +221,9 @@ export function createRelayHub(opts: RelayOptions) {
       opts.onSeen?.(box.code);
       log(`Основа ${box.code} на связи`, { address: conn.address });
 
-      ws.send(encodeControl({ t: "ready", code: box.code, server: "finecrm" }));
+      // Имя мастерской в облаке отдаём при каждом подключении: Основа,
+      // подключённая старой фразой, узнаёт его сама и показывает владельцу.
+      ws.send(encodeControl({ t: "ready", code: box.code, tag: box.tag, server: "finecrm" }));
       ws.on("message", (data, isBinary) => {
         if (isBinary) onFrame(conn, Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
         else onControl(conn, String(data));
@@ -255,6 +283,81 @@ export function createRelayHub(opts: RelayOptions) {
     });
   }
 
+  /**
+   * Сходить в мастерскую самому, без браузера.
+   *
+   * Нужно ровно для одного: сотрудник коробочной мастерской вошёл на общем
+   * сайте, и пароль его проверяет не облако, а Основа. Облако передаёт туда
+   * запрос как есть и возвращает ответ, ничего не запоминая, — ни почты, ни
+   * пароля у него не оседает.
+   */
+  function request(
+    code: string,
+    url: string,
+    init: { method?: string; headers?: Record<string, string>; body?: Buffer } = {}
+  ): Promise<RelayReply> {
+    const conn = byCode.get(code);
+    if (!conn) return Promise.resolve({ status: 503, headers: {}, body: Buffer.alloc(0), offline: true });
+
+    return new Promise<RelayReply>((resolve) => {
+      const chunks: Buffer[] = [];
+      let seen = { status: 502, headers: {} as Record<string, string | string[]> };
+      let done = false;
+      const finish = (reply: RelayReply) => {
+        if (done) return;
+        done = true;
+        resolve(reply);
+      };
+      const sink: Sink = {
+        headersSent: false,
+        writeHead(status, headers = {}) {
+          seen = { status, headers };
+          this.headersSent = true;
+        },
+        write(chunk) {
+          chunks.push(chunk);
+        },
+        end(body) {
+          // Страница-заглушка приходит строкой: так узел отвечает, когда
+          // мастерская оборвалась посреди ответа.
+          if (body && body.length) chunks.push(typeof body === "string" ? Buffer.from(body, "utf8") : body);
+          finish({ status: seen.status, headers: seen.headers, body: Buffer.concat(chunks) });
+        },
+        destroy() {
+          finish({ status: 502, headers: {}, body: Buffer.alloc(0) });
+        },
+        on() {},
+      };
+
+      const id = conn.nextId++;
+      if (conn.nextId > 0xffff_fff0) conn.nextId = 1;
+
+      const headers: Record<string, string> = {
+        ...(init.headers ?? {}),
+        "x-forwarded-proto": "https",
+      };
+      const body = init.body ?? Buffer.alloc(0);
+      if (body.length) headers["content-length"] = String(body.length);
+
+      const pending: Pending = {
+        res: sink,
+        html: null,
+        headers: {},
+        status: 502,
+        timer: setTimeout(() => {
+          conn.pending.delete(id);
+          conn.ws.send(encodeFrame(id, FRAME.ABORT));
+          finish({ status: 504, headers: {}, body: Buffer.alloc(0) });
+        }, timeoutMs),
+      };
+      conn.pending.set(id, pending);
+
+      conn.ws.send(encodeControl({ t: "req", id, method: init.method ?? "GET", url, headers }));
+      if (body.length) conn.ws.send(encodeFrame(id, FRAME.DATA, body));
+      conn.ws.send(encodeFrame(id, FRAME.END));
+    });
+  }
+
   return {
     /** Поднять приём соединений от Основ на указанном пути. */
     attach(server: HttpServer, path = opts.path ?? "/relay/agent") {
@@ -265,6 +368,7 @@ export function createRelayHub(opts: RelayOptions) {
       });
     },
     handleRequest,
+    request,
     online: (code: string) => byCode.has(code),
     /** Отключить мастерскую: ключ отозвали, доступ выключили, код сменили. */
     disconnect(code: string, why: string) {

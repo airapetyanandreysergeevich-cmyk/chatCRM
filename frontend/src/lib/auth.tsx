@@ -65,8 +65,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (v: { email: string; password: string }) => {
-      const data = await api.post<{ accessToken: string }>("/auth/login", v);
-      setAccessToken(data.accessToken);
+      const data = await api.post<{ accessToken?: string; redirect?: string }>("/auth/login", v);
+      // Сотрудник коробочной мастерской вошёл не в облако, а в свою Основу:
+      // пароль проверила она сама, печенье сессии уже выдано на её адрес —
+      // остаётся туда перейти. Дальше приложение поднимет сессию само.
+      if (data.redirect) {
+        window.location.assign(data.redirect);
+        // Обещание не разрешаем: страница уходит, и форме входа больше нечего
+        // делать — иначе она моргнёт «Проверяем…» и покажет пустой экран.
+        await new Promise(() => {});
+        return;
+      }
+      setAccessToken(data.accessToken ?? "");
       await loadMe();
     },
     [loadMe]

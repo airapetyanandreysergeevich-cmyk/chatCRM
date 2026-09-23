@@ -49,7 +49,7 @@ export function decodeFrame(buf: Buffer): { id: number; kind: FrameKind; payload
 
 /** Заголовки запроса и ответа — текстом. */
 export type Control =
-  | { t: "ready"; code: string; server: string }
+  | { t: "ready"; code: string; server: string; tag?: string }
   | { t: "req"; id: number; method: string; url: string; headers: Record<string, string> }
   | { t: "res"; id: number; status: number; headers: Record<string, string | string[]> }
   | { t: "err"; id: number; message: string };

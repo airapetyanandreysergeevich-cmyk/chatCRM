@@ -3,7 +3,7 @@ import { env } from "../../lib/env";
 import { createRelayAgent, type AgentState } from "./relay.agent";
 import { createRelayHub } from "./relay.hub";
 import { authenticateBox, markSeen } from "./boxes.service";
-import { readRemoteAccess } from "./remoteAccess";
+import { readRemoteAccess, saveRemoteAccess } from "./remoteAccess";
 
 /**
  * Два конца одного провода, включённые по настройкам.
@@ -70,6 +70,17 @@ export function applyRemoteAccess(next: { url: string; key: string } | null) {
     onState: (s, detail) => {
       state = { state: s, detail };
       console.log(`[доступ из интернета] ${s}${detail ? `: ${detail}` : ""}`);
+    },
+    // Код и имя мастерской в облаке приходят при каждом подключении.
+    // Запоминаем их: во фразе, выданной до этой возможности, имени нет, а
+    // владельцу его надо показать — по нему входят его сотрудники.
+    onReady: ({ code, tag }) => {
+      void (async () => {
+        const saved = await readRemoteAccess().catch(() => null);
+        if (!saved) return;
+        if (saved.code === code && saved.tag === tag) return;
+        await saveRemoteAccess({ ...saved, code, tag: tag ?? saved.tag }).catch(() => undefined);
+      })();
     },
   });
   agent.start();

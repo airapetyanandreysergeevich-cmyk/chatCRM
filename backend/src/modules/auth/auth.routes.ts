@@ -1,9 +1,11 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, unauthorized } from "../../lib/errors";
 import { authenticate, currentTenantId, permissionsOf } from "../../middleware/auth";
+import { boxByTag, splitTag } from "../relay/boxes.service";
+import { relayHub } from "../relay/relay.instance";
 import { login, refreshCookieOptions, REFRESH_COOKIE, revokeRefresh, rotateRefresh } from "./auth.service";
 
 export const authRouter = Router();
@@ -27,11 +29,71 @@ const loginSchema = z.object({
  * Кто именно пришёл, решает сервер по адресу — выбирать ничего не нужно.
  * Куда вести дальше, фронтенд узнаёт из ответа и из /auth/me.
  */
+/**
+ * Вход сотрудника коробочной мастерской.
+ *
+ * Такой человек живёт не в облаке, а в Основе своего владельца, и пароля его
+ * у нас нет и быть не должно. Поэтому он пишет почту с хвостом — имя
+ * мастерской в облаке: anton@repair.ru.local20. По хвосту облако находит
+ * мастерскую и передаёт туда обычный вход через туннель; пароль проверяет
+ * сама Основа, а облако лишь возвращает её ответ.
+ *
+ * Адрес мастерской наружу не выходит, пока пароль не подошёл: он случайный
+ * как раз затем, чтобы его нельзя было собрать перебором имён.
+ */
+async function loginThroughBox(
+  tag: string,
+  email: string,
+  password: string,
+  res: Response
+): Promise<boolean> {
+  const box = await boxByTag(tag);
+  const hub = relayHub();
+  if (!box || !hub) throw unauthorized("Неверная почта или пароль");
+
+  const reply = await hub.request(box.code, "/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: Buffer.from(JSON.stringify({ email, password }), "utf8"),
+  });
+
+  if (reply.offline || reply.status === 502 || reply.status === 503 || reply.status === 504) {
+    res.status(503).json({
+      error:
+        "Мастерская сейчас не на связи. Вход работает, пока в ней включён компьютер с программой — попробуйте позже.",
+    });
+    return true;
+  }
+
+  // Ответ Основы отдаём как есть: она одна знает, верен ли пароль, и она же
+  // считает попытки. Ни почты, ни пароля у облака не остаётся.
+  if (reply.status >= 400) {
+    let said: unknown = null;
+    try {
+      said = JSON.parse(reply.body.toString("utf8"));
+    } catch {
+      /* не json — скажем своими словами */
+    }
+    res.status(reply.status === 401 ? 401 : reply.status).json(said ?? { error: "Неверная почта или пароль" });
+    return true;
+  }
+
+  // Печенье сессии узел связи уже пометил путём /b/<код>/ — просто передаём.
+  const cookies = reply.headers["set-cookie"];
+  if (cookies) res.setHeader("set-cookie", cookies);
+  res.json({ kind: "box", redirect: `/b/${box.code}/` });
+  return true;
+}
+
 authRouter.post(
   "/login",
   loginLimiter,
   ah(async (req, res) => {
     const body = loginSchema.parse(req.body);
+
+    const split = splitTag(body.email);
+    if (split && (await loginThroughBox(split.tag, split.email, body.password, res))) return;
+
     const { accessToken, refresh, kind } = await login({ ...body, req });
     res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions());
     res.json({ accessToken, kind });

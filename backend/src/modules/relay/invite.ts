@@ -23,10 +23,19 @@ export interface Invite {
   code: string;
   /** Почта, на которую выдан доступ: видно, кому принадлежит фраза. */
   email?: string;
+  /** Имя мастерской в облаке (local20): по нему входят её сотрудники. */
+  tag?: string;
 }
 
 export function encodeInvite(invite: Invite): string {
-  const payload = JSON.stringify({ v: 1, u: invite.url, k: invite.key, c: invite.code, e: invite.email });
+  const payload = JSON.stringify({
+    v: 1,
+    u: invite.url,
+    k: invite.key,
+    c: invite.code,
+    e: invite.email,
+    t: invite.tag,
+  });
   return INVITE_PREFIX + Buffer.from(payload, "utf8").toString("base64url");
 }
 
@@ -51,11 +60,24 @@ export function parseInvite(raw: string, defaultUrl: string): Invite | null {
 
   try {
     const json = Buffer.from(found[0].slice(INVITE_PREFIX.length), "base64url").toString("utf8");
-    const data = JSON.parse(json) as { u?: string; k?: string; c?: string; e?: string; n?: string };
+    const data = JSON.parse(json) as {
+      u?: string;
+      k?: string;
+      c?: string;
+      e?: string;
+      n?: string;
+      t?: string;
+    };
     if (!data.k || !/^[\x21-\x7e]+$/.test(data.k)) return null;
     const url = typeof data.u === "string" && /^wss?:\/\//.test(data.u) ? data.u : defaultUrl;
     // n — от прежних фраз, где вместо почты стояло название мастерской.
-    return { url, key: data.k, code: typeof data.c === "string" ? data.c : "", email: data.e ?? data.n };
+    return {
+      url,
+      key: data.k,
+      code: typeof data.c === "string" ? data.c : "",
+      email: data.e ?? data.n,
+      tag: typeof data.t === "string" ? data.t : undefined,
+    };
   } catch {
     return null;
   }

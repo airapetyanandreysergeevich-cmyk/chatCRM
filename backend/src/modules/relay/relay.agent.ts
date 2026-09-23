@@ -32,6 +32,12 @@ export interface AgentOptions {
   target: string;
   log?: (line: string) => void;
   onState?: (state: AgentState, detail?: string) => void;
+  /**
+   * Узел связи при каждом подключении говорит, под каким именем мастерская
+   * видна в облаке. Имя может смениться (перевыпустили фразу, завели заново),
+   * поэтому не считаем его раз и навсегда известным, а запоминаем присланное.
+   */
+  onReady?: (info: { code: string; tag?: string }) => void;
   /** Проверка связи: если сервер молчит дольше, соединение считается мёртвым. */
   heartbeatMs?: number;
 }
@@ -108,6 +114,7 @@ export function createRelayAgent(opts: AgentOptions) {
     if (msg.t === "ready") {
       retry = FIRST_RETRY_MS;
       setState("online", msg.code);
+      opts.onReady?.({ code: msg.code, tag: msg.tag });
       log(`Доступ из интернета включён, код мастерской ${msg.code}`);
       return;
     }

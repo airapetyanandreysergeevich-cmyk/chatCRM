@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { encodeInvite, publicAddress } from "./invite";
-import { fingerprint, freeCode, newKey, normalizeCode } from "./boxes.service";
+import { fingerprint, freeCode, newKey, nextTag, normalizeCode } from "./boxes.service";
 import { relayHub } from "./relay.instance";
 
 /**
@@ -48,6 +48,7 @@ const view = (
   box: {
     id: string;
     code: string;
+    tag: string;
     email: string;
     keyHint: string;
     note: string | null;
@@ -69,6 +70,7 @@ boxesRouter.get(
           {
             id: b.id,
             code: b.code,
+            tag: b.tag,
             email: b.email,
             keyHint: b.keyHint,
             note: b.note,
@@ -100,6 +102,7 @@ boxesRouter.post(
     const box = await prisma.box.create({
       data: {
         code,
+        tag: await nextTag(),
         email: body.email,
         note: body.note || null,
         keyHash: fingerprint(key),
@@ -111,8 +114,9 @@ boxesRouter.post(
     res.status(201).json({
       id: box.id,
       code: box.code,
+      tag: box.tag,
       email: box.email,
-      phrase: encodeInvite({ url, key, code: box.code, email: box.email }),
+      phrase: encodeInvite({ url, key, code: box.code, email: box.email, tag: box.tag }),
       address: publicAddress(url, box.code),
     });
   })
@@ -133,8 +137,9 @@ boxesRouter.post(
     const url = relayUrlFor(req);
     res.json({
       code: box.code,
+      tag: box.tag,
       email: box.email,
-      phrase: encodeInvite({ url, key, code: box.code, email: box.email }),
+      phrase: encodeInvite({ url, key, code: box.code, email: box.email, tag: box.tag }),
       address: publicAddress(url, box.code),
     });
   })

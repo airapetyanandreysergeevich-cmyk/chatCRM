@@ -3,6 +3,7 @@ import express from "express";
 import http from "http";
 import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
+import { isTag, splitTag } from "../src/modules/relay/boxes.service";
 import { encodeInvite, encodeStaffKey, parseInvite, parseStaffKey, publicAddress } from "../src/modules/relay/invite";
 import { newCode } from "../src/modules/relay/boxes.service";
 
@@ -24,6 +25,7 @@ const check = (ok: boolean, what: string) => {
 
 const KEY = "kluch-masterskoj-0001";
 const CODE = "servis-na-lenina";
+const TAG = "local20";
 
 /** Поддельная Основа: отвечает так же, как настоящий сервер мастерской. */
 function startBox(): Promise<{ url: string; close: () => void }> {
@@ -44,9 +46,18 @@ function startBox(): Promise<{ url: string; close: () => void }> {
       );
   });
   app.get("/assets/app.js", (_req, res) => res.type("js").send("console.log(1)"));
-  app.post("/api/auth/login", (_req, res) => {
+  app.post("/api/auth/login", express.json(), (req, res) => {
+    // Пароль знает только мастерская — в этом весь смысл: облако его не видит
+    // и не хранит, а лишь передаёт запрос сюда.
+    const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
+    if (email && password && email !== "anton@repair.ru") {
+      return res.status(401).json({ error: "Неверная почта или пароль" });
+    }
+    if (password && password !== "verniy-parol") {
+      return res.status(401).json({ error: "Неверная почта или пароль" });
+    }
     res.setHeader("set-cookie", ["sid=abc; Path=/; HttpOnly", "other=1; HttpOnly"]);
-    res.json({ ok: true });
+    res.json({ ok: true, accessToken: "token-osnovy" });
   });
   app.get("/api/whoami", (req, res) =>
     res.json({ cookie: req.headers.cookie ?? "", proto: req.headers["x-forwarded-proto"] ?? "" })
@@ -186,7 +197,7 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
 
   const box = await startBox();
   const hub = createRelayHub({
-    authenticate: async (key) => (key === KEY ? { code: CODE } : null),
+    authenticate: async (key) => (key === KEY ? { code: CODE, tag: TAG } : null),
     timeoutMs: 5_000,
     log: () => {},
   });
@@ -196,15 +207,21 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   const offline = await ask(cloud.port, `/b/${CODE}/`);
   check(offline.status === 503 && offline.body.toString().includes("не на связи"), "без Основы — понятная страница, а не ошибка");
 
+  let told: { code: string; tag?: string } | null = null;
   const agent = createRelayAgent({
     url: `ws://127.0.0.1:${cloud.port}/relay/agent`,
     key: KEY,
     target: box.url,
     heartbeatMs: 1_000,
     log: () => {},
+    onReady: (info) => (told = info),
   });
   agent.start();
   check(await waitFor(() => hub.online(CODE)), "Основа подключилась");
+  check(
+    await waitFor(() => told?.tag === TAG),
+    "мастерская узнаёт своё имя в облаке при подключении — даже по старой фразе"
+  );
 
   const page = await ask(cloud.port, `/b/${CODE}/`);
   check(page.status === 200 && page.body.toString().includes('<base href="/b/' + CODE + '/">'), "страница приходит с приставкой");
@@ -278,8 +295,49 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   spoiled.stop();
   check(hub.online(CODE), "чужой ключ не сбил работающую мастерскую");
 
+  // ---------- вход сотрудника с общего сайта ----------
+  //
+  // Человек пишет anton@repair.ru.local20 на www.finecrm.ru; облако отрезает
+  // хвост, находит мастерскую и спрашивает пароль у неё самой.
+  check(splitTag("anton@repair.ru.local20")?.email === "anton@repair.ru", "почта отделяется от имени мастерской");
+  check(splitTag("anton@repair.ru.local20")?.tag === "local20", "имя мастерской читается из хвоста");
+  check(splitTag("ANTON@Repair.RU.LOCAL20")?.tag === "local20", "заглавные буквы не мешают");
+  check(splitTag("anton@repair.ru") === null, "обычная почта остаётся целой");
+  check(splitTag("anton@repair.ru.localhost") === null, "похожий хвост не считается именем");
+  check(splitTag("anton.local20") === null, "строка без собаки почтой не считается");
+  check(isTag("local20") && !isTag("local") && !isTag("local20a"), "имя мастерской — слово и число, и только");
+
+  const entered = await hub.request(CODE, "/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: Buffer.from(JSON.stringify({ email: "anton@repair.ru", password: "verniy-parol" }), "utf8"),
+  });
+  check(entered.status === 200, "облако может спросить пароль у мастерской само");
+  const given = entered.headers["set-cookie"];
+  check(
+    Array.isArray(given) && given.every((c) => c.includes(`Path=/b/${CODE}/`)),
+    "печенье сессии приходит уже с путём мастерской"
+  );
+  check(
+    !entered.body.toString().includes("verniy-parol"),
+    "пароль в ответе не возвращается"
+  );
+
+  const wrong = await hub.request(CODE, "/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: Buffer.from(JSON.stringify({ email: "anton@repair.ru", password: "ne-tot" }), "utf8"),
+  });
+  check(wrong.status === 401, "неверный пароль отвергает сама мастерская");
+  check(wrong.body.toString().includes("Неверная почта"), "и её словами, а не нашими");
+
+  check((await hub.request("chuzhoj-kod", "/api/auth/login", { method: "POST" })).offline === true,
+    "к незнакомой мастерской запрос не уходит вовсе");
+
   agent.stop();
   check(await waitFor(() => !hub.online(CODE)), "выключили — мастерская пропала из списка");
+  const noBody = await hub.request(CODE, "/api/auth/login", { method: "POST" });
+  check(noBody.offline === true, "пока мастерская не на связи, вход её сотрудников не проходит");
   const gone = await ask(cloud.port, `/b/${CODE}/`);
   check(gone.status === 503, "и снаружи это видно сразу");
 

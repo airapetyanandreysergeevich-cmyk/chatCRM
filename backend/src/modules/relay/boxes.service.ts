@@ -57,6 +57,52 @@ export async function freeCode(): Promise<string> {
   return `${newCode()}${Date.now().toString(36)}`;
 }
 
+/**
+ * Имя мастерской в облаке: local20.
+ *
+ * Код в адресе нарочно случайный, и это правильно — но продиктовать его
+ * нельзя. А диктовать придётся: сотрудник входит на общем сайте и пишет свою
+ * почту с хвостом, `anton@repair.ru.local20`. Поэтому имя короткое, из одного
+ * знакомого слова и числа: услышал — записал без ошибки.
+ *
+ * Числа идут по порядку и ничего не выдают, кроме того, какой по счёту
+ * мастерская подключилась. Адрес по имени не угадать: он остаётся случайным,
+ * и облако не отдаёт его никому, пока человек не вошёл.
+ */
+const TAG_PREFIX = "local";
+
+export async function nextTag(): Promise<string> {
+  const taken = await prisma.box.findMany({ select: { tag: true } });
+  let max = 0;
+  for (const { tag } of taken) {
+    const n = Number(tag.startsWith(TAG_PREFIX) ? tag.slice(TAG_PREFIX.length) : NaN);
+    if (Number.isInteger(n) && n > max) max = n;
+  }
+  return `${TAG_PREFIX}${max + 1}`;
+}
+
+/** Хвост почты — это имя мастерской? Годится только наш вид: local и число. */
+export function isTag(raw: string): boolean {
+  return new RegExp(`^${TAG_PREFIX}[0-9]{1,9}$`).test(raw);
+}
+
+/**
+ * Разобрать почту, набранную на общем входе.
+ *
+ * `anton@repair.ru.local20` → `{ email: "anton@repair.ru", tag: "local20" }`.
+ * Хвост отрезаем только свой: почта на настоящем домене остаётся целой, и
+ * облачные сотрудники ничего не замечают.
+ */
+export function splitTag(raw: string): { email: string; tag: string } | null {
+  const text = String(raw ?? "").trim().toLowerCase();
+  const dot = text.lastIndexOf(".");
+  if (dot < 0) return null;
+  const tail = text.slice(dot + 1);
+  if (!isTag(tail)) return null;
+  const email = text.slice(0, dot);
+  return email.includes("@") ? { email, tag: tail } : null;
+}
+
 /** Код в адресе: только то, что человек наберёт руками и не ошибётся. */
 export function normalizeCode(raw: string): string {
   return raw
@@ -74,12 +120,18 @@ export function normalizeCode(raw: string): string {
  * Отключённая мастерская не пускается вовсе: выключатель в панели собственника
  * — это и есть способ прекратить услугу, не бегая к чужому компьютеру.
  */
-export async function authenticateBox(key: string): Promise<{ code: string } | null> {
+export async function authenticateBox(key: string): Promise<{ code: string; tag: string } | null> {
   const box = await prisma.box.findFirst({
     where: { keyHash: fingerprint(key), isActive: true },
-    select: { code: true },
+    select: { code: true, tag: true },
   });
   return box;
+}
+
+/** Найти мастерскую по имени в облаке — для входа сотрудника с общего сайта. */
+export async function boxByTag(tag: string): Promise<{ code: string; tag: string } | null> {
+  if (!isTag(tag)) return null;
+  return prisma.box.findFirst({ where: { tag, isActive: true }, select: { code: true, tag: true } });
 }
 
 /** Отметка «была на связи» — редкая запись, раз в подключение. */

@@ -44,6 +44,8 @@ interface State {
   code: string;
   /** Почта, на которую поставщик выдал доступ. */
   email: string;
+  /** Имя мастерской в облаке: по нему входят сотрудники на общем сайте. */
+  tag: string;
   address: string;
   staff: StaffEntry[];
   state: "off" | "connecting" | "online" | "error";
@@ -135,6 +137,26 @@ export default function RemoteAccess() {
             Фраза подключена, ключ …{data.keyHint}
             {data.email && ` · выдана на ${data.email}`}
           </p>
+        )}
+
+        {/* Главное, что владельцу нужно отсюда унести: как его людям
+            представляться на общем сайте. Показываем не само имя, а готовый
+            образец — его и продиктуют сотруднику. */}
+        {data.tag && (
+          <div className="mt-4 rounded-field border border-line bg-surface-input px-3.5 py-3">
+            <p className="text-[13px] font-semibold text-ink-soft">Как входят ваши сотрудники</p>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-muted">
+              На www.finecrm.ru, обычной формой входа: своя почта, к которой дописано имя вашей
+              мастерской — <span className="font-mono text-[13px] text-ink">.{data.tag}</span>
+            </p>
+            <p className="mt-2 break-all font-mono text-[13px]">
+              anton@repair.ru<span className="font-bold text-brand-ink">.{data.tag}</span>
+            </p>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
+              Пароль остаётся прежним и проверяется здесь, у вас: облако его не видит. Заводить
+              сотрудников по-прежнему в разделе «Сотрудники» — отдельно ничего создавать не нужно.
+            </p>
+          </div>
         )}
 
         <div className="mt-4">

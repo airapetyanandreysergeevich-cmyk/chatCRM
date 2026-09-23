@@ -108,11 +108,14 @@ export default function Login() {
               Под приставкой /b/<код>/ это уже и есть его мастерская, и звать
               оттуда некуда. */}
           {BASE === "/" && (
-            <p className="mt-2.5 text-[13px] text-ink-muted">
-              База в вашей мастерской?{" "}
+            <p className="mt-2.5 text-[13px] leading-relaxed text-ink-muted">
+              База в вашей мастерской? Входите этой же формой, дописав к почте имя мастерской:{" "}
+              <span className="whitespace-nowrap font-mono text-[12.5px] text-ink">anton@repair.ru.local20</span>.
+              Имя подскажет владелец. Или{" "}
               <Link to="/connect" className="font-semibold text-brand hover:text-brand-ink">
-                Войти по ключу
+                войдите по ключу
               </Link>
+              .
             </p>
           )}
           <p className="mt-2.5 text-[12.5px] text-ink-dim">
