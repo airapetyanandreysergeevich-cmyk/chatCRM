@@ -14,6 +14,7 @@ const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
 const { Backups } = require("./backup");
 const network = require("./network");
+const discovery = require("./discovery");
 const { Updater } = require("./updater");
 
 /**
@@ -29,6 +30,8 @@ let tray = null;
 let postgres = null;
 let backend = null;
 let backups = null;
+/** Ответ на поиск Основы в сети (см. discovery.js). */
+let responder = null;
 /** Что сейчас поднято: настройки, раскладка папки, порт сервера. */
 let running = null;
 /** Пока сервер перезапускают намеренно, его уход — не повод пугать человека. */
@@ -151,10 +154,29 @@ async function startMain(dataDir, owner = null) {
   const prepared = await prepareMain(dataDir, say, owner);
   const cfg = prepared.config;
   postgres = prepared.postgres;
+  const l = ensureLayout(dataDir);
+
+  // Основа раздаёт базу всегда. Раньше раздачу включали руками, чтобы
+  // ноутбук с Основой в чужом Wi-Fi не был виден соседям, — но эту защиту и
+  // так даёт Windows: правило брандмауэра открыто только для частных сетей, а
+  // в общедоступной входящие отсекаются. Выключатель же стоил каждой
+  // мастерской одного обязательного похода в меню, о котором все забывали.
+  if (!cfg.share.enabled) {
+    cfg.share.enabled = true;
+    config.write(l.config, cfg);
+  }
 
   say("Запускаю сервер");
-  const l = ensureLayout(dataDir);
   const port = await startBackend(cfg, l);
+
+  // Отвечаем на поиск: сотрудник при установке нажимает «Найти
+  // автоматически», и программа находит эту Основу сама.
+  if (!responder) {
+    responder = discovery.startResponder({
+      port,
+      log: (line) => console.log(`[поиск в сети] ${line}`),
+    });
+  }
 
   // Копии заводим только у Основы и только после того, как база поднялась:
   // это единственный компьютер, где данные действительно лежат.
@@ -216,49 +238,6 @@ async function startBackend(cfg, l) {
   return port;
 }
 
-/**
- * Включает или выключает раздачу базы по локальной сети.
- *
- * Пока раздача выключена, сервер слушает только сам компьютер — программа в
- * мастерской не должна становиться доступной всему кафе оттого, что ноутбук
- * воткнули в чужой вайфай. Включение — осознанное действие владельца.
- */
-async function toggleSharing() {
-  if (!running) return;
-  const { cfg, layout: l } = running;
-  const turningOn = !cfg.share.enabled;
-
-  restartingBackend = true;
-  try {
-    await backend.stop();
-    cfg.share.enabled = turningOn;
-    config.write(l.config, cfg);
-    const port = await startBackend(cfg, l);
-
-    refreshTray();
-    await dialog.showMessageBox(win, {
-      type: "info",
-      title: turningOn ? "Раздача включена" : "Раздача выключена",
-      message: turningOn
-        ? `Сотрудники подключаются по адресу ${lanAddress(port)}`
-        : "Программа снова доступна только на этом компьютере.",
-      detail: turningOn
-        ? "Впишите этот адрес на другом компьютере при выборе роли «Клиент». " +
-          "Если он не откроется — брандмауэр Windows не пропускает входящие на этот порт."
-        : undefined,
-    });
-    if (turningOn) await warnIfNetworkBlocks();
-  } catch (err) {
-    // Откатываем настройку: раздача, которую не удалось включить, не должна
-    // остаться записанной как включённая.
-    cfg.share.enabled = !turningOn;
-    config.write(l.config, cfg);
-    dialog.showMessageBox(win, { type: "error", title: "Не получилось", message: err.message });
-  } finally {
-    restartingBackend = false;
-  }
-}
-
 /** Адрес этого компьютера в локальной сети — тот, что вводят сотрудники. */
 function lanAddress(port) {
   for (const list of Object.values(os.networkInterfaces())) {
@@ -280,8 +259,8 @@ function lanAddress(port) {
  * его нечего, а молчание означает интернет. Один и тот же совет в обоих
  * случаях был бы в одном из них заведомо неверным.
  */
-async function startClient(url, online = false) {
-  const address = online ? config.CLOUD_URL : String(url).replace(/\/+$/, "");
+async function startClient(url, online = false, workshopId = null) {
+  let address = online ? config.CLOUD_URL : String(url).replace(/\/+$/, "");
 
   // Показываем ожидание сразу: пустое окно на время проверки — ровно то, от
   // чего мы здесь и уходим.
@@ -289,7 +268,22 @@ async function startClient(url, online = false) {
   state.step = online ? "Соединяюсь с облаком" : "Ищу Основу в сети";
   if (win && !win.isDestroyed()) win.webContents.send("setup:progress", state.step);
 
-  const answer = await network.reach(address);
+  let answer = await network.reach(address);
+
+  // Роутер выдал Основе другой адрес — самая частая поломка у сотрудников:
+  // вчера работало, сегодня пустое окно. Если мы знаем, какую мастерскую
+  // искать, ищем её по номеру и молча переходим на новый адрес.
+  if (!answer.ok && !online && workshopId && discovery.isLanAddress(address)) {
+    state.step = "Основа сменила адрес — ищу её в сети";
+    if (win && !win.isDestroyed()) win.webContents.send("setup:progress", state.step);
+    const found = (await discovery.discover().catch(() => [])).find((f) => f.id === workshopId);
+    if (found) {
+      address = found.address;
+      location.writeLocation(userData(), { mode: config.MODE.CLIENT, connectTo: address, workshopId });
+      answer = await network.reach(address);
+    }
+  }
+
   if (!answer.ok) {
     if (online) {
       showError(
@@ -363,7 +357,7 @@ async function boot() {
       await showSetup("working");
       await startMain(where.dataDir);
     } else {
-      await startClient(where.connectTo, where.mode === config.MODE.ONLINE);
+      await startClient(where.connectTo, where.mode === config.MODE.ONLINE, where.workshopId ?? null);
     }
   } catch (err) {
     const logs = where.dataDir ? ensureLayout(where.dataDir).logs : userData();
@@ -403,16 +397,12 @@ function refreshTray() {
     Menu.buildFromTemplate([
       { label: "Открыть", click: () => (win.isVisible() ? win.focus() : win.show()) },
       { type: "separator" },
-      {
-        label: "Раздавать базу по сети",
-        type: "checkbox",
-        checked: !!(running && running.cfg.share.enabled),
-        enabled: !!running,
-        click: () => void toggleSharing(),
-      },
-      ...(running && running.cfg.share.enabled
+      // Раздача включена всегда, поэтому здесь не выключатель, а то, что
+      // может понадобиться: адрес на случай, если автопоиск у сотрудника
+      // не сработает (гостевой Wi-Fi, другая подсеть).
+      ...(running
         ? [
-            { label: `Адрес: ${lanAddress(running.port)}`, enabled: false },
+            { label: `Адрес для сотрудников: ${lanAddress(running.port)}`, enabled: false },
             {
               label: "Скопировать адрес",
               click: () => clipboard.writeText(lanAddress(running.port)),
@@ -473,6 +463,29 @@ ipcMain.handle("setup:pick-folder", async () => {
 
 ipcMain.handle("setup:check-folder", (_e, dir) => location.checkDataDir(dir));
 
+/**
+ * Найти Основу в сети — кнопка «Найти автоматически».
+ *
+ * Шаги поиска отправляем в окно: перебор адресов занимает несколько секунд,
+ * и молчащая крутилка на это время выглядит зависшей программой.
+ */
+ipcMain.handle("setup:discover", async () => {
+  const send = (step) => win && !win.isDestroyed() && win.webContents.send("setup:discover-step", step);
+  try {
+    const found = await discovery.discover({ onStep: send });
+    const nets = discovery.lanInterfaces();
+    const closed = await network.blocking().catch(() => []);
+    return {
+      found: found.map((f) => ({ address: f.address, name: f.name, id: f.id })),
+      // Почему могло не найтись — чтобы подсказать по делу, а не вообще.
+      noNetwork: nets.length === 0,
+      publicNetwork: closed.map((p) => p.name),
+    };
+  } catch (err) {
+    return { found: [], error: err.message, noNetwork: false, publicNetwork: [] };
+  }
+});
+
 ipcMain.handle("setup:open-logs", (_e, dir) => shell.openPath(dir));
 
 /**
@@ -513,7 +526,7 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
       // пришедшее оттуда значение здесь нечему проверять, а ошибиться в
       // букве — есть чему.
       // Адрес бывает двух видов: в локальной сети (http://192.168.1.40:7373)
-      // и из интернета (https://www.finecrm.ru/b/<код>/) — его владелец берёт
+      // и из интернета (https://<сайт>/b/<код>/) — его владелец берёт
       // в своих настройках. Хвостовой слэш снимаем: к адресу потом клеится
       // путь, а «…/b/код//api/health» — уже не тот адрес.
       const url =
@@ -522,8 +535,10 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
           : String(choice.connectTo || "").trim().replace(/\/+$/, "");
       const answer = await network.reach(url);
       if (!answer.ok) return { ok: false, error: answer.why };
-      location.writeLocation(userData(), { mode: choice.mode, connectTo: url });
-      await startClient(url, choice.mode === config.MODE.ONLINE);
+      // Номер мастерской помним, чтобы при смене адреса найти её снова.
+      const workshopId = typeof choice.workshopId === "string" && choice.workshopId ? choice.workshopId : null;
+      location.writeLocation(userData(), { mode: choice.mode, connectTo: url, workshopId });
+      await startClient(url, choice.mode === config.MODE.ONLINE, workshopId);
     }
     return { ok: true };
   } catch (err) {
@@ -699,6 +714,7 @@ async function prepareForUpdate() {
   try {
     if (backups) backups.stop();
     if (updater) updater.stop();
+    if (responder) responder.close();
     if (backend) await backend.stop();
     if (postgres) await postgres.stop();
   } catch (err) {
@@ -743,6 +759,7 @@ app.on("before-quit", (e) => {
   (async () => {
     try {
       if (backups) backups.stop();
+      if (responder) responder.close();
       if (backend) await backend.stop();
       if (postgres) await postgres.stop();
     } catch {

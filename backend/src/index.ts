@@ -82,9 +82,23 @@ app.use(
   })
 );
 
-app.get("/api/health", async (_req, res) => {
+app.get("/api/health", async (req, res) => {
   await prisma.$queryRaw`SELECT 1`;
-  res.json({ ok: true, ts: new Date().toISOString() });
+  const ts = new Date().toISOString();
+
+  // В коробке эта же проверка — визитная карточка для автопоиска: программа
+  // сотрудника находит Основу в сети и показывает название мастерской, а по
+  // номеру находит её снова, когда роутер выдаст Основе другой адрес.
+  //
+  // Только в локальной сети. Запрос, пришедший через туннель из интернета,
+  // несёт x-forwarded-for от узла связи — таким название не отдаём: снаружи
+  // адрес случайный как раз затем, чтобы ничего о мастерской не говорить.
+  if (env.storageDriver === "local" && !req.headers["x-forwarded-for"]) {
+    const tenant = await prisma.tenant.findFirst({ select: { id: true, name: true }, orderBy: { createdAt: "asc" } });
+    return res.json({ ok: true, ts, app: "finecrm", workshop: tenant ? { id: tenant.id, name: tenant.name } : null });
+  }
+
+  res.json({ ok: true, ts });
 });
 
 // Публичные маршруты подключаются до staffRouter: тот требует авторизацию для всего,

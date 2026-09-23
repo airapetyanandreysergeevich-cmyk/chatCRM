@@ -60,6 +60,14 @@
 
   nsExec::Exec 'netsh advfirewall firewall delete rule name="FineCRM"'
   nsExec::Exec 'netsh advfirewall firewall add rule name="FineCRM" dir=in action=allow protocol=TCP localport=7373 profile=domain,private description="Доступ сотрудников мастерской к Основе FineCRM"'
+
+  ; Поиск Основы в сети: программа сотрудника спрашивает «кто тут FineCRM?»
+  ; широковещательным пакетом, Основа отвечает. Без этого правила вопрос до
+  ; Основы не дойдёт, и поиск перейдёт к медленному перебору адресов. Те же
+  ; частные сети, что и у основного правила. Имя латиницей нарочно: по нему
+  ; правило потом удаляется, и рисковать кодировкой командной строки незачем.
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="FineCRM discovery"'
+  nsExec::Exec 'netsh advfirewall firewall add rule name="FineCRM discovery" dir=in action=allow protocol=UDP localport=7373 profile=domain,private description="Поиск Основы FineCRM в локальной сети"'
 !macroend
 
 ; Удаление.
@@ -73,6 +81,7 @@
 ; никогда. Про них спрашиваем отдельно, и по умолчанию ответ «нет».
 !macro customUnInstall
   nsExec::Exec 'netsh advfirewall firewall delete rule name="FineCRM"'
+  nsExec::Exec 'netsh advfirewall firewall delete rule name="FineCRM discovery"'
 
   ; Обновление версии запускает старый деинсталлятор молча. Это не удаление,
   ; а замена: ни спрашивать, ни стирать настройки тогда нельзя — иначе каждое

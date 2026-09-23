@@ -21,6 +21,11 @@ function readLocation(userDataDir) {
   try {
     const raw = JSON.parse(fs.readFileSync(pointerFile(userDataDir), "utf8"));
     if (typeof raw.dataDir === "string" && raw.dataDir) return raw;
+    // У клиента своей базы нет — только адрес Основы или облака. Раньше такой
+    // указатель считался пустым, и программа сотрудника при каждом запуске
+    // заново спрашивала, как ей работать.
+    if (raw.mode === "client" && typeof raw.connectTo === "string" && raw.connectTo) return raw;
+    if (raw.mode === "online") return raw;
     return null;
   } catch {
     return null;

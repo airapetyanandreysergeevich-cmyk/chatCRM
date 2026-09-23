@@ -84,6 +84,23 @@
       .row { display: flex; gap: 10px; margin-top: 22px; }
       .hidden { display: none; }
 
+      /* Способ подключения клиента: два равных варианта рядом. */
+      .seg { display: flex; gap: 6px; margin-top: 14px; }
+      .seg button { flex: 1; font-weight: 600; }
+      .seg button.on { border-color: var(--brand); background: #1b2a3a; color: #fff; }
+
+      /* Найденные Основы. */
+      .found {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        margin-top: 8px; padding: 12px 14px; border-radius: 12px;
+        border: 1px solid var(--line); background: var(--surface); cursor: pointer;
+      }
+      .found:hover { border-color: #444a58; }
+      .found.on { border-color: var(--brand); background: #1b2a3a; }
+      .found b { font-size: 14.5px; }
+      .found span { color: var(--ink-muted); font-size: 12.5px; font-family: Consolas, monospace; }
+      .ok { color: #4fbf82; }
+
       .spin {
         width: 18px; height: 18px; border-radius: 50%;
         border: 2px solid #2c3442; border-top-color: var(--brand);
@@ -148,14 +165,34 @@
         <!-- Одно поле на два случая: адрес в мастерской и адрес из интернета.
              Оба показывает сама Основа, у себя в настройках, — владельцу
              остаётся их переслать. -->
+        <!-- Сотруднику адрес Основы неоткуда взять: владелец занят, а переписывать
+             цифры с чужого экрана — верный способ ошибиться. Поэтому сначала
+             программа ищет сама; ручной ввод — для случаев, где поиск бессилен
+             (гостевой Wi-Fi, другая подсеть, работа из дома через интернет). -->
         <div id="clientFields" class="hidden">
-          <div class="folder">
-            <input id="addr" placeholder="http://192.168.1.40:7373" spellcheck="false" />
+          <div class="seg">
+            <button type="button" id="byAuto" class="on">Найти автоматически</button>
+            <button type="button" id="byHand">Ввести адрес</button>
           </div>
-          <p class="hint" id="addrHint">
-            Адрес показывает Основа в своих настройках: в мастерской — вида http://192.168…, из
-            интернета — вида https://www.finecrm.ru/b/…
-          </p>
+
+          <div id="autoBox">
+            <p class="hint" id="autoStep"></p>
+            <div id="foundList"></div>
+            <p class="hint" id="autoHint"></p>
+            <div class="row hidden" id="againRow">
+              <button type="button" id="searchAgain">Искать ещё раз</button>
+            </div>
+          </div>
+
+          <div id="handBox" class="hidden">
+            <div class="folder">
+              <input id="addr" placeholder="http://192.168.1.40:7373" spellcheck="false" />
+            </div>
+            <p class="hint" id="addrHint">
+              В мастерской адрес показывает Основа — в меню значка возле часов: вида http://192.168….
+              Для работы из дома — вида <span id="remoteSample">https://…/b/…</span>, его даст владелец.
+            </p>
+          </div>
         </div>
 
         <!-- У облака адрес один и тот же. Спрашивать его значит предлагать
@@ -208,7 +245,111 @@
           $("mainFields").classList.toggle("hidden", mode !== "main");
           $("clientFields").classList.toggle("hidden", mode !== "client");
           $("cloudFields").classList.toggle("hidden", mode !== "online");
+          // Выбрал «Клиент» — сразу ищем: нажимать ещё одну кнопку незачем.
+          if (mode === "client" && how === "auto" && !searched) void search();
         };
+      }
+
+      // ---------------------------------------------------------- поиск Основы
+
+      let how = "auto"; // "auto" | "hand"
+      let searched = false;
+      let searching = false;
+      let found = [];
+      let picked = null;
+
+      function setHow(next) {
+        how = next;
+        $("byAuto").classList.toggle("on", how === "auto");
+        $("byHand").classList.toggle("on", how === "hand");
+        $("autoBox").classList.toggle("hidden", how !== "auto");
+        $("handBox").classList.toggle("hidden", how !== "hand");
+        $("err").classList.add("hidden");
+        if (how === "hand") setTimeout(() => $("addr").focus(), 0);
+        if (how === "auto" && !searched) void search();
+      }
+      $("byAuto").onclick = () => setHow("auto");
+      $("byHand").onclick = () => setHow("hand");
+      $("searchAgain").onclick = () => void search();
+
+      window.setup.onDiscoverStep((step) => {
+        if (searching) $("autoStep").innerHTML = '<span class="spin"></span> ' + step + "…";
+      });
+
+      function renderFound() {
+        const list = $("foundList");
+        list.innerHTML = "";
+        for (const f of found) {
+          const row = document.createElement("div");
+          row.className = "found" + (picked === f ? " on" : "");
+          const title = document.createElement("b");
+          title.textContent = f.name || "Основа FineCRM";
+          const addr = document.createElement("span");
+          addr.textContent = f.address.replace(/^https?:\/\//, "");
+          row.append(title, addr);
+          row.onclick = () => {
+            picked = f;
+            renderFound();
+          };
+          list.append(row);
+        }
+      }
+
+      async function search() {
+        if (searching) return;
+        searching = true;
+        searched = true;
+        found = [];
+        picked = null;
+        renderFound();
+        $("autoHint").textContent = "";
+        $("againRow").classList.add("hidden");
+        $("autoStep").className = "hint";
+        $("autoStep").innerHTML = '<span class="spin"></span> Ищу Основу в сети…';
+
+        const res = await window.setup.discover();
+        searching = false;
+        found = res.found || [];
+
+        if (found.length === 1) {
+          // Нашлась одна — это она и есть. Показываем, какую именно, и
+          // продолжаем сами: человек выбрал «найти», а не «найти и нажать».
+          picked = found[0];
+          renderFound();
+          $("autoStep").className = "hint ok";
+          $("autoStep").textContent = "Основа найдена — подключаемся";
+          setTimeout(() => {
+            if (mode === "client" && how === "auto" && picked === found[0]) void go();
+          }, 900);
+          return;
+        }
+
+        if (found.length > 1) {
+          picked = found[0];
+          renderFound();
+          $("autoStep").className = "hint";
+          $("autoStep").textContent = `Нашлось несколько Основ (${found.length}) — выберите свою мастерскую:`;
+          $("againRow").classList.remove("hidden");
+          return;
+        }
+
+        // Ничего. Объясняем по делу: что проверить и что делать дальше.
+        $("autoStep").className = "hint bad";
+        $("autoStep").textContent = "Основа в сети не нашлась.";
+        const why = [];
+        if (res.noNetwork) why.push("Этот компьютер не подключён к сети.");
+        if (res.publicNetwork && res.publicNetwork.length) {
+          why.push(
+            `Windows считает сеть «${res.publicNetwork.join("», «")}» общедоступной — в такой сети компьютеры ` +
+              "не видят друг друга. Пометьте её частной: Параметры → Сеть и Интернет → сеть → «Частная»."
+          );
+        }
+        why.push(
+          "Проверьте, что компьютер с Основой включён и программа на нём запущена, а оба компьютера — в одной " +
+            "сети (гостевой Wi-Fi не подойдёт). Или введите адрес вручную: он показан в меню значка Основы возле часов."
+        );
+        $("autoHint").textContent = why.join(" ");
+        $("againRow").classList.remove("hidden");
       }
 
       $("pick").onclick = async () => {
@@ -225,7 +366,9 @@
         }
       };
 
-      $("go").onclick = async () => {
+      $("go").onclick = () => void go();
+
+      async function go() {
         $("err").classList.add("hidden");
         const choice =
           mode === "main"
@@ -239,7 +382,11 @@
                   password: $("password").value,
                 },
               }
-            : { mode, connectTo: mode === "online" ? "" : $("addr").value.trim() };
+            : mode === "online"
+              ? { mode, connectTo: "" }
+              : how === "auto"
+                ? { mode, connectTo: picked ? picked.address : "", workshopId: picked ? picked.id : null }
+                : { mode, connectTo: $("addr").value.trim() };
 
         if (mode === "main") {
           const o = choice.owner;
@@ -254,7 +401,15 @@
         }
         // Адрес спрашиваем только у клиента локальной сети: у облака он свой
         // и подставляется программой.
-        if (mode === "client" && !choice.connectTo) return fail("Укажите адрес Основы");
+        if (mode === "client" && !choice.connectTo) {
+          return fail(
+            how === "auto"
+              ? searching
+                ? "Подождите — поиск ещё идёт"
+                : "Выберите Основу из списка или введите адрес вручную"
+              : "Укажите адрес Основы"
+          );
+        }
 
         show("working");
         const res = await window.setup.apply(choice);
@@ -264,7 +419,7 @@
           show("choice");
           fail(res.error);
         }
-      };
+      }
 
       function fail(text) {
         $("err").textContent = text;
@@ -290,6 +445,8 @@
       window.setup.state().then((s) => {
         if (!$("dir").value) $("dir").value = s.suggestedDir;
         if (s.cloudUrl) $("cloudUrl").textContent = s.cloudUrl.replace(/^https?:\/\//, "");
+        // Адрес облака знает только config.js — здесь берём его оттуда же.
+        if (s.cloudUrl) $("remoteSample").textContent = s.cloudUrl + "/b/…";
         if (s.error) {
           logDir = s.error.logDir || "";
           $("failTitle").textContent = s.error.title;
