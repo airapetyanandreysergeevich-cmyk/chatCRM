@@ -5,7 +5,7 @@ import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
 import { z } from "zod";
 import { isTag, splitTag } from "../src/modules/relay/boxes.service";
-import { encodeInvite, encodeStaffKey, parseInvite, parseStaffKey, publicAddress } from "../src/modules/relay/invite";
+import { encodeInvite, parseInvite, publicAddress } from "../src/modules/relay/invite";
 import { newCode } from "../src/modules/relay/boxes.service";
 
 /**
@@ -171,17 +171,6 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   check(/^[a-z2-9]{14}$/.test(newCode()), "код в адресе случайный и ни о чём не говорит");
   check(newCode() !== newCode(), "два кода подряд не совпадают");
 
-  // Ключ сотрудника: внутри только адрес мастерской, ни ключа туннеля, ни пароля.
-  const staff = encodeStaffKey({ address: "https://www.finecrm.ru/b/kn7tuw2m4p9xzq/", workshop: "Сервис на Ленина", label: "Сергей" });
-  const staffBack = parseStaffKey(`Серёж, вот доступ:\n${staff}\nвходи своим логином`);
-  check(staffBack?.address === "https://www.finecrm.ru/b/kn7tuw2m4p9xzq/", "ключ сотрудника разбирается из письма");
-  check(staffBack?.workshop === "Сервис на Ленина" && staffBack?.label === "Сергей", "в ключе видно мастерскую и кому выдан");
-  check(!staff.includes(KEY), "ключа туннеля в ключе сотрудника нет");
-  check(
-    parseStaffKey("https://www.finecrm.ru/b/kn7tuw2m4p9xzq/")?.address === "https://www.finecrm.ru/b/kn7tuw2m4p9xzq/",
-    "вставленный адрес тоже принимается"
-  );
-  check(parseStaffKey("здравствуйте") === null, "обычный текст ключом не считается");
   check(
     parseInvite(`  Держите:\n${phrase}\n\nвопросы — пишите  `, DEFAULT_URL)?.key === KEY,
     "фраза вынимается из письма с лишним текстом"

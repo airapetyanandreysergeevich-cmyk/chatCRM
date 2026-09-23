@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
@@ -27,7 +26,7 @@ import { enforceTenantStatus } from "../../middleware/tenantStatus";
 
 import { applyRemoteAccess, relayAgentState } from "../relay/relay.instance";
 import { defaultRelayUrl, readRemoteAccess, saveRemoteAccess } from "../relay/remoteAccess";
-import { encodeStaffKey, parseInvite, publicAddress } from "../relay/invite";
+import { parseInvite, publicAddress } from "../relay/invite";
 
 export const settingsRouter = Router();
 settingsRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -278,7 +277,6 @@ settingsRouter.get(
       /** Имя мастерской в облаке: по нему входят её сотрудники. */
       tag: saved?.tag ?? "",
       address: publicAddress(url, saved?.code ?? ""),
-      staff: saved?.staff ?? [],
       state: agent.state,
       detail: agent.detail ?? null,
     });
@@ -306,7 +304,7 @@ settingsRouter.put(
     const tag = invite?.tag || saved?.tag || "";
     if (body.enabled && !key) throw badRequest("Вставьте фразу подключения — её выдаёт поставщик программы");
 
-    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email, tag, staff: saved?.staff ?? [] });
+    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email, tag });
     const agent = applyRemoteAccess(body.enabled ? { url, key } : null);
 
     await withTenant(tenantOf(req), (tx) =>
@@ -332,56 +330,5 @@ settingsRouter.put(
       address: publicAddress(url, code),
       state: agent.state,
     });
-  })
-);
-
-/**
- * Ключ для сотрудника.
- *
- * Владелец выдаёт его каждому по отдельности — и не потому, что ключи разные
- * по правам (прав они не дают вовсе), а потому что так человеку нечего
- * запоминать: вставил строку в программу и попал на экран входа своей
- * мастерской. Кому выдавали, остаётся в списке — чтобы владелец помнил, а не
- * чтобы что-то проверять.
- */
-settingsRouter.post(
-  "/remote-access/staff-key",
-  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
-  ah(async (req, res) => {
-    const { label } = z
-      .object({ label: z.string().trim().min(1, "Напишите, кому выдаёте ключ").max(60) })
-      .parse(req.body);
-
-    const saved = await readRemoteAccess();
-    if (!saved?.key || !saved.code) {
-      throw badRequest("Сначала подключите мастерскую к интернету — тогда появится и адрес для сотрудников");
-    }
-
-    const address = publicAddress(saved.url || defaultRelayUrl(), saved.code);
-    const tenant = await withTenant(tenantOf(req), (tx) =>
-      tx.tenant.findUnique({ where: { id: tenantOf(req) }, select: { name: true } })
-    );
-
-    const entry = { id: randomUUID(), label, issuedAt: new Date().toISOString() };
-    await saveRemoteAccess({ ...saved, staff: [...(saved.staff ?? []), entry] });
-
-    res.status(201).json({
-      key: encodeStaffKey({ address, workshop: tenant?.name ?? "", label }),
-      address,
-      staff: [...(saved.staff ?? []), entry],
-    });
-  })
-);
-
-/** Убрать запись из списка: сам ключ этим не отзывается — отзывается учётка сотрудника. */
-settingsRouter.delete(
-  "/remote-access/staff-key/:id",
-  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
-  ah(async (req, res) => {
-    const saved = await readRemoteAccess();
-    if (!saved) return res.json({ staff: [] });
-    const staff = (saved.staff ?? []).filter((s) => s.id !== req.params.id);
-    await saveRemoteAccess({ ...saved, staff });
-    res.json({ staff });
   })
 );

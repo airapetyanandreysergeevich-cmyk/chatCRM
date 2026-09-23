@@ -14,7 +14,6 @@ const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
 const { Backups } = require("./backup");
 const network = require("./network");
-const staffKey = require("./staffKey");
 const { Updater } = require("./updater");
 
 /**
@@ -474,20 +473,6 @@ ipcMain.handle("setup:pick-folder", async () => {
 
 ipcMain.handle("setup:check-folder", (_e, dir) => location.checkDataDir(dir));
 
-/**
- * Что за строку вставили в поле адреса.
- *
- * Окно спрашивает об этом, пока человек печатает, чтобы сразу показать
- * название мастерской: так видно, что ключ дошёл целым, ещё до нажатия
- * «Продолжить». Разбирает всё равно главный процесс — чтобы правила были в
- * одном месте, а не в двух.
- */
-ipcMain.handle("setup:read-key", (_e, text) => {
-  const parsed = staffKey.parseStaffKey(text);
-  if (parsed) return { kind: "key", address: parsed.address, workshop: parsed.workshop, label: parsed.label };
-  return { kind: staffKey.looksLikeKey(text) ? "broken" : "address" };
-});
-
 ipcMain.handle("setup:open-logs", (_e, dir) => shell.openPath(dir));
 
 /**
@@ -527,17 +512,14 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
       // У облака адрес один и тот же, и берём мы его у себя, а не из окна:
       // пришедшее оттуда значение здесь нечему проверять, а ошибиться в
       // букве — есть чему.
-      //
-      // Клиенту можно дать и адрес Основы в локальной сети, и ключ
-      // подключения, выданный владельцем мастерской: во втором случае адрес
-      // лежит внутри ключа, и человеку не приходится его переписывать.
-      const typed = String(choice.connectTo || "").trim();
-      const fromKey = staffKey.addressFromKey(typed);
-      if (staffKey.looksLikeKey(typed) && !fromKey) {
-        return { ok: false, error: "Ключ подключения испорчен — скопируйте выданную строку целиком и вставьте ещё раз" };
-      }
+      // Адрес бывает двух видов: в локальной сети (http://192.168.1.40:7373)
+      // и из интернета (https://www.finecrm.ru/b/<код>/) — его владелец берёт
+      // в своих настройках. Хвостовой слэш снимаем: к адресу потом клеится
+      // путь, а «…/b/код//api/health» — уже не тот адрес.
       const url =
-        choice.mode === config.MODE.ONLINE ? config.CLOUD_URL : fromKey || typed.replace(/\/+$/, "");
+        choice.mode === config.MODE.ONLINE
+          ? config.CLOUD_URL
+          : String(choice.connectTo || "").trim().replace(/\/+$/, "");
       const answer = await network.reach(url);
       if (!answer.ok) return { ok: false, error: answer.why };
       location.writeLocation(userData(), { mode: choice.mode, connectTo: url });

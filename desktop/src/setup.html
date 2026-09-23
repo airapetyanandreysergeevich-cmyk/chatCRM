@@ -109,10 +109,7 @@
 
         <div class="card" data-mode="client">
           <h2>Клиент — база на другом компьютере</h2>
-          <p>
-            Только окно с программой. Данные берутся с Основы — из локальной сети или, по ключу
-            подключения, через интернет.
-          </p>
+          <p>Только окно с программой. Данные берутся с Основы — из локальной сети или через интернет.</p>
         </div>
 
         <div class="card" data-mode="online">
@@ -148,16 +145,16 @@
           </div>
         </div>
 
-        <!-- Одно поле на два случая. Свой человек в мастерской перепишет адрес
-             с экрана Основы; тот, кто заходит снаружи, вставит ключ, выданный
-             владельцем, — адрес там внутри, и переписывать нечего. -->
+        <!-- Одно поле на два случая: адрес в мастерской и адрес из интернета.
+             Оба показывает сама Основа, у себя в настройках, — владельцу
+             остаётся их переслать. -->
         <div id="clientFields" class="hidden">
           <div class="folder">
-            <input id="addr" placeholder="Ключ подключения или http://192.168.1.40:7373" spellcheck="false" />
+            <input id="addr" placeholder="http://192.168.1.40:7373" spellcheck="false" />
           </div>
           <p class="hint" id="addrHint">
-            Адрес показывает Основа в своих настройках. Ключ для работы через интернет выдаёт
-            владелец мастерской — вставьте его целиком, вместе с началом FINECRM-S-.
+            Адрес показывает Основа в своих настройках: в мастерской — вида http://192.168…, из
+            интернета — вида https://www.finecrm.ru/b/…
           </p>
         </div>
 
@@ -228,33 +225,6 @@
         }
       };
 
-      // Разбираем вставленное, пока человек ещё смотрит на поле: увидеть
-      // название своей мастерской — самый короткий способ убедиться, что ключ
-      // дошёл целым. Разбирает главный процесс, здесь только показываем.
-      const ADDR_HINT = $("addrHint").textContent;
-      $("addr").oninput = async () => {
-        const text = $("addr").value.trim();
-        if (!text) {
-          $("addrHint").className = "hint";
-          $("addrHint").textContent = ADDR_HINT;
-          return;
-        }
-        const seen = await window.setup.readKey(text);
-        if (seen.kind === "key") {
-          $("addrHint").className = "hint";
-          $("addrHint").textContent =
-            (seen.workshop ? `Мастерская «${seen.workshop}»` : "Ключ принят") +
-            (seen.label ? ` · ключ для: ${seen.label}` : "") +
-            ` · ${seen.address}`;
-        } else if (seen.kind === "broken") {
-          $("addrHint").className = "hint bad";
-          $("addrHint").textContent = "Ключ скопирован не целиком. Вставьте всю строку, вместе с началом FINECRM-S-.";
-        } else {
-          $("addrHint").className = "hint";
-          $("addrHint").textContent = ADDR_HINT;
-        }
-      };
-
       $("go").onclick = async () => {
         $("err").classList.add("hidden");
         const choice =
@@ -284,7 +254,7 @@
         }
         // Адрес спрашиваем только у клиента локальной сети: у облака он свой
         // и подставляется программой.
-        if (mode === "client" && !choice.connectTo) return fail("Вставьте ключ подключения или адрес Основы");
+        if (mode === "client" && !choice.connectTo) return fail("Укажите адрес Основы");
 
         show("working");
         const res = await window.setup.apply(choice);

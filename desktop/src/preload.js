@@ -12,7 +12,6 @@ contextBridge.exposeInMainWorld("setup", {
   state: () => ipcRenderer.invoke("setup:state"),
   pickFolder: () => ipcRenderer.invoke("setup:pick-folder"),
   checkFolder: (dir) => ipcRenderer.invoke("setup:check-folder", dir),
-  readKey: (text) => ipcRenderer.invoke("setup:read-key", text),
   apply: (choice) => ipcRenderer.invoke("setup:apply", choice),
   openLogs: (dir) => ipcRenderer.invoke("setup:open-logs", dir),
   retry: () => ipcRenderer.invoke("setup:retry"),

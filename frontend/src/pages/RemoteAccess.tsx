@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Modal } from "../components/Modal";
 import {
   Banner,
   Button,
   Card,
   Checkbox,
-  Input,
   PageHeader,
   SectionLabel,
   Spinner,
   Textarea,
 } from "../components/ui";
 import { ApiError, api } from "../lib/api";
-import { formatDateTime } from "../lib/format";
 
 /**
  * Доступ к Основе из интернета — экран владельца мастерской.
@@ -29,13 +26,6 @@ import { formatDateTime } from "../lib/format";
  * показывается никогда — видно только четыре последних знака ключа.
  */
 
-/** Кому владелец уже выдавал ключ — список для памяти, а не для проверки. */
-interface StaffEntry {
-  id: string;
-  label: string;
-  issuedAt: string;
-}
-
 interface State {
   enabled: boolean;
   /** Фраза уже вставлена: можно просто двигать переключатель. */
@@ -47,7 +37,6 @@ interface State {
   /** Имя мастерской в облаке: по нему входят сотрудники на общем сайте. */
   tag: string;
   address: string;
-  staff: StaffEntry[];
   state: "off" | "connecting" | "online" | "error";
   detail: string | null;
 }
@@ -139,25 +128,7 @@ export default function RemoteAccess() {
           </p>
         )}
 
-        {/* Главное, что владельцу нужно отсюда унести: как его людям
-            представляться на общем сайте. Показываем не само имя, а готовый
-            образец — его и продиктуют сотруднику. */}
-        {data.tag && (
-          <div className="mt-4 rounded-field border border-line bg-surface-input px-3.5 py-3">
-            <p className="text-[13px] font-semibold text-ink-soft">Как входят ваши сотрудники</p>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-muted">
-              На www.finecrm.ru, обычной формой входа: своя почта, к которой дописано имя вашей
-              мастерской — <span className="font-mono text-[13px] text-ink">.{data.tag}</span>
-            </p>
-            <p className="mt-2 break-all font-mono text-[13px]">
-              anton@repair.ru<span className="font-bold text-brand-ink">.{data.tag}</span>
-            </p>
-            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
-              Пароль остаётся прежним и проверяется здесь, у вас: облако его не видит. Заводить
-              сотрудников по-прежнему в разделе «Сотрудники» — отдельно ничего создавать не нужно.
-            </p>
-          </div>
-        )}
+        {data.tag && <StaffLogin tag={data.tag} email={data.email} />}
 
         <div className="mt-4">
           <Checkbox
@@ -177,8 +148,6 @@ export default function RemoteAccess() {
           Компьютер с Основой для этого должен быть включён: когда он спит, адрес не отвечает.
         </p>
       </Card>
-
-      <StaffKeys data={data} onChange={load} />
 
       <Card>
         <SectionLabel>{data.connected ? "Новая фраза подключения" : "Фраза подключения"}</SectionLabel>
@@ -232,9 +201,8 @@ export default function RemoteAccess() {
             общие чаты.
           </li>
           <li>
-            Ключ сотрудника — не пароль: в нём только адрес вашей мастерской. Уволился человек или
-            потерял телефон — отключите его учётную запись в разделе «Сотрудники»: и ключ, и вход с
-            сайта перестанут что-либо давать.
+            Уволился человек или потерял телефон — отключите его учётную запись в разделе
+            «Сотрудники»: вход снаружи перестанет работать вместе с обычным.
           </li>
         </ul>
       </Card>
@@ -243,125 +211,21 @@ export default function RemoteAccess() {
 }
 
 /**
- * Ключи для сотрудников.
+ * Как входят сотрудники этой мастерской.
  *
- * Адрес мастерской теперь случайный — /b/kn7tuw2m4p9xzq, и продиктовать его
- * по телефону нельзя: ошибутся на третьем знаке. Поэтому владелец выдаёт
- * каждому строку, а сотрудник вставляет её на странице «Подключение» — в
- * программе для Windows, на телефоне или на сайте, — и попадает на экран
- * входа своей мастерской.
- *
- * Прав такой ключ не даёт никаких: вход остаётся прежним, логином и паролем.
- * Поэтому и «отозвать» его нечем — отзывается учётная запись сотрудника.
- * Список выданных нужен только владельцу: вспомнить, кому уже отправлял.
+ * Самое нужное на экране: приставка, которую владелец будет диктовать людям.
+ * Показываем не одно голое имя, а готовую строку целиком — по ней сразу видно,
+ * куда её дописывать, и переспрашивать не придётся. Пример строим из почты,
+ * на которую выдан доступ: свою человек узнаёт с одного взгляда, а выдуманный
+ * «anton@repair.ru» каждый раз приходится примерять на себя.
  */
-function StaffKeys({ data, onChange }: { data: State; onChange: () => Promise<void> }) {
-  const [label, setLabel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [issued, setIssued] = useState<{ key: string; label: string } | null>(null);
-
-  async function issue(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api.post<{ key: string }>("/settings/remote-access/staff-key", {
-        label: label.trim(),
-      });
-      setIssued({ key: res.key, label: label.trim() });
-      setLabel("");
-      await onChange();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось выдать ключ");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function forget(id: string) {
-    await api.del(`/settings/remote-access/staff-key/${id}`);
-    await onChange();
-  }
-
-  return (
-    <Card>
-      <SectionLabel>Ключи для сотрудников</SectionLabel>
-      <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
-        Нужны только для программы на Windows: при первом запуске сотрудник выбирает «Клиент» и
-        вставляет ключ — адрес мастерской внутри, диктовать его не придётся. На сайте ключ не нужен:
-        там входят почтой с именем мастерской.
-      </p>
-
-      {!data.connected ? (
-        <p className="mt-3 text-[12.5px] text-ink-dim">
-          Ключи появятся, когда мастерская будет подключена: адрес для них берётся отсюда же.
-        </p>
-      ) : (
-        <>
-          {error && (
-            <div className="mt-3">
-              <Banner tone="error">{error}</Banner>
-            </div>
-          )}
-          <form onSubmit={issue} className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <Input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Кому: Иван, приёмщик"
-              aria-label="Кому выдаётся ключ"
-              maxLength={60}
-            />
-            <Button type="submit" disabled={busy || !label.trim()} className="sm:min-w-[170px]">
-              {busy ? "Выдаём…" : "Выдать ключ"}
-            </Button>
-          </form>
-
-          {data.staff.length > 0 && (
-            <ul className="mt-4 divide-y divide-line border-t border-line">
-              {data.staff.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <span className="min-w-0">
-                    <span className="block truncate text-[14px] font-semibold">{s.label}</span>
-                    <span className="text-[12.5px] text-ink-dim">выдан {formatDateTime(s.issuedAt)}</span>
-                  </span>
-                  <Button
-                    variant="secondary"
-                    className="min-h-[34px] shrink-0 px-3 text-[13px]"
-                    onClick={() => void forget(s.id)}
-                  >
-                    Убрать
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">
-            Ключ можно выдать ещё раз в любой момент: он один и тот же для всех — это просто адрес
-            вашей мастерской. «Убрать» стирает запись из списка, у сотрудника ничего не меняется.
-            Через браузер — с телефона или с чужого компьютера — ключ не нужен вовсе.
-          </p>
-        </>
-      )}
-
-      {issued && <StaffKeyModal issued={issued} onClose={() => setIssued(null)} />}
-    </Card>
-  );
-}
-
-/** Ключ целиком — чтобы скопировать одной кнопкой и отправить человеку. */
-function StaffKeyModal({
-  issued,
-  onClose,
-}: {
-  issued: { key: string; label: string };
-  onClose: () => void;
-}) {
+function StaffLogin({ tag, email }: { tag: string; email: string }) {
   const [copied, setCopied] = useState(false);
+  const sample = (email && email.includes("@") ? email : "admin@admin.ru") + "." + tag;
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(issued.key);
+      await navigator.clipboard.writeText("." + tag);
       setCopied(true);
     } catch {
       setCopied(false);
@@ -369,23 +233,39 @@ function StaffKeyModal({
   };
 
   return (
-    <Modal title={`Ключ для: ${issued.label}`} onClose={onClose}>
-      <div className="space-y-4">
-        <p className="text-[13.5px] leading-relaxed text-ink-muted">
-          Отправьте эту строку сотруднику. При первом запуске программы он выберет «Клиент» и
-          вставит её в поле «Ключ подключения или адрес» — и увидит привычный вход.
-        </p>
-        <div className="break-all rounded-field border border-line bg-surface-input px-3 py-2.5 font-mono text-[13px]">
-          {issued.key}
-        </div>
-        {copied && <p className="text-center text-[13px] text-state-done">Скопировано</p>}
-        <Button type="button" onClick={() => void copy()} className="w-full">
-          Скопировать ключ
-        </Button>
-        <Button type="button" variant="secondary" onClick={onClose} className="w-full">
-          Готово
+    <div className="mt-4 rounded-field border border-line bg-surface-input px-3.5 py-3">
+      <p className="text-[13px] font-semibold text-ink-soft">Как входят ваши сотрудники</p>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-[13.5px] text-ink-muted">Приставка вашей мастерской:</span>
+        <span className="rounded-md bg-surface px-2 py-1 font-mono text-[15px] font-bold text-brand-ink">
+          .{tag}
+        </span>
+        <Button
+          type="button"
+          variant="secondary"
+          className="min-h-[30px] px-2.5 text-[12.5px]"
+          onClick={() => void copy()}
+        >
+          {copied ? "Скопировано" : "Скопировать"}
         </Button>
       </div>
-    </Modal>
+
+      <p className="mt-3 text-[13.5px] leading-relaxed text-ink-muted">
+        На <span className="font-semibold text-ink">www.finecrm.ru</span>, обычной формой входа.
+        В поле «Email» — та почта, которой человек входит здесь, у вас, плюс приставка в конце:
+      </p>
+
+      <p className="mt-2 break-all rounded-field border border-line bg-surface px-3 py-2.5 font-mono text-[13.5px]">
+        {sample.slice(0, sample.length - tag.length - 1)}
+        <span className="font-bold text-brand-ink">.{tag}</span>
+      </p>
+
+      <ul className="mt-3 space-y-1.5 text-[12.5px] leading-relaxed text-ink-dim">
+        <li>Пароль — тот же, что и в мастерской, и проверяется здесь, у вас: облако его не видит.</li>
+        <li>Заводить людей по-прежнему в разделе «Сотрудники» — отдельно создавать ничего не нужно.</li>
+        <li>Приставка одна на всю мастерскую: разным сотрудникам разные не нужны.</li>
+      </ul>
+    </div>
   );
 }

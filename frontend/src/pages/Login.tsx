@@ -5,7 +5,6 @@ import { BrandLogo, BrandRow } from "../components/Brand";
 import { Banner, Button, Field, Input, SectionLabel } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { BASE } from "../lib/basePath";
 
 /**
  * Вход один на всех. Кто пришёл — сотрудник мастерской или команда платформы —
@@ -102,18 +101,6 @@ export default function Login() {
               Оставить заявку
             </Link>
           </p>
-          {/* Сотрудник мастерской, которая держит базу у себя, приходит сюда по
-              привычке — это первый адрес, который он знает. Отсюда ему нужна
-              своя мастерская, а не облако: подсказываем, где вход.
-              Под приставкой /b/<код>/ это уже и есть его мастерская, и звать
-              оттуда некуда. */}
-          {BASE === "/" && (
-            <p className="mt-2.5 text-[13px] leading-relaxed text-ink-muted">
-              База в вашей мастерской? Входите этой же формой, дописав к почте имя мастерской:{" "}
-              <span className="whitespace-nowrap font-mono text-[12.5px] text-ink">anton@repair.ru.local20</span>.
-              Имя подскажет владелец.
-            </p>
-          )}
           <p className="mt-2.5 text-[12.5px] text-ink-dim">
             Забыли пароль — его меняет владелец мастерской в разделе «Сотрудники».
           </p>
