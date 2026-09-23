@@ -182,14 +182,29 @@
             <div class="row hidden" id="againRow">
               <button type="button" id="searchAgain">Искать ещё раз</button>
             </div>
+
+            <!-- Основа за другим роутером: ни вопрос в сеть, ни перебор своего
+                 диапазона туда не дотягиваются, а перебор названного — да. -->
+            <div id="rangeBox" class="hidden">
+              <p class="sub">Основа в другой сети мастерской?</p>
+              <div class="folder">
+                <input id="range" placeholder="Например, 192.168.0" spellcheck="false" />
+                <button type="button" id="searchRange">Искать там</button>
+              </div>
+              <p class="hint">
+                Если в мастерской несколько роутеров, у каждого свой диапазон адресов. Впишите первые три
+                числа адреса Основы — их видно в меню её значка возле часов.
+              </p>
+            </div>
           </div>
 
           <div id="handBox" class="hidden">
             <div class="folder">
-              <input id="addr" placeholder="http://192.168.1.40:7373" spellcheck="false" />
+              <input id="addr" placeholder="192.168.1.40" spellcheck="false" />
             </div>
             <p class="hint" id="addrHint">
-              В мастерской адрес показывает Основа — в меню значка возле часов: вида http://192.168….
+              В мастерской адрес показывает Основа — в меню значка возле часов. Достаточно цифр, например
+              192.168.1.40: «http://» и порт программа допишет сама.
               Для работы из дома — вида <span id="remoteSample">https://…/b/…</span>, его даст владелец.
             </p>
           </div>
@@ -247,6 +262,7 @@
           $("cloudFields").classList.toggle("hidden", mode !== "online");
           // Выбрал «Клиент» — сразу ищем: нажимать ещё одну кнопку незачем.
           if (mode === "client" && how === "auto" && !searched) void search();
+          updateGoLabel();
         };
       }
 
@@ -258,6 +274,12 @@
       let found = [];
       let picked = null;
 
+      /** «Подключиться», когда есть к чему; в остальных случаях — «Продолжить». */
+      function updateGoLabel() {
+        const connect = mode === "client" && ((how === "auto" && picked) || how === "hand");
+        $("go").textContent = connect ? "Подключиться" : "Продолжить";
+      }
+
       function setHow(next) {
         how = next;
         $("byAuto").classList.toggle("on", how === "auto");
@@ -267,10 +289,15 @@
         $("err").classList.add("hidden");
         if (how === "hand") setTimeout(() => $("addr").focus(), 0);
         if (how === "auto" && !searched) void search();
+        updateGoLabel();
       }
       $("byAuto").onclick = () => setHow("auto");
       $("byHand").onclick = () => setHow("hand");
       $("searchAgain").onclick = () => void search();
+      $("searchRange").onclick = () => void search($("range").value.trim());
+      $("range").onkeydown = (e) => {
+        if (e.key === "Enter") void search($("range").value.trim());
+      };
 
       window.setup.onDiscoverStep((step) => {
         if (searching) $("autoStep").innerHTML = '<span class="spin"></span> ' + step + "…";
@@ -295,32 +322,46 @@
         }
       }
 
-      async function search() {
+      async function search(range) {
         if (searching) return;
         searching = true;
         searched = true;
         found = [];
         picked = null;
         renderFound();
+        updateGoLabel();
         $("autoHint").textContent = "";
         $("againRow").classList.add("hidden");
         $("autoStep").className = "hint";
-        $("autoStep").innerHTML = '<span class="spin"></span> Ищу Основу в сети…';
+        $("autoStep").innerHTML = range
+          ? '<span class="spin"></span> Ищу Основу в диапазоне ' + range.replace(/[<>&]/g, "") + "…"
+          : '<span class="spin"></span> Ищу Основу в сети…';
 
-        const res = await window.setup.discover();
+        const res = await window.setup.discover(range ? { range } : {});
         searching = false;
         found = res.found || [];
+        // Поле другого диапазона показываем после первого поиска: до этого
+        // оно только отвлекает — в большинстве мастерских сеть одна.
+        $("rangeBox").classList.remove("hidden");
+
+        if (res.badRange) {
+          $("autoStep").className = "hint bad";
+          $("autoStep").textContent =
+            "Не похоже на диапазон адресов мастерской. Нужны первые три числа, например 192.168.0 или 10.0.1.";
+          $("againRow").classList.remove("hidden");
+          updateGoLabel();
+          return;
+        }
 
         if (found.length === 1) {
-          // Нашлась одна — это она и есть. Показываем, какую именно, и
-          // продолжаем сами: человек выбрал «найти», а не «найти и нажать».
+          // Нашлась одна. Сами не уходим: человек должен успеть увидеть, что
+          // это его мастерская, а не соседняя за тем же роутером.
           picked = found[0];
           renderFound();
           $("autoStep").className = "hint ok";
-          $("autoStep").textContent = "Основа найдена — подключаемся";
-          setTimeout(() => {
-            if (mode === "client" && how === "auto" && picked === found[0]) void go();
-          }, 900);
+          $("autoStep").textContent = "Основа найдена. Проверьте название и нажмите «Подключиться».";
+          $("againRow").classList.remove("hidden");
+          updateGoLabel();
           return;
         }
 
@@ -330,12 +371,15 @@
           $("autoStep").className = "hint";
           $("autoStep").textContent = `Нашлось несколько Основ (${found.length}) — выберите свою мастерскую:`;
           $("againRow").classList.remove("hidden");
+          updateGoLabel();
           return;
         }
 
         // Ничего. Объясняем по делу: что проверить и что делать дальше.
         $("autoStep").className = "hint bad";
-        $("autoStep").textContent = "Основа в сети не нашлась.";
+        $("autoStep").textContent = range
+          ? `В диапазоне ${range} Основа не нашлась.`
+          : "Основа в сети не нашлась.";
         const why = [];
         if (res.noNetwork) why.push("Этот компьютер не подключён к сети.");
         if (res.publicNetwork && res.publicNetwork.length) {

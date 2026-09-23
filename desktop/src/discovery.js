@@ -218,6 +218,53 @@ async function identify(ip, port, timeoutMs = 1500) {
   }
 }
 
+/**
+ * Диапазон, который человек попросил проверить: «192.168.0», «192.168.0.x»,
+ * «192.168.0.15» или «192.168.0.0/24» — всё это одно и то же, первые три
+ * числа адреса.
+ *
+ * Зачем. Когда в мастерской несколько роутеров и второй подключён к первому
+ * своим входом «Интернет», компьютеры за вторым видят сеть первого, но ни
+ * широковещательный вопрос, ни перебор своего диапазона туда не доходят.
+ * Зная диапазон, программа перебирает его по HTTP — а это через роутер
+ * проходит.
+ *
+ * Только частные диапазоны: перебирать чужие адреса в интернете программа
+ * мастерской не должна ни по ошибке, ни по просьбе.
+ */
+function parseRange(raw) {
+  const m = /^\s*(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(?:\d{1,3}|x|\*)?)?(?:\/\d{1,2})?\s*$/i.exec(String(raw ?? ""));
+  if (!m) return null;
+  const parts = m.slice(1, 4).map(Number);
+  if (parts.some((n) => n > 255)) return null;
+  const prefix = parts.join(".");
+  if (!isLanAddress(`http://${prefix}.1`)) return null;
+  return prefix;
+}
+
+/**
+ * Адрес, набранный руками, — в тот вид, по которому можно подключиться.
+ *
+ * Люди пишут так, как видят: «192.168.0.15», «192.168.0.15:7373»,
+ * «http://192.168.0.15». Без «http://» адрес вообще не открывается, а без
+ * порта уходит не туда. Дописываем недостающее сами: у Основы в локальной
+ * сети порт всегда 7373, если не указан другой. Адреса из интернета
+ * (https://…/b/…) не трогаем — там порт не нужен.
+ */
+function normalizeAddress(raw) {
+  let a = String(raw ?? "").trim();
+  if (!a) return "";
+  if (!/^https?:\/\//i.test(a)) a = `http://${a}`;
+  try {
+    const u = new URL(a);
+    if (u.protocol === "http:" && !u.port) u.port = String(DEFAULT_PORT);
+    a = u.toString();
+  } catch {
+    /* оставим как есть — проверка связи скажет, что не так */
+  }
+  return a.replace(/\/+$/, "");
+}
+
 /** Выполнить задачи с ограничением одновременности — не валить сеть сотней запросов разом. */
 async function pool(items, limit, fn) {
   const out = [];
@@ -258,6 +305,15 @@ async function discover(opts = {}) {
   });
   let found = await pool(answered, 8, ({ ip, port: p }) => identify(ip, p));
 
+  // Диапазоны, названные человеком (или запомненные при прошлом
+  // подключении), перебираем всегда: раз их назвали, Основа ожидается там.
+  const ranges = (opts.ranges ?? []).map(parseRange).filter(Boolean);
+  if (ranges.length) {
+    const hosts = [...new Set(ranges.flatMap((prefix) => scanTargets({ address: `${prefix}.0`, netmask: "255.255.255.0" })))];
+    say(`Проверяю адреса ${ranges.map((r) => `${r}.x`).join(", ")}`);
+    found = found.concat(await pool(hosts, opts.concurrency ?? 64, (ip) => identify(ip, port, opts.probeMs ?? 800)));
+  }
+
   if (found.length === 0 && opts.scan !== false) {
     const hosts = [...new Set(interfaces.flatMap(scanTargets))];
     if (hosts.length) {
@@ -296,4 +352,6 @@ module.exports = {
   broadcastOf,
   scanTargets,
   isLanAddress,
+  parseRange,
+  normalizeAddress,
 };

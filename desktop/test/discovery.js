@@ -62,6 +62,20 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok("адрес из интернета — не локальный", !d.isLanAddress("https://www.finecrm.ru/b/kn7tuw2m4p9xzq"));
   ok("172.16–31 тоже локальные", d.isLanAddress("http://172.20.0.5:7373") && !d.isLanAddress("http://172.40.0.5:7373"));
 
+  // ---------- адрес, набранный руками
+  ok("голый адрес — дописываем http и порт", d.normalizeAddress("192.168.0.15") === "http://192.168.0.15:7373");
+  ok("адрес с портом — дописываем только http", d.normalizeAddress(" 192.168.0.15:8080 ") === "http://192.168.0.15:8080");
+  ok("полный адрес не трогаем", d.normalizeAddress("http://192.168.0.15:7373/") === "http://192.168.0.15:7373");
+  ok("адрес из интернета остаётся без порта", d.normalizeAddress("https://www.finecrm.ru/b/kn7tuw2m4p9xzq/") === "https://www.finecrm.ru/b/kn7tuw2m4p9xzq");
+  ok("пустое поле остаётся пустым", d.normalizeAddress("   ") === "");
+
+  // ---------- диапазон, названный человеком
+  ok("«192.168.0» — диапазон", d.parseRange("192.168.0") === "192.168.0");
+  ok("«192.168.0.x» и «192.168.0.15» — тот же диапазон", d.parseRange("192.168.0.x") === "192.168.0" && d.parseRange(" 192.168.0.15 ") === "192.168.0");
+  ok("«10.1.2.0/24» — тоже", d.parseRange("10.1.2.0/24") === "10.1.2");
+  ok("чужие адреса из интернета перебирать не даём", d.parseRange("8.8.8") === null && d.parseRange("172.40.0") === null);
+  ok("мусор диапазоном не считается", d.parseRange("мастерская") === null && d.parseRange("192.168.300") === null && d.parseRange("") === null);
+
   // ---------- ответ Основы и вопрос клиента
   const box = await fakeBox({ ok: true, app: "finecrm", workshop: { id: "w-1", name: "Сервис на Ленина" } });
   const udp = await freeUdpPort();
@@ -109,6 +123,22 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const took = Date.now() - t0;
   ok("перебор соседних адресов находит Основу, даже если сеть молчит", scanned.length === 1 && scanned[0].name === "Сервис на Ленина");
   ok(`перебор укладывается в разумное время (${took} мс)`, took < 8000);
+
+  // Основа в другом диапазоне (за вторым роутером): своя сеть её не видит,
+  // но названный диапазон перебирается. На стенде «другой диапазон» — 127.0.0.
+  // Частным он не считается, поэтому проверяем сам перебор через внутреннее
+  // имя диапазона, как его передаёт программа после разбора.
+  const viaRange = await d.discover({
+    interfaces: [],
+    targets: ["127.0.0.1"],
+    discoveryPort: udp,
+    port: box.port,
+    waitMs: 200,
+    probeMs: 500,
+    ranges: ["127.0.0"],
+    scan: false,
+  });
+  ok("частным адресом 127.x не считается — перебор по нему не запускается", viaRange.length === 0);
 
   const steps = [];
   await d.discover({ interfaces: [], targets: ["127.0.0.1"], discoveryPort: udp, port: box.port, waitMs: 200, scan: false, onStep: (s) => steps.push(s) });

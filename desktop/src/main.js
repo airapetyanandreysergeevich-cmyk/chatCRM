@@ -32,6 +32,8 @@ let backend = null;
 let backups = null;
 /** Ответ на поиск Основы в сети (см. discovery.js). */
 let responder = null;
+/** К чему подключён клиент: показываем в меню значка, там же меняем. */
+let connection = null;
 /** Что сейчас поднято: настройки, раскладка папки, порт сервера. */
 let running = null;
 /** Пока сервер перезапускают намеренно, его уход — не повод пугать человека. */
@@ -276,7 +278,10 @@ async function startClient(url, online = false, workshopId = null) {
   if (!answer.ok && !online && workshopId && discovery.isLanAddress(address)) {
     state.step = "Основа сменила адрес — ищу её в сети";
     if (win && !win.isDestroyed()) win.webContents.send("setup:progress", state.step);
-    const found = (await discovery.discover().catch(() => [])).find((f) => f.id === workshopId);
+    // Прежний диапазон проверяем обязательно: если Основа стоит за другим
+    // роутером, ни вопрос в сеть, ни перебор своего диапазона её не найдут.
+    const ranges = [discovery.parseRange(new URL(address).hostname)].filter(Boolean);
+    const found = (await discovery.discover({ ranges }).catch(() => [])).find((f) => f.id === workshopId);
     if (found) {
       address = found.address;
       location.writeLocation(userData(), { mode: config.MODE.CLIENT, connectTo: address, workshopId });
@@ -299,6 +304,8 @@ async function startClient(url, online = false, workshopId = null) {
     return;
   }
 
+  connection = { mode: online ? config.MODE.ONLINE : config.MODE.CLIENT, address };
+  refreshTray();
   await win.loadURL(address);
 }
 
@@ -386,13 +393,44 @@ function lastBackupLabel() {
 }
 
 /**
+ * Сменить подключение клиента: вернуться к выбору «найти автоматически /
+ * ввести адрес». Спрашиваем подтверждение — пункт стоит рядом с «Выйти», и
+ * случайный щелчок не должен выкидывать человека из работы.
+ */
+async function changeConnection() {
+  const answer = await dialog.showMessageBox(win, {
+    type: "question",
+    title: "Сменить подключение",
+    message: "Подключиться к другой Основе или по другому адресу?",
+    detail: "Программа откроет выбор: найти Основу в сети автоматически или ввести адрес вручную.",
+    buttons: ["Сменить", "Отмена"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (answer.response !== 0) return;
+  location.forgetLocation(userData());
+  connection = null;
+  state.error = null;
+  refreshTray();
+  win.show();
+  await showSetup();
+}
+
+/**
  * Меню в трее. Пересобираем целиком, а не правим пункты: Electron не даёт
  * менять готовое меню, и «обновлённый» пункт остался бы прежним.
  */
 function refreshTray() {
   if (!tray) return;
 
-  tray.setToolTip("FineCRM — Основа");
+  const role = running
+    ? "Основа"
+    : connection && connection.mode === config.MODE.ONLINE
+      ? "облако"
+      : connection
+        ? "клиент"
+        : null;
+  tray.setToolTip(role ? `FineCRM — ${role}` : "FineCRM");
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Открыть", click: () => (win.isVisible() ? win.focus() : win.show()) },
@@ -409,9 +447,30 @@ function refreshTray() {
             },
           ]
         : []),
-      { type: "separator" },
-      { label: lastBackupLabel(), enabled: false },
+      // Клиенту — к чему он подключён и как это поменять. Ситуации бывают
+      // разные: Основу перенесли на другой компьютер, поставили второй
+      // роутер, человек забрал ноутбук домой. Сменить подключение должно
+      // быть можно без переустановки программы.
+      ...(!running && connection
+        ? [
+            {
+              label:
+                connection.mode === config.MODE.ONLINE
+                  ? "Подключено к облаку"
+                  : `Подключено к: ${connection.address.replace(/^https?:\/\//, "")}`,
+              enabled: false,
+            },
+            { label: "Сменить подключение…", click: () => void changeConnection() },
+          ]
+        : []),
+      ...(running
+        ? [
+            { type: "separator" },
+            { label: lastBackupLabel(), enabled: false },
+          ]
+        : []),
       {
+        visible: !!running,
         label: "Сделать копию сейчас",
         enabled: !!backups,
         click: async () => {
@@ -469,10 +528,20 @@ ipcMain.handle("setup:check-folder", (_e, dir) => location.checkDataDir(dir));
  * Шаги поиска отправляем в окно: перебор адресов занимает несколько секунд,
  * и молчащая крутилка на это время выглядит зависшей программой.
  */
-ipcMain.handle("setup:discover", async () => {
+ipcMain.handle("setup:discover", async (_e, opts = {}) => {
   const send = (step) => win && !win.isDestroyed() && win.webContents.send("setup:discover-step", step);
+  // Диапазон, который человек назвал сам («Основа за другим роутером»).
+  const range = opts && opts.range ? discovery.parseRange(opts.range) : null;
+  if (opts && opts.range && !range) {
+    return {
+      found: [],
+      badRange: true,
+      noNetwork: false,
+      publicNetwork: [],
+    };
+  }
   try {
-    const found = await discovery.discover({ onStep: send });
+    const found = await discovery.discover({ onStep: send, ranges: range ? [range] : [] });
     const nets = discovery.lanInterfaces();
     const closed = await network.blocking().catch(() => []);
     return {
@@ -530,9 +599,7 @@ ipcMain.handle("setup:apply", async (_e, choice) => {
       // в своих настройках. Хвостовой слэш снимаем: к адресу потом клеится
       // путь, а «…/b/код//api/health» — уже не тот адрес.
       const url =
-        choice.mode === config.MODE.ONLINE
-          ? config.CLOUD_URL
-          : String(choice.connectTo || "").trim().replace(/\/+$/, "");
+        choice.mode === config.MODE.ONLINE ? config.CLOUD_URL : discovery.normalizeAddress(choice.connectTo);
       const answer = await network.reach(url);
       if (!answer.ok) return { ok: false, error: answer.why };
       // Номер мастерской помним, чтобы при смене адреса найти её снова.
