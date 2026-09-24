@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { copyable } from "../components/CopyMenu";
 import { Modal } from "../components/Modal";
 import { IconDownload, IconPlus, IconUpload } from "../components/icons";
 import {
@@ -177,7 +178,11 @@ export default function Finance() {
                         {money(t.amount)}
                       </span>
                       <span className="truncate text-ink-soft">{t.category?.name ?? "без статьи"}</span>
-                      {t.order && <Badge>заказ {t.order.number}</Badge>}
+                      {t.order && (
+                        <span {...copyable("order", t.order.number)}>
+                          <Badge>заказ {t.order.number}</Badge>
+                        </span>
+                      )}
                     </>
                   }
                   subtitle={

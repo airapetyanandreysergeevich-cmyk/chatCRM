@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "../components/Modal";
+import { OrderNumberCard } from "../components/OrderNumberCard";
 import { IconDelete, IconDownload, IconUpload } from "../components/icons";
 import { Banner, Button, Card, Field, Input, PageHeader, SectionLabel, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
@@ -603,8 +604,9 @@ export default function Data() {
       <PageHeader
         eyebrow="Настройки"
         title="Базы"
-        subtitle="Выгрузка данных мастерской и загрузка из файла."
+        subtitle="Нумерация заказов, выгрузка данных мастерской и загрузка из файла."
       />
+      <OrderNumberCard />
       <ExportCard reference={reference} onWiped={() => void load()} />
       <ImportCard reference={reference} />
       <ColumnsCard reference={reference} />

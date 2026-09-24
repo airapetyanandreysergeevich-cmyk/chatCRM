@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { copyable } from "../components/CopyMenu";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconAdd, IconClients, IconCompany, IconEdit, IconPerson } from "../components/icons";
@@ -229,7 +230,7 @@ export default function Clients() {
                       style={{ backgroundColor: customerColor(c.color)!.dot }}
                     />
                   )}
-                  <span className="truncate" style={nameStyle(c.color)}>
+                  <span className="truncate" style={nameStyle(c.color)} {...copyable("name", c.name)}>
                     {c.name}
                   </span>
                   {c.type === "COMPANY" && <Badge>организация</Badge>}
@@ -247,6 +248,7 @@ export default function Clients() {
                   {c.phone ? (
                     <a
                       href={`tel:${c.phone}`}
+                      {...copyable("phone", c.phone)}
                       onClick={(e) => e.stopPropagation()}
                       className="font-semibold text-brand-ink hover:underline"
                     >

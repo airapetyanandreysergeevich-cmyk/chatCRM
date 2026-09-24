@@ -1,8 +1,15 @@
 import { Router, type Request } from "express";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { ah, badRequest } from "../../lib/errors";
+import { ah, badRequest, conflict } from "../../lib/errors";
+import {
+  STANDARD_PREFIX,
+  parseTemplate,
+  tenantYear,
+  upcoming,
+  type OrderNumberFormat,
+} from "../../lib/orderNumber";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
   actorUserId,
@@ -331,5 +338,128 @@ settingsRouter.put(
       address: publicAddress(url, code),
       state: agent.state,
     });
+  })
+);
+
+// ---------------------------------------------------------------- номер заказа
+
+/**
+ * Свой формат номера заказа (см. lib/orderNumber.ts).
+ *
+ * Менять можно, только пока в мастерской нет ни одного заказа — считая
+ * удалённые и загруженные из файла. Иначе номера на выданных квитанциях
+ * разошлись бы с базой, а новый счётчик мог бы выдать номер, который уже
+ * есть у старого заказа.
+ */
+async function orderNumberState(tenantId: string) {
+  return withTenant(tenantId, async (tx) => {
+    const [tenant, orders, year] = await Promise.all([
+      tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: {
+          orderNumberPrefix: true,
+          orderNumberNext: true,
+          orderNumberTemplate: true,
+          orderNumberWidth: true,
+          orderNumberStart: true,
+          orderNumberWithYear: true,
+          orderNumberYear: true,
+        },
+      }),
+      tx.order.count(),
+      tenantYear(tx, tenantId),
+    ]);
+    const format: OrderNumberFormat = {
+      template: tenant.orderNumberTemplate,
+      prefix: tenant.orderNumberPrefix,
+      width: tenant.orderNumberWidth,
+      start: tenant.orderNumberStart,
+      withYear: tenant.orderNumberWithYear,
+    };
+    return {
+      template: tenant.orderNumberTemplate ?? "",
+      withYear: tenant.orderNumberWithYear,
+      /** Заказы уже есть — формат менять нельзя. */
+      locked: orders > 0,
+      orders,
+      year,
+      next: upcoming(format, { next: tenant.orderNumberNext, year: tenant.orderNumberYear }, year),
+    };
+  });
+}
+
+const orderNumberSchema = z.object({
+  /** Пусто — стандартный формат. */
+  template: z.string().max(40).default(""),
+  withYear: z.boolean().default(false),
+});
+
+/** Разобрать запрос в формат — или объяснить, что не так. */
+function formatFrom(body: z.infer<typeof orderNumberSchema>): OrderNumberFormat {
+  const template = body.template.trim();
+  if (!template) return { template: null, prefix: STANDARD_PREFIX, width: 5, start: 1, withYear: false };
+  const parsed = parseTemplate(template);
+  if (!parsed.ok) throw new ZodError([{ code: "custom", path: ["template"], message: parsed.reason }]);
+  return { template, prefix: parsed.prefix, width: parsed.width, start: parsed.start, withYear: body.withYear };
+}
+
+settingsRouter.get(
+  "/order-number",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    res.json(await orderNumberState(tenantOf(req)));
+  })
+);
+
+/** Как будут выглядеть номера — пока владелец печатает, до сохранения. */
+settingsRouter.get(
+  "/order-number/preview",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const q = z
+      .object({ template: z.string().max(40).default(""), withYear: z.enum(["1", "0"]).default("0") })
+      .parse(req.query);
+    const format = formatFrom({ template: q.template, withYear: q.withYear === "1" });
+    const year = await withTenant(tenantOf(req), (tx) => tenantYear(tx, tenantOf(req)));
+    res.json({ next: upcoming(format, { next: format.start, year: null }, year) });
+  })
+);
+
+settingsRouter.put(
+  "/order-number",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const format = formatFrom(orderNumberSchema.parse(req.body));
+    const tenantId = tenantOf(req);
+
+    await withTenant(tenantId, async (tx) => {
+      if ((await tx.order.count()) > 0) {
+        throw conflict("Нумерация уже идёт — менять её нельзя, иначе номера на выданных квитанциях разойдутся с базой");
+      }
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: {
+          orderNumberTemplate: format.template,
+          orderNumberPrefix: format.prefix,
+          orderNumberWidth: format.width,
+          orderNumberStart: format.start,
+          orderNumberWithYear: format.withYear,
+          // Счётчик — с первого номера образца; год выставится при первом заказе.
+          orderNumberNext: format.start,
+          orderNumberYear: null,
+        },
+      });
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        diff: { orderNumber: format.template ?? "стандартный", withYear: format.withYear },
+        ip: clientIp(req),
+      });
+    });
+
+    res.json(await orderNumberState(tenantId));
   })
 );

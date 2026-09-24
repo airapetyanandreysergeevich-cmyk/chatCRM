@@ -1,6 +1,7 @@
 "use strict";
 
 const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, ipcMain, shell } = require("electron");
+const { attachEditMenu } = require("./editMenu");
 const fs = require("fs");
 const net = require("net");
 const os = require("os");
@@ -90,6 +91,10 @@ function createWindow() {
   });
 
   win.once("ready-to-show", () => win.show());
+
+  // «Копировать / Вставить» по правой кнопке в полях ввода — своего меню у
+  // окна Electron нет (см. editMenu.js).
+  attachEditMenu(win.webContents, { Menu, clipboard });
 
   // Внешние ссылки — в браузер, а не в окно программы: вернуться из
   // случайно открытого сайта внутри окна человеку будет нечем.

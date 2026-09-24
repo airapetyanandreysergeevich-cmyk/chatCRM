@@ -59,6 +59,17 @@ model Tenant {
   // нумерация заказов — своя у каждой мастерской
   orderNumberPrefix String @default("Р")
   orderNumberNext   Int    @default(1)
+  /// Свой формат номера — образец, как его ввёл владелец: SC01, З-001, 1000.
+  /// Пусто — стандартный Р-2026-00001. Приставка своего формата лежит в
+  /// orderNumberPrefix, ширина и начало счётчика — рядом. Менять можно только
+  /// пока в мастерской нет ни одного заказа (см. lib/orderNumber.ts).
+  orderNumberTemplate String?
+  orderNumberWidth    Int     @default(5)
+  orderNumberStart    Int     @default(1)
+  /// Год в своём формате (SC-2026-01). С ним счётчик каждый год начинается заново.
+  orderNumberWithYear Boolean @default(false)
+  /// К какому году относится счётчик своего формата с годом.
+  orderNumberYear     Int?
 
   /// Счётчик номеров клиентов — своя нумерация у каждой мастерской, как и у заказов.
   customerNumberNext Int @default(1)

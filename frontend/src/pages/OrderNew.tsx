@@ -1,3 +1,4 @@
+import { copyable } from "../components/CopyMenu";
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconCamera, IconCompany, IconPerson, IconSettings } from "../components/icons";
@@ -54,7 +55,7 @@ function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: Cust
             {c.type === "COMPANY" ? <IconCompany /> : <IconPerson />}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[14px] font-semibold" style={nameStyle(c.color)}>
+            <span className="block truncate text-[14px] font-semibold" style={nameStyle(c.color)} {...copyable("name", c.name)}>
               {c.name}
               {customerColor(c.color) && (
                 <span
@@ -63,7 +64,7 @@ function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: Cust
                 />
               )}
             </span>
-            <span className="block truncate text-[12.5px] text-ink-muted">
+            <span className="block truncate text-[12.5px] text-ink-muted" {...copyable("phone", c.phone)}>
               {c.phone}
               {c.orderCount > 0 && ` · ${plural(c.orderCount, "заказ", "заказа", "заказов")}`}
             </span>
@@ -283,7 +284,7 @@ export default function OrderNew() {
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-field border border-brand/40 bg-brand-tint px-3 py-2.5">
                 <span className="text-[13.5px]">
                   Карточка из базы:{" "}
-                  <span className="font-semibold" style={nameStyle(picked.color)} title={customerColor(picked.color)?.label}>
+                  <span className="font-semibold" style={nameStyle(picked.color)} title={customerColor(picked.color)?.label} {...copyable("name", picked.name)}>
                     {picked.name}
                   </span>
                   {picked.orderCount > 0 && (

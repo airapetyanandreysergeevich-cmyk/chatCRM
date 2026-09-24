@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { copyable } from "../components/CopyMenu";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
@@ -403,7 +404,7 @@ export default function OrderCard() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="font-mono text-[26px] font-extrabold tracking-tight">{order.number}</h1>
+            <h1 className="font-mono text-[26px] font-extrabold tracking-tight" {...copyable("order", order.number)}>{order.number}</h1>
             <StatusChip tone={statusTone(order.status.group)}>{order.status.name}</StatusChip>
             {order.isUrgent && (
               <span className="rounded-pill bg-state-off/10 px-2.5 py-1 text-[12px] font-bold text-state-off">срочный</span>
@@ -416,7 +417,12 @@ export default function OrderCard() {
           </div>
           <p className="mt-2 text-[15px] text-ink-muted">
             {[order.device?.kind, order.device?.brand, order.device?.model].filter(Boolean).join(" ")}
-            {order.device?.serial ? ` · s/n ${order.device.serial}` : ""}
+            {order.device?.serial && (
+              <>
+                {" · s/n "}
+                <span {...copyable("serial", order.device.serial)}>{order.device.serial}</span>
+              </>
+            )}
           </p>
         </div>
 
@@ -515,7 +521,7 @@ export default function OrderCard() {
           <div className="mt-3">
             <Rows
               items={[
-                { label: "Прошлый заказ", value: <span className="font-mono">{order.previousRepair.number}</span> },
+                { label: "Прошлый заказ", value: <span className="font-mono" {...copyable("order", order.previousRepair.number)}>{order.previousRepair.number}</span> },
                 { label: "Мастер", value: order.previousRepair.master },
                 { label: "Закрыт", value: formatDate(order.previousRepair.issuedAt ?? order.previousRepair.completedAt) },
                 { label: "Гарантия до", value: formatDate(order.previousRepair.warrantyUntil) },
@@ -682,6 +688,7 @@ export default function OrderCard() {
                         can("customers.view") ? (
                           <Link
                             to={`/clients/${order.customer.id}`}
+                            {...copyable("name", order.customer.name)}
                             className="font-semibold underline decoration-dotted underline-offset-4 hover:decoration-solid"
                             style={nameStyle(order.customer.color)}
                             title={`${customerColor(order.customer.color)?.label ?? "Клиент"} — открыть карточку`}
@@ -691,6 +698,7 @@ export default function OrderCard() {
                         ) : (
                           <span
                             className="font-semibold"
+                            {...copyable("name", order.customer.name)}
                             style={nameStyle(order.customer.color)}
                             title={customerColor(order.customer.color)?.label}
                           >
@@ -702,12 +710,17 @@ export default function OrderCard() {
                     {
                       label: "Телефон",
                       value: order.customer.phone ? (
-                        <a href={`tel:${order.customer.phone}`} className="font-semibold text-brand">
+                        <a href={`tel:${order.customer.phone}`} {...copyable("phone", order.customer.phone)} className="font-semibold text-brand">
                           {order.customer.phone}
                         </a>
                       ) : null,
                     },
-                    { label: "Ещё телефон", value: order.customer.phone2 },
+                    {
+                      label: "Ещё телефон",
+                      value: order.customer.phone2 ? (
+                        <span {...copyable("phone", order.customer.phone2)}>{order.customer.phone2}</span>
+                      ) : null,
+                    },
                     { label: "Email", value: order.customer.email },
                     { label: "Адрес", value: order.customer.address },
                   ]}

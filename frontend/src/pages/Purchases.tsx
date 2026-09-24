@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { copyable } from "../components/CopyMenu";
 import { useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconPlus, IconPurchases } from "../components/icons";
@@ -182,14 +183,18 @@ export default function Purchases() {
               glyph={<StatusGlyph tone={TONE[r.status]} title={r.statusLabel} icon={<IconPurchases />} />}
               title={
                 <>
-                  <span className="font-mono text-[14px] text-ink-soft">{r.number}</span>
+                  <span className="font-mono text-[14px] text-ink-soft" {...copyable("order", r.number)}>{r.number}</span>
                   <span className="truncate">
                     {r.items[0]?.name ?? "без позиций"}
                     {r.items.length > 1 && (
                       <span className="text-ink-dim"> и ещё {r.items.length - 1}</span>
                     )}
                   </span>
-                  {r.order && <Badge>к заказу {r.order.number}</Badge>}
+                  {r.order && (
+                    <span {...copyable("order", r.order.number)}>
+                      <Badge>к заказу {r.order.number}</Badge>
+                    </span>
+                  )}
                 </>
               }
               subtitle={

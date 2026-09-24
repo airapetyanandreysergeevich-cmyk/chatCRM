@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import { CopyMenu } from "./components/CopyMenu";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { Card, SectionLabel } from "./components/ui";
 import { useAuth } from "./lib/auth";
@@ -49,6 +50,9 @@ export default function App() {
   const { status } = useAuth();
 
   return (
+    <>
+    {/* «Копировать» по правой кнопке — одно меню на всё приложение. */}
+    <CopyMenu />
     <Routes>
       <Route path="/login" element={status === "ready" ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/register" element={status === "ready" ? <Navigate to="/" replace /> : <Register />} />
@@ -89,5 +93,6 @@ export default function App() {
         </Route>
       </Route>
     </Routes>
+    </>
   );
 }

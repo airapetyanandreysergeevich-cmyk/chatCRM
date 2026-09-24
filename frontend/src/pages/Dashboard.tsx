@@ -1,3 +1,4 @@
+import { copyable } from "../components/CopyMenu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { IconOrders } from "../components/icons";
@@ -80,15 +81,16 @@ function OverduePanel({ rows, total }: { rows: OverdueDebt[]; total: number }) {
             key={r.orderId}
             className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-field bg-surface/70 px-3 py-2"
           >
-            <Link to={`/orders/${r.orderId}`} className="font-mono text-[13px] font-bold hover:underline">
+            <Link to={`/orders/${r.orderId}`} className="font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
               {r.number}
             </Link>
-            <span className="min-w-0 flex-1 truncate text-[14px]">
+            <span className="min-w-0 flex-1 truncate text-[14px]" {...copyable("name", r.customer?.name)}>
               {r.customer?.name ?? "Клиент не указан"}
             </span>
             {r.customer?.phone && (
               <a
                 href={`tel:${r.customer.phone}`}
+                {...copyable("phone", r.customer.phone)}
                 className="whitespace-nowrap text-[13px] font-semibold text-brand-ink hover:underline"
               >
                 {r.customer.phone}
@@ -117,7 +119,7 @@ function OrderCardTile({ card }: { card: BoardCard }) {
       className="block rounded-card border border-line bg-surface-raised p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
     >
       <div className="flex items-center gap-2">
-        <span className="font-mono text-[13px] font-semibold text-ink-soft">{card.number}</span>
+        <span className="font-mono text-[13px] font-semibold text-ink-soft" {...copyable("order", card.number)}>{card.number}</span>
         {card.isUrgent && <Badge tone="danger">срочный</Badge>}
       </div>
 

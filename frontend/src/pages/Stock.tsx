@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { copyable } from "../components/CopyMenu";
 import { listPref } from "../lib/listPrefs";
 import { SortSelect } from "../components/ListControls";
 import { useSearchParams } from "react-router-dom";
@@ -524,7 +525,11 @@ function HistoryModal({ item, onClose }: { item: StockItem; onClose: () => void 
                       {m.qty} {m.item.unit}
                     </span>
                     <Badge>{m.typeLabel}</Badge>
-                    {m.order && <span className="font-mono text-[12.5px] text-ink-dim">{m.order.number}</span>}
+                    {m.order && (
+                      <span className="font-mono text-[12.5px] text-ink-dim" {...copyable("order", m.order.number)}>
+                        {m.order.number}
+                      </span>
+                    )}
                   </>
                 }
                 subtitle={

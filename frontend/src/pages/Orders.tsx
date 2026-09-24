@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { copyable } from "../components/CopyMenu";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
 import {
@@ -234,7 +235,7 @@ export default function Orders() {
                   glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
                   title={
                     <>
-                      <span className="font-mono text-[14px] text-ink-soft">{o.number}</span>
+                      <span className="font-mono text-[14px] text-ink-soft" {...copyable("order", o.number)}>{o.number}</span>
                       <span className="truncate">{deviceTitle(o)}</span>
                       {o.isUrgent && (
                         <Badge tone="danger" icon={<IconUrgent />}>
@@ -256,6 +257,7 @@ export default function Orders() {
                       {o.customer.name && (
                         <span
                           className="text-ink-soft"
+                          {...copyable("name", o.customer.name)}
                           style={nameStyle(o.customer.color)}
                           title={customerColor(o.customer.color)?.label}
                         >

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { copyable } from "../components/CopyMenu";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { IconChevronLeft, IconCompany, IconEdit, IconOrders, IconPerson, IconUrgent, IconWarranty } from "../components/icons";
 import {
@@ -135,20 +136,20 @@ export default function ClientCard() {
                     style={{ backgroundColor: color.dot }}
                   />
                 )}
-                <span style={nameStyle(c.color)}>{c.name}</span>
+                <span style={nameStyle(c.color)} {...copyable("name", c.name)}>{c.name}</span>
                 {c.type === "COMPANY" && <Badge>организация</Badge>}
                 {c.discountPercent > 0 && <Badge tone="brand">скидка {c.discountPercent}%</Badge>}
               </h1>
               <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[14px] text-ink-muted">
                 {c.phone ? (
-                  <a href={`tel:${c.phone}`} className="font-semibold text-brand-ink hover:underline">
+                  <a href={`tel:${c.phone}`} {...copyable("phone", c.phone)} className="font-semibold text-brand-ink hover:underline">
                     {c.phone}
                   </a>
                 ) : (
                   <span className="text-ink-dim">телефон не указан</span>
                 )}
                 {c.phone2 && (
-                  <a href={`tel:${c.phone2}`} className="hover:underline">
+                  <a href={`tel:${c.phone2}`} {...copyable("phone", c.phone2)} className="hover:underline">
                     {c.phone2}
                   </a>
                 )}
@@ -206,7 +207,7 @@ export default function ClientCard() {
                   glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
                   title={
                     <>
-                      <span className="font-mono text-[14px] text-ink-soft">{o.number}</span>
+                      <span className="font-mono text-[14px] text-ink-soft" {...copyable("order", o.number)}>{o.number}</span>
                       <span className="truncate">{deviceTitle(o.device)}</span>
                       {o.isUrgent && (
                         <Badge tone="danger" icon={<IconUrgent />}>
