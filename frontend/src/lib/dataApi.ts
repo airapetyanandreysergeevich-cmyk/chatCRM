@@ -2,7 +2,7 @@ import { api } from "./api";
 
 /** Выгрузка и загрузка данных мастерской. */
 
-export type DatasetKey = "customers" | "orders" | "stock" | "services";
+export type DatasetKey = "staff" | "customers" | "orders" | "stock" | "services";
 export type FormatKey = "xlsx" | "csv" | "html";
 
 export interface DatasetInfo {
@@ -12,6 +12,8 @@ export interface DatasetInfo {
   matchBy: string;
   /** Сколько записей сейчас в разделе. Нужно окну стирания, чтобы назвать число. */
   count: number;
+  /** Можно ли стереть раздел целиком. Сотрудников — нельзя. */
+  canWipe?: boolean;
   columns: Array<{ title: string; required: boolean; readOnly: boolean }>;
 }
 
@@ -65,6 +67,8 @@ export interface ImportResult {
   updated: number;
   restored: number;
   failed: RowIssue[];
+  /** Временные пароли новых сотрудников — приходят один раз, больше их нигде нет. */
+  passwords?: Array<{ name: string; login: string; password: string }>;
   dataset: DatasetKey;
   fileName: string;
   finishedAt: string;

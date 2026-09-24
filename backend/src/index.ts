@@ -13,6 +13,7 @@ import { workshopNameRouter } from "./modules/relay/workshopName.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
 import { customersRouter } from "./modules/customers/customers.routes";
 import { dataRouter } from "./modules/data/data.routes";
+import { demoRouter } from "./modules/demo/demo.routes";
 import { financeRouter } from "./modules/finance/finance.routes";
 import { ordersRouter } from "./modules/orders/orders.routes";
 import { messagesRouter } from "./modules/orders/messages.routes";
@@ -136,6 +137,7 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/push", pushRouter);
 app.use("/api/data", dataRouter);
+app.use("/api/demo", demoRouter);
 app.use("/api", staffRouter);
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не найден" }));

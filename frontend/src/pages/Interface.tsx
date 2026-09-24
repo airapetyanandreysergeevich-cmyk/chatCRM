@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconMoon, IconSun } from "../components/icons";
-import { Banner, Button, Card, Field, Input, SectionLabel, PageHeader } from "../components/ui";
+import { Banner, Button, Card, Checkbox, Field, Input, SectionLabel, PageHeader } from "../components/ui";
+import { fixLayoutEnabled, setFixLayoutEnabled } from "../lib/searchPrefs";
 import { appearanceApi, LOGO_TYPES, prepareLogo, type Branding } from "../lib/branding";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -426,6 +427,8 @@ export default function Interface() {
         </p>
       </Card>
 
+      <SearchLayoutCard />
+
       {!mayEdit ? (
         <Banner>
           Цвета мастерской настраивает владелец. Вам доступна смена светлой и тёмной темы.
@@ -479,5 +482,32 @@ export default function Interface() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Исправление раскладки в поиске: набрал «yjen,er» — нашлось «ноутбук».
+ * Живёт на устройстве, как тема (см. lib/searchPrefs.ts).
+ */
+function SearchLayoutCard() {
+  const [on, setOn] = useState(fixLayoutEnabled);
+  return (
+    <Card>
+      <SectionLabel>Поиск</SectionLabel>
+      <div className="mt-3 sm:max-w-[520px]">
+        <Checkbox
+          checked={on}
+          onChange={(next) => {
+            setOn(next);
+            setFixLayoutEnabled(next);
+          }}
+          label="Исправлять раскладку в поиске"
+        />
+      </div>
+      <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">
+        Набрали «yjen,er» вместо «ноутбук» — поиск поймёт и покажет результаты для «ноутбук». Слова, которые находятся
+        как набраны, не трогаются: серийные номера и модели латиницей останутся латиницей. Действует на этом устройстве.
+      </p>
+    </Card>
   );
 }

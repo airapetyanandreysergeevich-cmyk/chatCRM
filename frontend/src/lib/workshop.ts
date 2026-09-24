@@ -71,6 +71,8 @@ export interface StockList {
   items: StockItem[];
   /** Счётчики по всему складу, а не по странице и не по фильтру. */
   totals: { positions: number; low: number; value?: number };
+  /** Поиск исправил раскладку — см. lib/searchPrefs. */
+  searchFixed?: string | null;
   total: number;
   page: number;
   pageSize: number;
@@ -166,7 +168,7 @@ export const summaryApi = {
 };
 
 export const stockApi = {
-  list: (params: { search?: string; filter?: string; sort?: string; page?: number } = {}) =>
+  list: (params: { search?: string; filter?: string; sort?: string; layout?: string; page?: number } = {}) =>
     api.get<StockList>(`/stock${qs(params)}`),
   warehouses: () => api.get<Array<{ id: string; name: string; isDefault: boolean }>>("/stock/warehouses"),
   createItem: (body: { sku?: string; name: string; unit?: string; category?: string; minQty?: number }) =>

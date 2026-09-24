@@ -255,12 +255,59 @@ async function servicesSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   };
 }
 
+/**
+ * Сотрудники — без паролей: их у нас и нет, только отпечатки. Владелец в
+ * списке есть, чтобы файл был полным; загрузка его пропускает.
+ */
+async function staffSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
+  const def = DATASETS.staff;
+  const [users, roles] = await Promise.all([
+    tx.user.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ isOwner: "desc" }, { fullName: "asc" }],
+      take: MAX_ROWS,
+      select: {
+        fullName: true,
+        email: true,
+        contactEmail: true,
+        phone: true,
+        roleId: true,
+        extraRoleIds: true,
+        isActive: true,
+        workPercent: true,
+        partPercent: true,
+        lastLoginAt: true,
+      },
+    }),
+    tx.role.findMany({ select: { id: true, name: true } }),
+  ]);
+  const roleName = new Map(roles.map((r) => [r.id, r.name]));
+  const pct = (v: Prisma.Decimal | null) => (v === null ? "" : num(v));
+
+  return {
+    name: def.sheet,
+    columns: def.columns.map((c) => ({ title: c.title, width: c.width })),
+    rows: users.map((u) => [
+      u.fullName,
+      u.email,
+      u.contactEmail ?? "",
+      u.phone ?? "",
+      [u.roleId, ...u.extraRoleIds].flatMap((id) => (id && roleName.has(id) ? [roleName.get(id)!] : [])).join("; "),
+      u.isActive ? "" : "да",
+      pct(u.workPercent),
+      pct(u.partPercent),
+      u.lastLoginAt ?? "",
+    ]),
+  };
+}
+
 export async function buildSheets(
   tx: Prisma.TransactionClient,
   keys: DatasetKey[]
 ): Promise<SheetData[]> {
   const out: SheetData[] = [];
   for (const key of keys) {
+    if (key === "staff") out.push(await staffSheet(tx));
     if (key === "customers") out.push(await customersSheet(tx));
     if (key === "orders") out.push(await ordersSheet(tx));
     if (key === "stock") out.push(await stockSheet(tx));

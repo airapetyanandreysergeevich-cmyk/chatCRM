@@ -20,8 +20,10 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { flagsOf, labelsText, toLabels, withFlags } from "../src/lib/dictionaries";
 import { DATASETS, DATASET_KEYS, matchColumns } from "../src/modules/data/dataset";
 import { buildSheets } from "../src/modules/data/export";
-import { MAX_IMPORT_ROWS, phoneKey, serviceKey } from "../src/modules/data/import";
-import { parseDate, parseLineItem } from "../src/modules/data/apply";
+import { MAX_IMPORT_ROWS, phoneKey, roleKey, serviceKey, splitRoles, yesNo } from "../src/modules/data/import";
+import { parseDate, parseLineItem, temporaryPassword } from "../src/modules/data/apply";
+import { WIPEABLE_KEYS } from "../src/modules/data/dataset";
+import { loginFor } from "../src/modules/staff/login";
 import { parseRows } from "../src/modules/data/import";
 import {
   contentDisposition,
@@ -47,6 +49,24 @@ const check = (ok: boolean, msg: string) => {
 const one = <T>(v: T) => ({ findMany: async () => [v] });
 
 const fakeTx = {
+  user: one({
+    fullName: "Олег Иванов",
+    email: "oleg@lenina",
+    contactEmail: null,
+    phone: "+7 900 111-22-33",
+    roleId: "r1",
+    extraRoleIds: ["r2"],
+    isActive: false,
+    workPercent: 40,
+    partPercent: null,
+    lastLoginAt: new Date(),
+  }),
+  role: {
+    findMany: async () => [
+      { id: "r1", name: "Мастер" },
+      { id: "r2", name: "Приёмщик" },
+    ],
+  },
   customer: one({
     id: "c1",
     number: 412,
@@ -150,6 +170,36 @@ async function main(): Promise<void> {
   check(svc.rows[0][0] === "Замена экрана", "название услуги попадает в первую колонку");
   check(svc.rows[0][1] === 1500, "цена выгружается числом, а не строкой");
   check(svc.rows[0][3] === "да", "закреплённая услуга помечена словом, понятным в Excel");
+
+  // 2а. Сотрудники: без паролей, роли словами, отключённый помечен.
+  const [st] = await buildSheets(fakeTx as never, ["staff"]);
+  const col = (t: string) => DATASETS.staff.columns.findIndex((c) => c.title === t);
+  check(st.rows[0][col("Логин")] === "oleg@lenina", "логин выгружается как есть");
+  check(st.rows[0][col("Роли")] === "Мастер; Приёмщик", "роли — названиями, основная первой");
+  check(st.rows[0][col("Отключён")] === "да", "отключённый сотрудник помечен «да»");
+  check(st.rows[0][col("% с работ")] === 40 && st.rows[0][col("% с запчастей")] === "", "проценты — числом, пустой пуст");
+  check(
+    !DATASETS.staff.columns.some((c) => /парол/i.test(c.title)),
+    "колонки с паролем нет ни в выгрузке, ни в загрузке"
+  );
+  check(!WIPEABLE_KEYS.includes("staff"), "сотрудников не стереть кнопкой «Удалить»");
+  check(DATASET_KEYS[0] === "staff", "сотрудники в списке первыми — заказы ищут мастера по имени");
+  check(matchColumns(["Последний вход"], DATASETS.staff).size === 0, "«Последний вход» обратно не загружается");
+
+  check(yesNo("да") === true && yesNo("Нет") === false && yesNo("") === undefined, "да/нет/пусто");
+  check(yesNo("может быть") === null, "непонятное — не «нет», а ошибка строки");
+  check(splitRoles("Мастер; приёмщик, Мастер").join("|") === "Мастер|приёмщик", "роли через «;» и «,», без повторов");
+  check(roleKey(" ПРИЁМЩИК ") === roleKey("приемщик"), "роль узнаётся без регистра и без «ё»");
+
+  const l1 = loginFor("Nikita", "lenina");
+  check(l1.ok && l1.login === "nikita@lenina", "у мастерской с именем «nikita» становится nikita@lenina");
+  check(!loginFor("nikita@gorkogo", "lenina").ok, "чужое окончание не принимается");
+  check(!loginFor("nikita", "").ok, "без имени мастерской нужен настоящий email");
+  check(loginFor("Oleg@Mail.ru ", "").ok, "а настоящий email принимается");
+
+  const pw = new Set(Array.from({ length: 200 }, () => temporaryPassword()));
+  check(pw.size === 200, "временные пароли не повторяются");
+  check([...pw].every((p) => p.length === 10 && /\d/.test(p) && !/[01lIoO]/.test(p)), "10 знаков, есть цифра, нет похожих букв");
 
   // 3. Чужие заголовки узнаются. Регистр, лишние пробелы и «ё» значения не имеют.
   const found = matchColumns(["  УСЛУГА ", "Стоимость", "Что входит"], services);
@@ -407,7 +457,7 @@ async function main(): Promise<void> {
   const xlsx = await writeXlsx(all);
   check(xlsx.length > 0 && xlsx.subarray(0, 2).toString("latin1") === "PK", "книга Excel записывается");
 
-  const csv = writeCsv(all[0]);
+  const csv = writeCsv(all[DATASET_KEYS.indexOf("customers")]);
   check(csv.subarray(0, 3).toString("hex") === "efbbbf", "csv начинается с метки порядка байтов — иначе Excel покажет кракозябры");
   check(csv.toString("utf8").split("\r\n")[0].split(";").length === DATASETS.customers.columns.length, "в шапке csv столько же колонок, сколько описано");
 

@@ -1,9 +1,11 @@
+import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { compareKeys, desc, type Key } from "../../lib/listOrder";
+import { fixLayout, searchWords, truthy } from "../../lib/search";
 import { pageFields } from "../../lib/paging";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
@@ -81,26 +83,34 @@ stockRouter.get(
         search: z.string().trim().max(120).optional(),
         filter: z.enum(["all", "low", "zero", "in"]).default("all"),
         sort: z.enum(STOCK_SORTS).catch("name").default("name"),
+        layout: z.string().optional(),
         ...pageFields,
       })
       .parse(req.query);
 
     const cost = seesCost(req);
 
+    // Каждое слово — отдельным условием: «шлейф 15.6» (lib/search.ts).
+    const wordWhere = (w: string): Prisma.StockItemWhereInput => ({
+      OR: [
+        { name: { contains: w, mode: "insensitive" as const } },
+        { sku: { contains: w, mode: "insensitive" as const } },
+        { category: { contains: w, mode: "insensitive" as const } },
+      ],
+    });
+    let words = searchWords(q.search);
+    let searchFixed: string | null = null;
+    if (words.length && truthy(q.layout)) {
+      const fixed = await withTenant(tenantOf(req), (tx) =>
+        fixLayout(words, async (w) => (await tx.stockItem.count({ where: { isActive: true, ...wordWhere(w) }, take: 1 })) > 0)
+      );
+      words = fixed.words;
+      searchFixed = fixed.fixed;
+    }
+
     const rows = await withTenant(tenantOf(req), (tx) =>
       tx.stockItem.findMany({
-        where: {
-          isActive: true,
-          ...(q.search
-            ? {
-                OR: [
-                  { name: { contains: q.search, mode: "insensitive" as const } },
-                  { sku: { contains: q.search, mode: "insensitive" as const } },
-                  { category: { contains: q.search, mode: "insensitive" as const } },
-                ],
-              }
-            : {}),
-        },
+        where: { isActive: true, AND: words.map(wordWhere) },
         orderBy: { name: "asc" },
         // Постраничности на стороне базы здесь быть не может: «мало»,
         // «нет в наличии» и «есть» считаются из остатков по складам, то
@@ -178,6 +188,7 @@ stockRouter.get(
     const page = ordered.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
 
     res.json({
+      searchFixed,
       items: page.map(({ avgCost, value, ...rest }) => (cost ? { ...rest, avgCost, value } : rest)),
       // Счётчики — по всему складу, а не по отобранному: «мало у 12» это
       // свойство склада, и от того, какой фильтр включён, оно не меняется.

@@ -152,7 +152,8 @@ async function prepareMain(dataDir, say = () => {}, owner = null) {
       say("Завожу мастерскую");
       await runTool(
         path.join(be, "dist", "cli", "create-workshop.js"),
-        [owner.workshop, owner.fullName, owner.email],
+        // --demo — галочка «Заполнить базу тестовыми данными» на первом экране.
+        [owner.workshop, owner.fullName, owner.email, ...(owner.demo === true ? ["--demo"] : [])],
         {
           cwd: be,
           env: { DATABASE_URL: config.databaseUrl(cfg, "owner") },

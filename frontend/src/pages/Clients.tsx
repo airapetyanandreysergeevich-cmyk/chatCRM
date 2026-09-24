@@ -27,6 +27,8 @@ import { ColorPicker } from "../components/ColorPicker";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { useAuth } from "../lib/auth";
 import { listPref } from "../lib/listPrefs";
+import { fixLayoutEnabled } from "../lib/searchPrefs";
+import { SearchFixedHint } from "../components/SearchFixedHint";
 import { COLOR_FILTER_VALUES, ColorFilter, SortSelect, type ColorFilterValue } from "../components/ListControls";
 
 export interface Client {
@@ -118,6 +120,9 @@ export default function Clients() {
     allowed: COLOR_FILTER_VALUES,
   });
   const [search, setSearch] = useState("");
+  // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
+  const [exact, setExact] = useState(false);
+  const [searchFixed, setSearchFixed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** null — окно закрыто, "new" — создание, объект — правка. */
   const [editing, setEditing] = useState<Client | "new" | null>(null);
@@ -126,15 +131,17 @@ export default function Clients() {
     try {
       const p = new URLSearchParams({ page: String(page) });
       if (search.trim()) p.set("search", search.trim());
+      if (search.trim() && !exact && fixLayoutEnabled()) p.set("layout", "1");
       if (sort !== "new") p.set("sort", sort);
       if (color) p.set("color", color);
       const data = await api.get<Page<Client>>(`/customers?${p.toString()}`);
       setRows(data.rows);
+      setSearchFixed(data.searchFixed ?? null);
       setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить клиентов");
     }
-  }, [search, page, sort, color]);
+  }, [search, page, sort, color, exact]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
@@ -167,10 +174,11 @@ export default function Clients() {
       <Card className="p-3.5">
         <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
           <SearchInput
-            placeholder="Имя, телефон, email или номер"
+            placeholder="Любые слова: имя, телефон, email, номер"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
+              setExact(false);
               // Новый поиск — снова первая страница: иначе человек ищет и
               // попадает на седьмую страницу того, чего нашлось три строки.
               if (page > 1) setPage(1);
@@ -183,6 +191,8 @@ export default function Clients() {
           </div>
         </div>
       </Card>
+
+      <SearchFixedHint fixed={searchFixed} onExact={() => setExact(true)} />
 
       {!rows ? (
         <Spinner />

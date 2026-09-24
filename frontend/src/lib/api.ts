@@ -103,6 +103,8 @@ export interface Page<T> {
   page: number;
   pageSize: number;
   pages: number;
+  /** Поиск исправил раскладку: «yjen,er» → «ноутбук». Иначе пусто. */
+  searchFixed?: string | null;
 }
 
 export const api = {

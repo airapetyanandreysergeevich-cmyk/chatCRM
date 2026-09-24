@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { BrandMark, BrandRow } from "./Brand";
+import { DemoBanner } from "./DemoBanner";
 import { InstallAppBanner } from "./InstallApp";
 import {
   IconAdmins,
@@ -218,6 +219,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-full bg-bg">
+      <DemoBanner />
       <InstallAppBanner />
       {impersonating && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-state-waiting/30 bg-state-waiting/10 px-5 py-2.5 text-[13px] font-medium text-state-waiting">

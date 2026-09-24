@@ -80,6 +80,10 @@
       .sub { margin: 22px 0 10px; font-size: 13px; font-weight: 600; color: var(--ink); }
       .two { display: flex; gap: 8px; margin-bottom: 8px; }
       .two input { flex: 1; min-width: 0; }
+      .check { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; cursor: pointer; }
+      .check input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; padding: 0; accent-color: var(--brand); }
+      .check b { font-weight: 600; }
+      .check span span { display: block; font-size: 13px; color: var(--ink-dim); }
       .bad { color: var(--off); }
       .row { display: flex; gap: 10px; margin-top: 22px; }
       .hidden { display: none; }
@@ -159,6 +163,17 @@
               Этими данными вы будете входить в программу. Почта может быть любой — она нужна
               как имя пользователя и никуда не отправляется.
             </p>
+            <!-- Пустая программа ничего не показывает: сводка из нулей, пустые
+                 списки. Двадцать заказов на разных стадиях показывают всё
+                 сразу — а убираются одной кнопкой, когда насмотрелись. -->
+            <label class="check">
+              <input id="demo" type="checkbox" />
+              <span>
+                <b>Заполнить базу тестовыми данными</b>
+                <span>20 заказов на разных стадиях, клиенты, склад, прайс и 5 сотрудников — чтобы сразу
+                увидеть, как всё работает. Уберёте одной кнопкой, когда начнёте работать.</span>
+              </span>
+            </label>
           </div>
         </div>
 
@@ -424,6 +439,7 @@
                   fullName: $("fullName").value.trim(),
                   email: $("email").value.trim(),
                   password: $("password").value,
+                  demo: $("demo").checked,
                 },
               }
             : mode === "online"

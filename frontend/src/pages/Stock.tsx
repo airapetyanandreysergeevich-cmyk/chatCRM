@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { copyable } from "../components/CopyMenu";
 import { listPref } from "../lib/listPrefs";
+import { fixLayoutEnabled } from "../lib/searchPrefs";
+import { SearchFixedHint } from "../components/SearchFixedHint";
 import { SortSelect } from "../components/ListControls";
 import { useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
@@ -59,6 +61,8 @@ export default function Stock() {
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<StockList | null>(null);
   const [search, setSearch] = useState("");
+  // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
+  const [exact, setExact] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<{ item: StockItem; type: MoveType } | null>(null);
@@ -96,11 +100,19 @@ export default function Stock() {
 
   const load = useCallback(async () => {
     try {
-      setData(await stockApi.list({ search: search.trim(), filter, page, ...(sort !== "name" ? { sort } : {}) }));
+      setData(
+        await stockApi.list({
+          search: search.trim(),
+          filter,
+          page,
+          ...(sort !== "name" ? { sort } : {}),
+          ...(search.trim() && !exact && fixLayoutEnabled() ? { layout: "1" } : {}),
+        })
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить склад");
     }
-  }, [search, filter, page, sort]);
+  }, [search, filter, page, sort, exact]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
@@ -131,6 +143,7 @@ export default function Stock() {
             value={search}
             onChange={(e) => {
             setSearch(e.target.value);
+            setExact(false);
             if (page > 1) setPage(1);
           }}
             className="lg:max-w-[380px]"
@@ -156,6 +169,8 @@ export default function Stock() {
           </div>
         </div>
       </Card>
+
+      <SearchFixedHint fixed={data?.searchFixed} onExact={() => setExact(true)} />
 
       {!data ? (
         <Spinner />

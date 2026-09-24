@@ -11,6 +11,7 @@ import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors"
 import { notifyTenant } from "../../lib/notify";
 import { nextOrderNumber } from "../../lib/orderNumber";
 import { pageFields, paged, skipTake } from "../../lib/paging";
+import { fixLayout, searchWords, truthy } from "../../lib/search";
 import {
   MAX_SCAN,
   colorFilterField,
@@ -116,6 +117,8 @@ function searchWhere(search: string, withContacts: boolean): Prisma.OrderWhereIn
     // История ремонта: «та самая мамка, про которую писали „ждём шлейф“» —
     // мастер помнит свою запись в ленте, а не номер заказа.
     { messages: { some: { text: like, deletedAt: null } } },
+    // Тип техники: «ноутбук», «смартфон» — первое, что называет приёмщик.
+    { device: { is: { kind: like } } },
     { device: { is: { serial: like } } },
     { device: { is: { model: like } } },
     { device: { is: { brand: like } } },
@@ -152,6 +155,8 @@ ordersRouter.get(
         mine: z.enum(["1", "0"]).optional(),
         sort: z.enum(ORDER_SORTS).catch("default").default("default"),
         color: colorFilterField,
+        /** Исправлять раскладку: «yjen,er» → «ноутбук». Включается на устройстве. */
+        layout: z.string().optional(),
         ...pageFields,
       })
       .parse(req.query);
@@ -165,14 +170,27 @@ ordersRouter.get(
     // Условие выписано отдельно: по нему идут и выборка страницы, и подсчёт
     // общего числа. Разъехавшись, они дали бы «страница 7 из 3» — и виноватой
     // выглядела бы навигация, а не забытый фильтр.
-    const where = {
+    const base = {
       deletedAt: null,
       ...(onlyMine && me ? { assignedMasterId: me } : {}),
       ...(q.statusId ? { statusId: q.statusId } : {}),
       ...(q.group ? { status: { group: q.group } } : {}),
-      ...(q.search ? { OR: searchWhere(q.search, seesCustomerContacts(req)) } : {}),
       ...(q.color ? { customer: { is: customerColorWhere(q.color) } } : {}),
     } satisfies Prisma.OrderWhereInput;
+
+    // Каждое слово запроса — отдельным условием (lib/search.ts).
+    const contactsVisible = seesCustomerContacts(req);
+    const wordWhere = (w: string): Prisma.OrderWhereInput => ({ OR: searchWhere(w, contactsVisible) });
+    let words = searchWords(q.search);
+    let searchFixed: string | null = null;
+    if (words.length && truthy(q.layout)) {
+      const fixed = await withTenant(tenantOf(req), (tx) =>
+        fixLayout(words, async (w) => (await tx.order.count({ where: { ...base, ...wordWhere(w) }, take: 1 })) > 0)
+      );
+      words = fixed.words;
+      searchFixed = fixed.fixed;
+    }
+    const where: Prisma.OrderWhereInput = words.length ? { ...base, AND: words.map(wordWhere) } : base;
 
     const [rows, total] = await withTenant(tenantOf(req), async (tx) => {
       const count = tx.order.count({ where });
@@ -225,15 +243,17 @@ ordersRouter.get(
     // Нашлось в истории ремонта — показываем ту самую запись прямо в списке.
     // Иначе строка «заказ 0412» на запрос «шлейф» выглядит случайной: слова
     // из запроса в ней нет, оно внутри ленты сообщений.
-    const found = q.search ? await matchedMessages(tenantOf(req), rows.map((o) => o.id), q.search) : new Map();
+    const found = words.length ? await matchedMessages(tenantOf(req), rows, words) : new Map();
 
-    res.json(
-      paged(
+    res.json({
+      ...paged(
         rows.map((o) => ({ ...projectOrder(o, { contacts, money }), foundMessage: found.get(o.id) ?? null })),
         total,
         q
-      )
-    );
+      ),
+      // Искали в другой раскладке — интерфейс скажет «Показаны результаты для …».
+      searchFixed,
+    });
   })
 );
 
@@ -286,24 +306,55 @@ const acceptSchema = z.object({
  * поиске и только по одному на заказ, а тащить их вместе с карточкой значило
  * бы грузить ленту целиком там, где её никто не смотрит.
  */
-async function matchedMessages(tenantId: string, orderIds: string[], search: string) {
+async function matchedMessages(
+  tenantId: string,
+  orders: Array<{
+    id: string;
+    number: string;
+    complaint: string;
+    device: { kind: string | null; brand: string | null; model: string | null; serial: string | null } | null;
+    customer: { name: string } | null;
+  }>,
+  words: string[]
+) {
   const out = new Map<string, { id: string; text: string; createdAt: Date; author: string | null }>();
-  if (!orderIds.length) return out;
+  // Историю показываем только ради слов, которых не видно в самой строке
+  // списка. Иначе на «ноутбук xiaomi» под каждым ноутбуком всплывала бы
+  // случайная запись со словом «ноутбук» — хотя заказ нашёлся по типу техники.
+  const hidden = new Map<string, string[]>();
+  for (const o of orders) {
+    const visible = [o.number, o.complaint, o.device?.kind, o.device?.brand, o.device?.model, o.device?.serial, o.customer?.name]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const rest = words.filter((w) => !visible.includes(w.toLowerCase()));
+    if (rest.length) hidden.set(o.id, rest);
+  }
+  if (!hidden.size) return out;
+
   const rows = await withTenant(tenantId, (tx) =>
     tx.orderMessage.findMany({
       where: {
-        orderId: { in: orderIds },
+        orderId: { in: [...hidden.keys()] },
         deletedAt: null,
-        text: { contains: search, mode: "insensitive" },
+        OR: [...new Set([...hidden.values()].flat())].map((w) => ({ text: { contains: w, mode: "insensitive" as const } })),
       },
       orderBy: { createdAt: "asc" },
-      take: 200,
+      take: 400,
       select: { id: true, orderId: true, text: true, createdAt: true, author: { select: { fullName: true } } },
     })
   );
+  // У каждого заказа — запись, где скрытых слов больше всего, при равенстве — ранняя.
+  const best = new Map<string, { score: number; m: (typeof rows)[number] }>();
   for (const m of rows) {
-    if (out.has(m.orderId)) continue;
-    out.set(m.orderId, {
+    const text = m.text.toLowerCase();
+    const score = (hidden.get(m.orderId) ?? []).filter((w) => text.includes(w.toLowerCase())).length;
+    if (!score) continue;
+    const was = best.get(m.orderId);
+    if (!was || score > was.score) best.set(m.orderId, { score, m });
+  }
+  for (const [orderId, { m }] of best) {
+    out.set(orderId, {
       id: m.id,
       text: m.text.length > 180 ? `${m.text.slice(0, 177)}…` : m.text,
       createdAt: m.createdAt,

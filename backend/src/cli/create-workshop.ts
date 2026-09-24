@@ -10,11 +10,16 @@
  * платформы. В коробке заявок нет и собственника платформы тоже — мастерская
  * одна, и создаётся она при первом запуске программы.
  *
+ * С ключом --demo после мастерской заводятся тестовые данные — галочка
+ * «Заполнить базу тестовыми данными» на первом запуске программы. Убрать их
+ * владелец может одной кнопкой, из полосы вверху экрана.
+ *
  * Скрипт можно запускать сколько угодно раз: если мастерская уже есть, он
  * ничего не делает. Это важно — первый запуск программы повторяется после
  * каждого выключения питания, и он не должен плодить мастерские.
  */
-import { prisma } from "../lib/db";
+import { prisma, withTenant } from "../lib/db";
+import { seedDemo } from "../modules/demo/demo";
 import { createTenant } from "../services/tenant";
 
 /** Короткий код мастерской из названия: латиница, цифры и дефисы. */
@@ -43,7 +48,9 @@ async function readPasswordFromStdin(): Promise<string> {
 }
 
 async function main() {
-  const [name, ownerFullName, ownerEmail] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const demo = args.includes("--demo");
+  const [name, ownerFullName, ownerEmail] = args.filter((a) => a !== "--demo");
   if (!name || !ownerFullName || !ownerEmail) {
     throw new Error('Нужны три аргумента: "Название мастерской" "Имя владельца" email');
   }
@@ -67,6 +74,27 @@ async function main() {
   });
 
   console.log(`Создана мастерская «${tenant.name}» (${tenant.slug}), владелец ${ownerEmail}.`);
+
+  if (demo) {
+    // Отдельной транзакцией и без права провалить установку: мастерская уже
+    // есть, и если тестовые данные не завелись, ими можно заполнить базу
+    // позже — кнопкой в «Базах».
+    try {
+      const state = await withTenant(
+        tenant.id,
+        async (tx) => {
+          const owner = await tx.user.findFirst({ where: { isOwner: true }, select: { id: true } });
+          const full = await tx.tenant.findUnique({ where: { id: tenant.id }, select: { slug: true, maxUsers: true } });
+          if (!owner || !full) throw new Error("не нашёлся владелец");
+          return seedDemo(tx, tenant.id, { ownerId: owner.id, loginDomain: "", slug: full.slug, maxUsers: full.maxUsers });
+        },
+        { timeout: 2 * 60_000, maxWait: 30_000 }
+      );
+      console.log(`Тестовые данные: ${state.orders.length} заказов, ${state.customers.length} клиентов, ${state.users.length} сотрудников.`);
+    } catch (err) {
+      console.error("Тестовые данные не завелись:", err instanceof Error ? err.message : err);
+    }
+  }
 }
 
 main()

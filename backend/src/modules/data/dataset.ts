@@ -6,7 +6,9 @@
  * файл открывают в Excel живые люди, а не программа.
  */
 
-export type DatasetKey = "customers" | "orders" | "stock" | "services";
+import { PERMISSIONS } from "../../lib/permissions";
+
+export type DatasetKey = "staff" | "customers" | "orders" | "stock" | "services";
 
 export interface ColumnDef {
   /** Заголовок в файле. По нему же колонка узнаётся при загрузке. */
@@ -49,9 +51,55 @@ export interface DatasetDef {
   columns: ColumnDef[];
   /** Загрузка этой таблицы пока не поддержана — только выгрузка. */
   exportOnly?: boolean;
+  /**
+   * Раздел нельзя стереть кнопкой «Стереть раздел».
+   *
+   * Сотрудники — это входы в программу, и среди них сам владелец. Стереть их
+   * одним словом значит запереть мастерскую снаружи; убирают сотрудников по
+   * одному, в разделе «Сотрудники», где видно, кого именно.
+   */
+  noWipe?: boolean;
+  /**
+   * Право, без которого раздел не выгрузить и не загрузить — сверх права
+   * на сам раздел «Базы». Список сотрудников с логинами и процентами — не то,
+   * что должен видеть каждый, кто правит бланки.
+   */
+  permission?: string;
 }
 
 export const DATASETS: Record<DatasetKey, DatasetDef> = {
+  /**
+   * Сотрудники. Первыми — потому что заказы ссылаются на мастеров по имени:
+   * загрузи заказы раньше, и мастер в них останется пустым.
+   *
+   * Паролей в файле нет ни в какую сторону. Выгрузка их не содержит (у нас
+   * их и нет — только отпечатки), а новым сотрудникам загрузка придумывает
+   * временные и показывает один раз. Файл с паролями живёт в «Загрузках»
+   * годами и уходит в чужие руки вместе со старым ноутбуком.
+   */
+  staff: {
+    key: "staff",
+    title: "Сотрудники",
+    sheet: "Сотрудники",
+    hint:
+      "Загружайте первыми — заказы находят мастера по имени. Узнаём по логину. Новым сотрудникам " +
+      "придумаем временные пароли и покажем один раз; пароли тех, кто уже есть, не трогаем. Роли — по названию, через «;».",
+    matchBy: "Логин",
+    noWipe: true,
+    permission: PERMISSIONS.STAFF_MANAGE,
+    columns: [
+      { title: "Имя", aliases: ["ФИО", "Сотрудник"], width: 28, required: true },
+      { title: "Логин", aliases: ["Логин для входа", "Email для входа", "Вход"], width: 26, required: true },
+      { title: "Почта для связи", aliases: ["Email", "Почта", "E-mail"], width: 26 },
+      { title: "Телефон", aliases: ["Тел"], width: 18, kind: "phone" },
+      { title: "Роли", aliases: ["Роль", "Должность"], width: 26 },
+      { title: "Отключён", aliases: ["Отключен", "Не работает"], width: 11 },
+      { title: "% с работ", aliases: ["Процент с работ", "С работ, %"], width: 11, kind: "number" },
+      { title: "% с запчастей", aliases: ["Процент с запчастей", "С запчастей, %"], width: 13, kind: "number" },
+      { title: "Последний вход", width: 18, readOnly: true, kind: "date" },
+    ],
+  },
+
   customers: {
     key: "customers",
     title: "Клиенты и их техника",
@@ -199,6 +247,9 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
 };
 
 export const DATASET_KEYS = Object.keys(DATASETS) as DatasetKey[];
+
+/** Разделы, которые можно стереть. */
+export const WIPEABLE_KEYS = DATASET_KEYS.filter((k) => !DATASETS[k].noWipe);
 
 export const isDatasetKey = (v: string): v is DatasetKey => v in DATASETS;
 

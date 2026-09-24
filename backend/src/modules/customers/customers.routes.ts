@@ -23,6 +23,7 @@ import {
   type Key,
 } from "../../lib/listOrder";
 import { seesMoney } from "../orders/orders.service";
+import { fixLayout, searchWords, truthy } from "../../lib/search";
 
 export const customersRouter = Router();
 customersRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -86,6 +87,7 @@ customersRouter.get(
         search: z.string().trim().max(120).optional(),
         sort: z.enum(CUSTOMER_SORTS).catch("new").default("new"),
         color: colorFilterField,
+        layout: z.string().optional(),
         ...pageFields,
       })
       .parse(req.query);
@@ -94,27 +96,32 @@ customersRouter.get(
     // строк выдал бы, кто из клиентов заплатил больше.
     const sort: CustomerSort = q.sort === "paid" && !seesMoney(req) ? "new" : q.sort;
 
+    // Каждое слово — отдельным условием: «Иван 912» — Иван с телефоном на 912.
+    const wordWhere = (w: string): Prisma.CustomerWhereInput => ({
+      OR: [
+        { name: { contains: w, mode: "insensitive" as const } },
+        { phone: { contains: w } },
+        { phone2: { contains: w } },
+        { email: { contains: w, mode: "insensitive" as const } },
+        // Номер ищется, только если слово — число: иначе каждый поиск по
+        // имени тащил бы за собой ещё и сравнение с номером.
+        ...(/^\d{1,9}$/.test(w) ? [{ number: Number(w) }] : []),
+      ],
+    });
+    const base: Prisma.CustomerWhereInput = { deletedAt: null, ...customerColorWhere(q.color) };
+    let words = searchWords(q.search);
+    let searchFixed: string | null = null;
+    if (words.length && truthy(q.layout)) {
+      const fixed = await withTenant(tenantOf(req), (tx) =>
+        fixLayout(words, async (w) => (await tx.customer.count({ where: { AND: [base, wordWhere(w)] }, take: 1 })) > 0)
+      );
+      words = fixed.words;
+      searchFixed = fixed.fixed;
+    }
+
     // Условие одно на выборку и на подсчёт: разъехавшись, они дали бы
     // «страница 7 из 3», и виноватой выглядела бы навигация.
-    const where: Prisma.CustomerWhereInput = {
-      deletedAt: null,
-      AND: [
-        customerColorWhere(q.color),
-        q.search
-          ? {
-              OR: [
-                { name: { contains: q.search, mode: "insensitive" as const } },
-                { phone: { contains: q.search } },
-                { email: { contains: q.search, mode: "insensitive" as const } },
-                // Номер ищется, только если введено число: иначе каждый
-                // поиск по имени тащил бы за собой ещё и сравнение с
-                // номером, а «Анна» номером не бывает.
-                ...(/^\d+$/.test(q.search) ? [{ number: Number(q.search) }] : []),
-              ],
-            }
-          : {},
-      ],
-    };
+    const where: Prisma.CustomerWhereInput = { AND: [base, ...words.map(wordWhere)] };
     const include = { _count: { select: { orders: true, devices: true } } } as const;
     const tenantId = tenantOf(req);
 
@@ -159,7 +166,7 @@ customersRouter.get(
       return Promise.all([inOrder(ids, page), count]);
     });
 
-    res.json(paged(rows.map(customerRow), total, q));
+    res.json({ ...paged(rows.map(customerRow), total, q), searchFixed });
   })
 );
 

@@ -29,6 +29,8 @@ import {
   type Order,
 } from "../lib/orders";
 import { STAGES } from "../lib/stages";
+import { fixLayoutEnabled } from "../lib/searchPrefs";
+import { SearchFixedHint } from "../components/SearchFixedHint";
 import { listPref } from "../lib/listPrefs";
 import { COLOR_FILTER_VALUES, ColorFilter, SortSelect, type ColorFilterValue } from "../components/ListControls";
 
@@ -76,6 +78,9 @@ export default function Orders() {
     setParams(p, { replace: true });
   };
   const [search, setSearch] = useState("");
+  // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
+  const [exact, setExact] = useState(false);
+  const [searchFixed, setSearchFixed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Деньги видит не каждый — и сортировку по ним тоже.
@@ -115,14 +120,16 @@ export default function Orders() {
       if (group) query.group = group;
       if (search.trim()) query.search = search.trim();
       if (sort !== "default") query.sort = sort;
+      if (search.trim() && !exact && fixLayoutEnabled()) query.layout = "1";
       if (color) query.color = color;
       const data = await ordersApi.list(query);
       setRows(data.rows);
+      setSearchFixed(data.searchFixed ?? null);
       setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [group, search, page, sort, color]);
+  }, [group, search, page, sort, color, exact]);
 
   useEffect(() => {
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
@@ -156,10 +163,11 @@ export default function Orders() {
       <Card className="space-y-3 p-3.5">
         <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
           <SearchInput
-            placeholder="Номер, техника, неисправность, комментарий или запись в истории ремонта"
+            placeholder="Любые слова: ноутбук xiaomi, номер, клиент, неисправность, запись в истории"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
+              setExact(false);
               if (page > 1) setPage(1);
             }}
             className="lg:max-w-[380px]"
@@ -193,6 +201,8 @@ export default function Orders() {
           </div>
         </div>
       </Card>
+
+      <SearchFixedHint fixed={searchFixed} onExact={() => setExact(true)} />
 
       {overdue > 0 && (
         <Banner tone="warning">

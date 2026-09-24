@@ -4,7 +4,7 @@ import multer from "multer";
 import { originalName } from "../../lib/uploadName";
 import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
-import { withTenant } from "../../lib/db";
+import { prisma, withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import { removeFile } from "../../lib/storage";
@@ -12,10 +12,13 @@ import {
   authenticate,
   actorUserId,
   currentTenantId,
+  permissionsOf,
   requirePermission,
   requireTenant,
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
+import { revokeAllForUser } from "../auth/auth.service";
+import { localLoginDomain } from "../relay/remoteAccess";
 import { applyRows } from "./apply";
 import { DATASETS, DATASET_KEYS, isDatasetKey, type DatasetKey } from "./dataset";
 import { buildSheets } from "./export";
@@ -39,6 +42,19 @@ dataRouter.use(
 );
 
 const tenantOf = (req: Request) => currentTenantId(req)!;
+
+/** Раздел доступен, если у человека есть его собственное право (если оно у раздела есть). */
+const mayUse = (req: Request, key: DatasetKey): boolean => {
+  const need = DATASETS[key].permission;
+  return !need || permissionsOf(req).includes(need);
+};
+
+function assertMayUse(req: Request, keys: DatasetKey[]) {
+  const denied = keys.filter((k) => !mayUse(req, k));
+  if (denied.length) {
+    throw forbidden(`Нет доступа к разделу: ${denied.map((k) => DATASETS[k].title).join(", ")}`);
+  }
+}
 
 
 const upload = multer({
@@ -88,22 +104,26 @@ dataRouter.get(
     // «сотрём Заказы» — это обещание неизвестно чего, а «сотрём 4039
     // заказов» — то, на что человек действительно отвечает «да».
     const counts = await withTenant(tenantOf(req), async (tx) => {
-      const [orders, customers, stock, services] = await Promise.all([
+      const [staff, orders, customers, stock, services] = await Promise.all([
+        tx.user.count({ where: { deletedAt: null } }),
         tx.order.count({ where: { deletedAt: null } }),
         tx.customer.count({ where: { deletedAt: null } }),
         tx.stockItem.count(),
         tx.service.count(),
       ]);
-      return { orders, customers, stock, services } as Record<DatasetKey, number>;
+      return { staff, orders, customers, stock, services } as Record<DatasetKey, number>;
     });
 
     res.json({
-      datasets: DATASET_KEYS.map((key) => ({
+      // Раздел, на который нет права, не показываем вовсе: кнопка, которая
+      // отвечает «нет доступа», хуже отсутствующей.
+      datasets: DATASET_KEYS.filter((key) => mayUse(req, key)).map((key) => ({
         key,
         title: DATASETS[key].title,
         hint: DATASETS[key].hint,
         matchBy: DATASETS[key].matchBy,
         count: counts[key] ?? 0,
+        canWipe: !DATASETS[key].noWipe,
         columns: DATASETS[key].columns.map((c) => ({
           title: c.title,
           required: !!c.required,
@@ -140,6 +160,7 @@ dataRouter.get(
 
     const keys = datasets.filter(isDatasetKey);
     if (keys.length === 0) throw badRequest("Не выбрано, что выгружать");
+    assertMayUse(req, keys);
     if (format === "csv" && keys.length > 1) {
       throw badRequest("CSV — это один лист. Выберите один раздел или возьмите Excel");
     }
@@ -227,6 +248,12 @@ dataRouter.delete(
     const { datasets, confirm } = wipeSchema.parse(req.body);
     const keys = datasets.filter(isDatasetKey);
     if (keys.length === 0) throw badRequest("Не выбрано, что стирать");
+    const locked = keys.filter((k) => DATASETS[k].noWipe);
+    if (locked.length) {
+      throw badRequest(
+        `«${locked.map((k) => DATASETS[k].title).join("», «")}» так не стираются — сотрудников убирают по одному в разделе «Сотрудники»`
+      );
+    }
 
     // Слово сверяем на сервере, а не только в окне: окно — это удобство, а
     // запрет должен стоять там, где его нельзя обойти.
@@ -299,6 +326,7 @@ dataRouter.post(
   ah(async (req, res) => {
     const dataset = String(req.body?.dataset ?? "");
     if (!isDatasetKey(dataset)) throw badRequest("Не указано, что загружаем");
+    assertMayUse(req, [dataset]);
 
     const file = req.file;
     if (!file) throw badRequest("Файл не приложен");
@@ -311,9 +339,10 @@ dataRouter.post(
     if (table.length === 0) throw badRequest("Файл пустой");
 
     const tenantId = tenantOf(req);
+    const loginDomain = dataset === "staff" ? await localLoginDomain() : "";
     const { preview, rows } = await withTenant(
       tenantId,
-      (tx) => parseRows(tx, dataset, table),
+      (tx) => parseRows(tx, dataset, table, { tenantId, loginDomain }),
       // Разбор ничего не пишет, но на десяти тысячах строк успевает упереться
       // в тот же пятисекундный срок — и человек не поймёт, чем провинился файл.
       { timeout: 2 * 60_000, maxWait: 30_000 }
@@ -354,6 +383,11 @@ dataRouter.post(
     }
 
     pending.delete(token);
+    // Право проверяем и здесь: между разбором и записью его могли отнять.
+    assertMayUse(req, [item.dataset]);
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: item.tenantId }, select: { maxUsers: true } });
+    if (!tenant) throw notFound("Мастерская не найдена");
 
     // Загрузка пишет до десяти тысяч строк одной транзакцией, и пяти секунд,
     // которые Prisma даёт по умолчанию, ей не хватает даже на сотню. Десять
@@ -361,7 +395,12 @@ dataRouter.post(
     // ответа; дольше него всё равно ждёт только nginx.
     const result = await withTenant(
       item.tenantId,
-      (tx) => applyRows(tx, item.tenantId, item.dataset, item.rows, item.userId),
+      (tx) =>
+        applyRows(tx, item.tenantId, item.dataset, item.rows, item.userId, {
+          permissions: permissionsOf(req),
+          maxUsers: tenant.maxUsers,
+          ip: clientIp(req),
+        }),
       { timeout: 10 * 60_000, maxWait: 30_000 }
     );
 
@@ -383,8 +422,16 @@ dataRouter.post(
       })
     );
 
+    // Отключённых файлом выкидываем со всех устройств — после записи, а не
+    // до: откатись загрузка, человек остался бы включённым, но без входа.
+    const { revoke = [], ...shown } = result;
+    for (const id of revoke) await revokeAllForUser(id);
+
+    // Временные пароли — только в этом ответе. В журнал и в черновик разбора
+    // они не попадают: показать один раз и забыть — весь их смысл.
+    res.set("Cache-Control", "no-store");
     res.json({
-      ...result,
+      ...shown,
       dataset: item.dataset,
       fileName: item.fileName,
       finishedAt: formatDate(new Date()),

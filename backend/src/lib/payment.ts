@@ -61,6 +61,8 @@ export async function takePayment(
     how: PaidBy;
     userId: string | null;
     comment?: string;
+    /** Когда. Нужно только тестовым данным: у живой оплаты время — сейчас. */
+    at?: Date;
   }
 ): Promise<number> {
   const amount = Math.round(params.amount * 100) / 100;
@@ -80,6 +82,7 @@ export async function takePayment(
       customerId: params.customerId,
       userId: params.userId,
       comment: params.comment ?? null,
+      ...(params.at ? { createdAt: params.at } : {}),
     },
   });
 

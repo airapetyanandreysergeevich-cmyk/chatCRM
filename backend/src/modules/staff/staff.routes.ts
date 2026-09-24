@@ -11,7 +11,7 @@ import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermi
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { isEmailTaken, revokeAllForUser } from "../auth/auth.service";
 import { listMasters } from "./masters";
-import { localProblem } from "../../lib/login";
+import { loginFor } from "./login";
 import { localLoginDomain } from "../relay/remoteAccess";
 
 export const staffRouter = Router();
@@ -116,33 +116,11 @@ staffRouter.get(
   })
 );
 
-/**
- * Логин сотрудника.
- *
- * У мастерской с именем (lenina) логины одного вида — nikita@lenina, и
- * владелец вводит только часть до @: окончание дописывается здесь. Чужое
- * окончание не принимаем — такой логин не заработал бы на общем сайте, и
- * узнали бы об этом не здесь, а у стойки в понедельник утром.
- * У мастерской без имени логин — почта, как раньше.
- */
+/** Логин сотрудника по правилу мастерской (см. staff/login.ts) — или ошибка поля. */
 async function resolveLogin(raw: string): Promise<string> {
-  const login = raw.trim().toLowerCase();
-  const fail = (message: string): never => {
-    throw new ZodError([{ code: "custom", path: ["email"], message }]);
-  };
-  const domain = await localLoginDomain();
-  if (domain) {
-    const local = login.includes("@") ? login.slice(0, login.lastIndexOf("@")) : login;
-    const tail = login.includes("@") ? login.slice(login.lastIndexOf("@") + 1) : domain;
-    if (tail !== domain) fail(`Логин в этой мастерской оканчивается на @${domain}`);
-    const bad = localProblem(local);
-    if (bad) fail(bad);
-    return `${local}@${domain}`;
-  }
-  // Без имени логин — только настоящая почта. Логин вида nikita@lenina здесь
-  // не годится: в облаке такой вход ушёл бы искать мастерскую lenina.
-  if (!z.string().email().safeParse(login).success) fail("Похоже, это не email");
-  return login;
+  const r = loginFor(raw, await localLoginDomain());
+  if (!r.ok) throw new ZodError([{ code: "custom", path: ["email"], message: r.reason }]);
+  return r.login;
 }
 
 const contactEmailField = z.string().trim().toLowerCase().email("Похоже, это не email").optional().or(z.literal(""));

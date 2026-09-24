@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { copyText } from "../components/CopyMenu";
+import { RemoveDemoModal } from "../components/DemoBanner";
 import { Modal } from "../components/Modal";
 import { OrderNumberCard } from "../components/OrderNumberCard";
 import { IconDelete, IconDownload, IconUpload } from "../components/icons";
@@ -16,6 +18,7 @@ import {
   type ImportResult,
   type WipeResult,
 } from "../lib/dataApi";
+import { demoApi, reloadAfterDemo, type DemoState } from "../lib/demoApi";
 
 /**
  * Окно стирания.
@@ -28,10 +31,13 @@ import {
  */
 function WipeModal({
   datasets,
+  skipped,
   onClose,
   onDone,
 }: {
   datasets: DatasetInfo[];
+  /** Выбранные, но не стираемые разделы — чтобы человек не решил, что стёр и их. */
+  skipped: DatasetInfo[];
   onClose: () => void;
   onDone: (result: WipeResult) => void;
 }) {
@@ -75,6 +81,12 @@ function WipeModal({
               </li>
             ))}
           </ul>
+          {skipped.length > 0 && (
+            <p className="mt-2 text-[12.5px] text-ink-dim">
+              {skipped.map((d) => `«${d.title}»`).join(", ")} так не стираются — сотрудников убирают по
+              одному в разделе «Сотрудники».
+            </p>
+          )}
         </div>
 
         {/* Про деньги говорим здесь, а не в журнале: владелец должен узнать
@@ -123,6 +135,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
   // старшего приёмщика: выгрузка и загрузка поправимы, стирание — нет.
   const canWipe = me?.kind === "tenant" && me.user.isOwner;
   const pickedInfo = reference.datasets.filter((d) => picked.includes(d.key));
+  const wipeable = pickedInfo.filter((d) => d.canWipe !== false);
 
   const toggle = (key: DatasetKey) =>
     setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
@@ -199,7 +212,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
             <Button
               variant="danger"
               icon={<IconDelete />}
-              disabled={picked.length === 0}
+              disabled={wipeable.length === 0}
               onClick={() => setWiping(true)}
             >
               Удалить
@@ -216,7 +229,8 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
 
       {wiping && (
         <WipeModal
-          datasets={pickedInfo}
+          datasets={wipeable}
+          skipped={pickedInfo.filter((d) => d.canWipe === false)}
           onClose={() => setWiping(false)}
           onDone={(result) => {
             setWiping(false);
@@ -371,8 +385,80 @@ function PreviewBlock({
   );
 }
 
+/**
+ * Временные пароли новых сотрудников.
+ *
+ * Показываются один раз: сервер их не хранит, и второй раз взять их неоткуда.
+ * Поэтому здесь же — «скопировать» и «скачать», и прямо сказано, что после
+ * ухода со страницы пароли не вернуть (только задать новые в «Сотрудниках»).
+ */
+function PasswordsBlock({ list, onHide }: { list: NonNullable<ImportResult["passwords"]>; onHide: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const text = list.map((p) => `${p.name}\t${p.login}\t${p.password}`).join("\n");
+
+  function download() {
+    const body = "Имя\tЛогин\tВременный пароль\r\n" + text.replace(/\n/g, "\r\n") + "\r\n";
+    const url = URL.createObjectURL(new Blob(["\ufeff" + body], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "paroli-sotrudnikov.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="mt-3 rounded-card border border-state-waiting/40 bg-state-waiting/5 p-4">
+      <p className="text-[14px] font-semibold">Временные пароли новых сотрудников</p>
+      <p className="mt-1 text-[13px] text-ink-muted">
+        Показываем один раз — система их не хранит. Раздайте сотрудникам и попросите сменить при первом
+        входе. Потеряли — задайте новый пароль в разделе «Сотрудники».
+      </p>
+      <div className="mt-3 overflow-auto rounded-field border border-line">
+        <table className="w-full text-[13px]">
+          <thead className="bg-surface-raised text-left text-ink-dim">
+            <tr>
+              <th className="px-3 py-1.5 font-medium">Имя</th>
+              <th className="px-3 py-1.5 font-medium">Логин</th>
+              <th className="px-3 py-1.5 font-medium">Пароль</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {list.map((p) => (
+              <tr key={p.login}>
+                <td className="px-3 py-1.5">{p.name}</td>
+                <td className="px-3 py-1.5 font-mono">{p.login}</td>
+                <td className="px-3 py-1.5 font-mono font-semibold">{p.password}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          onClick={() => void copyText(text).then((ok) => ok && setCopied(true))}
+        >
+          {copied ? "Скопировано" : "Скопировать всё"}
+        </Button>
+        <Button variant="secondary" icon={<IconDownload />} onClick={download}>
+          Скачать .txt
+        </Button>
+        <div className="ml-auto">
+          <Button variant="secondary" onClick={onHide}>
+            Записал — скрыть
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ImportCard({ reference }: { reference: DataReference }) {
-  const [dataset, setDataset] = useState<DatasetKey>("customers");
+  const [dataset, setDataset] = useState<DatasetKey>(
+    reference.datasets.some((d) => d.key === "customers") ? "customers" : reference.datasets[0]?.key ?? "customers"
+  );
   const [token, setToken] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -502,6 +588,12 @@ function ImportCard({ reference }: { reference: DataReference }) {
             {result.restored > 0 && `, вернулось из удалённых ${result.restored}`}
             {result.failed.length > 0 && `, не удалось ${result.failed.length}`}
           </Banner>
+          {result.passwords && result.passwords.length > 0 && (
+            <PasswordsBlock
+              list={result.passwords}
+              onHide={() => setResult({ ...result, passwords: [] })}
+            />
+          )}
           {result.failed.length > 0 && (
             <div className="mt-2 max-h-[200px] overflow-auto rounded-card border border-line">
               <table className="w-full text-[13px]">
@@ -517,6 +609,76 @@ function ImportCard({ reference }: { reference: DataReference }) {
             </div>
           )}
         </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Тестовые данные — владельцу.
+ *
+ * Завести можно только в пустую базу: смешать двадцать выдуманных заказов с
+ * настоящими — значит потом разбирать, где чьи. Убрать — всегда, одной
+ * кнопкой (она же в полосе вверху экрана).
+ */
+function DemoCard() {
+  const { me } = useAuth();
+  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const [state, setState] = useState<DemoState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+
+  useEffect(() => {
+    if (isOwner) demoApi.state().then(setState).catch(() => {});
+  }, [isOwner]);
+
+  if (!isOwner || !state) return null;
+  if (!state.active && !state.canSeed) return null;
+
+  async function seed() {
+    setBusy(true);
+    setError(null);
+    try {
+      await demoApi.seed();
+      reloadAfterDemo();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось заполнить");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <SectionLabel>Тестовые данные</SectionLabel>
+      {state.active ? (
+        <>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
+            В базе тестовые заказы ({state.orders}) и клиенты ({state.customers}). Тестовые сотрудники
+            входят с паролем <b className="font-mono text-ink">{state.password}</b>:{" "}
+            <span className="font-mono">{state.logins.join(", ")}</span>.
+          </p>
+          <div className="mt-4">
+            <Button variant="danger" icon={<IconDelete />} onClick={() => setRemoving(true)}>
+              Убрать тестовые данные
+            </Button>
+          </div>
+          {removing && <RemoveDemoModal state={state} onClose={() => setRemoving(false)} />}
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
+            База пока пустая. Заполните её примером живой мастерской — 20 заказов на разных стадиях,
+            клиенты, склад, прайс и 5 сотрудников, — чтобы увидеть, как всё работает. Уберёте одной
+            кнопкой, когда начнёте работать.
+          </p>
+          {error && <div className="mt-3"><Banner tone="error">{error}</Banner></div>}
+          <div className="mt-4">
+            <Button variant="secondary" onClick={() => void seed()} disabled={busy}>
+              {busy ? "Заполняем…" : "Заполнить тестовыми данными"}
+            </Button>
+          </div>
+        </>
       )}
     </Card>
   );
@@ -604,9 +766,10 @@ export default function Data() {
       <PageHeader
         eyebrow="Настройки"
         title="Базы"
-        subtitle="Нумерация заказов, выгрузка данных мастерской и загрузка из файла."
+        subtitle="Нумерация заказов, тестовые данные, выгрузка и загрузка из файла."
       />
       <OrderNumberCard />
+      <DemoCard />
       <ExportCard reference={reference} onWiped={() => void load()} />
       <ImportCard reference={reference} />
       <ColumnsCard reference={reference} />

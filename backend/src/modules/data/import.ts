@@ -1,4 +1,6 @@
 import type { Prisma } from "@prisma/client";
+import { withPlatform } from "../../lib/db";
+import { loginFor } from "../staff/login";
 import { DATASETS, matchColumns, type DatasetDef, type DatasetKey } from "./dataset";
 import type { Cell, TableRow } from "./tableFile";
 
@@ -105,13 +107,21 @@ export function parseNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+export interface ParseOptions {
+  /** Мастерская — нужна сотрудникам: логин должен быть свободен во всей системе. */
+  tenantId?: string;
+  /** Окончание логинов мастерской («lenina») или пусто — см. staff/login.ts. */
+  loginDomain?: string;
+}
+
 /**
  * Разбор строк файла в общий вид + проверка. Ничего не пишет.
  */
 export async function parseRows(
   tx: Prisma.TransactionClient,
   dataset: DatasetKey,
-  table: TableRow[]
+  table: TableRow[],
+  opts: ParseOptions = {}
 ): Promise<{ preview: ImportPreview; rows: ParsedRow[] }> {
   const def = DATASETS[dataset];
   const issues: RowIssue[] = [];
@@ -129,7 +139,7 @@ export async function parseRows(
     .map((c) => c.title);
 
   const body = table.slice(1);
-  const rows: ParsedRow[] = [];
+  let rows: ParsedRow[] = [];
 
   if (missingColumns.length) {
     return {
@@ -169,6 +179,7 @@ export async function parseRows(
     for (const [idx, col] of mapping) values[col.title] = asText(line[idx]);
 
     const rowIssues = validateRow(def, values, rowNo);
+    if (dataset === "staff" && rowIssues.length === 0) rowIssues.push(...staffRowIssues(values, rowNo, opts));
     if (rowIssues.length) {
       issues.push(...rowIssues);
       for (const bad of rowIssues) if (bad.column) byColumn.set(bad.column, (byColumn.get(bad.column) ?? 0) + 1);
@@ -198,7 +209,8 @@ export async function parseRows(
     });
   }
 
-  await markExisting(tx, dataset, rows);
+  if (dataset === "staff") rows = await checkStaff(tx, rows, issues, opts);
+  else await markExisting(tx, dataset, rows);
 
   return {
     rows,
@@ -280,6 +292,8 @@ function matchKey(dataset: DatasetKey, values: Record<string, string>): string |
     return number ? `№${number}` : phoneKey(values["Телефон"] ?? "") || null;
   }
   if (dataset === "orders") return (values["Номер"] ?? "").trim() || null;
+  // Логин к этому времени уже приведён к виду мастерской (staffRowIssues).
+  if (dataset === "staff") return (values["Логин"] ?? "").trim().toLowerCase() || null;
   if (dataset === "services") return serviceKey(values["Название"] ?? "") || null;
   // На складе артикул есть не всегда — тогда сличаем по названию.
   const sku = (values["Артикул"] ?? "").trim();
@@ -378,4 +392,140 @@ async function markExisting(
       r.action = "update";
     }
   }
+}
+
+// ------------------------------------------------------------------ сотрудники
+
+/** «да», «+», «1» — да; «нет», «-», «0» и пусто — нет; остальное — не понять. */
+export function yesNo(raw: string | undefined): boolean | null | undefined {
+  const s = (raw ?? "").trim().toLowerCase();
+  if (!s) return undefined;
+  if (/^(да|д|yes|y|\+|1|true|отключ[её]н)$/.test(s)) return true;
+  if (/^(нет|н|no|n|-|—|0|false|работает)$/.test(s)) return false;
+  return null;
+}
+
+/** Роли из ячейки: «Мастер; Приёмщик». Первая — основная. */
+export const splitRoles = (raw: string | undefined): string[] => [
+  ...new Set(
+    String(raw ?? "")
+      .split(/[;,\n]+/)
+      .map((r) => r.trim())
+      .filter(Boolean)
+  ),
+];
+
+/** Название роли так, как его узнаёт глаз: без регистра, «ё» как «е». */
+export const roleKey = (s: string): string => s.trim().toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ");
+
+/**
+ * Проверки одной строки сотрудника, которым не нужна база.
+ *
+ * Логин здесь же приводится к виду мастерской: «nikita» у мастерской lenina
+ * становится «nikita@lenina» — так же, как в форме нового сотрудника. После
+ * этого повтор внутри файла ловится по настоящему логину, а не по написанию.
+ */
+function staffRowIssues(values: Record<string, string>, row: number, opts: ParseOptions): RowIssue[] {
+  const out: RowIssue[] = [];
+  const login = loginFor(values["Логин"] ?? "", opts.loginDomain ?? "");
+  if (!login.ok) out.push({ row, message: `логин «${values["Логин"]}»: ${login.reason}`, column: "Логин" });
+  else values["Логин"] = login.login;
+
+  const contact = (values["Почта для связи"] ?? "").trim();
+  if (contact && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+    out.push({ row, message: `почта для связи «${contact}» не похожа на адрес`, column: "Почта для связи" });
+  }
+  if (yesNo(values["Отключён"]) === null) {
+    out.push({ row, message: `в колонке «Отключён» нужно «да» или «нет», а не «${values["Отключён"]}»`, column: "Отключён" });
+  }
+  for (const col of ["% с работ", "% с запчастей"]) {
+    const n = parseNumber(values[col] ?? "");
+    if (n !== null && (n < 0 || n > 100)) out.push({ row, message: `«${col}» — от 0 до 100, а не ${n}`, column: col });
+  }
+  return out;
+}
+
+/**
+ * Проверки сотрудников, которым нужна база: кто уже есть, свободен ли логин,
+ * есть ли такие роли. Всё, что можно сказать до записи, говорим здесь — в
+ * предпросмотре, а не отчётом о несостоявшейся загрузке.
+ *
+ * Возвращает строки, которые пойдут в загрузку; остальные — в замечания.
+ */
+async function checkStaff(
+  tx: Prisma.TransactionClient,
+  rows: ParsedRow[],
+  issues: RowIssue[],
+  opts: ParseOptions
+): Promise<ParsedRow[]> {
+  if (rows.length === 0) return rows;
+
+  const [users, roles] = await Promise.all([
+    // Удалённых тоже: логин удалённого сотрудника остаётся за ним, и
+    // завести на него нового нельзя — можно только вернуть прежнего.
+    tx.user.findMany({ select: { id: true, email: true, isOwner: true, deletedAt: true } }),
+    tx.role.findMany({ select: { name: true } }),
+  ]);
+  const byLogin = new Map(users.map((u) => [u.email.toLowerCase(), u]));
+  const roleNames = new Set(roles.map((r) => roleKey(r.name)));
+
+  // Вход общий на всю систему: логин, занятый в другой мастерской, не
+  // достанется этой, даже если здесь его никто не носит.
+  const fresh = rows.map((r) => r.values["Логин"]).filter((l) => !byLogin.has(l));
+  const elsewhere = new Set<string>();
+  if (fresh.length) {
+    const [foreign, platform] = await withPlatform((ptx) =>
+      Promise.all([
+        ptx.user.findMany({
+          where: { email: { in: fresh }, ...(opts.tenantId ? { tenantId: { not: opts.tenantId } } : {}) },
+          select: { email: true },
+        }),
+        ptx.platformUser.findMany({ where: { email: { in: fresh } }, select: { email: true } }),
+      ])
+    );
+    for (const u of [...foreign, ...platform]) elsewhere.add(u.email.toLowerCase());
+  }
+
+  const out: ParsedRow[] = [];
+  for (const r of rows) {
+    const login = r.values["Логин"];
+    const found = byLogin.get(login);
+    const bad = (message: string, column?: string) => issues.push({ row: r.row, message, column });
+
+    if (found?.isOwner) {
+      // Владельца загрузка не трогает: его имя, роль и вход меняются в
+      // профиле. Строка с ним есть в любой выгрузке — это не ошибка файла.
+      bad("это владелец мастерской — его данные меняются в профиле, строка пропущена");
+      continue;
+    }
+    if (!found && elsewhere.has(login)) {
+      bad(`логин «${login}» уже занят в другой учётной записи — придумайте другой`, "Логин");
+      continue;
+    }
+    const wanted = splitRoles(r.values["Роли"]);
+    const unknown = wanted.filter((w) => !roleNames.has(roleKey(w)));
+    if (unknown.length) {
+      bad(
+        `нет такой роли: ${unknown.map((u) => `«${u}»`).join(", ")}. Есть: ${roles.map((x) => x.name).join(", ")}`,
+        "Роли"
+      );
+      continue;
+    }
+    if (wanted.length > 10) {
+      bad("больше десяти ролей у одного сотрудника — так не бывает", "Роли");
+      continue;
+    }
+    if ((!found || found.deletedAt) && wanted.length === 0) {
+      bad("новому сотруднику нужна хотя бы одна роль — без неё он войдёт и ничего не увидит", "Роли");
+      continue;
+    }
+
+    if (found) {
+      r.existingId = found.id;
+      r.existingDeleted = found.deletedAt !== null;
+      r.action = "update";
+    }
+    out.push(r);
+  }
+  return out;
 }

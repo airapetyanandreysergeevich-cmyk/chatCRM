@@ -2,7 +2,10 @@ import type { Prisma } from "@prisma/client";
 import { createWithNumber } from "../../lib/customerNumber";
 import { flagsOf, toLabels } from "../../lib/dictionaries";
 import { recalcTotals } from "../orders/totals";
-import { parseNumber, phoneKey, type ParsedRow, type RowIssue } from "./import";
+import { randomInt } from "node:crypto";
+import { safeDiff, writeAudit } from "../../lib/audit";
+import { hashPassword } from "../../lib/password";
+import { parseNumber, phoneKey, roleKey, splitRoles, yesNo, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
 
 /**
@@ -29,6 +32,22 @@ export interface ApplyResult {
   /** Вернулось из удалённых. Считаем отдельно: это не обновление, а возврат. */
   restored: number;
   failed: RowIssue[];
+  /**
+   * Временные пароли новых сотрудников. Отдаются один раз — в ответе на эту
+   * загрузку — и нигде не хранятся: ни в журнале, ни в черновике разбора.
+   */
+  passwords?: Array<{ name: string; login: string; password: string }>;
+  /** Кого выкинуть со всех устройств после записи: отключённых файлом. */
+  revoke?: string[];
+}
+
+/** Кто загружает — нужно сотрудникам: чужих прав не раздать, тариф не превысить. */
+export interface ApplyContext {
+  /** Права загружающего. Роль с правом, которого у него нет, не выдаётся. */
+  permissions: string[];
+  /** Сколько сотрудников позволяет тариф. */
+  maxUsers: number;
+  ip?: string | null;
 }
 
 /**
@@ -121,9 +140,14 @@ export async function applyRows(
   tenantId: string,
   dataset: DatasetKey,
   rows: ParsedRow[],
-  userId: string | null
+  userId: string | null,
+  ctx?: ApplyContext
 ): Promise<ApplyResult> {
   const result: ApplyResult = { created: 0, updated: 0, restored: 0, failed: [] };
+  if (dataset === "staff") {
+    if (!ctx) throw new Error("staff import needs ApplyContext");
+    return applyStaffRows(tx, tenantId, rows, userId, ctx, result);
+  }
   const lookups = await readLookups(tx);
 
   for (const row of rows) {
@@ -449,8 +473,12 @@ async function applyOrder(
       statusId,
       acceptedById,
       acceptedAt: parseDate(v["Принят"]) ?? new Date(),
-      completeness: [],
-      appearance: [],
+      // Из файла, а пусто — пустой список. Раньше здесь стояли просто пустые
+      // списки, и они затирали то, что `common` взял из файла: новый заказ
+      // приезжал без комплектности и состояния — ровно того, чем решается
+      // спор о забытой зарядке.
+      completeness: common.completeness ?? [],
+      appearance: common.appearance ?? [],
       // Мастер из файла, если такой сотрудник в мастерской есть. Нет — поле
       // остаётся пустым: заводить сотрудника по строке в чужой выгрузке
       // значит завести ему учётку и доступ.
@@ -684,4 +712,147 @@ async function findOrCreateDevice(
     },
     select: { id: true },
   });
+}
+
+// ------------------------------------------------------------------ сотрудники
+
+/**
+ * Буквы временного пароля — без похожих друг на друга: l и 1, O и 0 путают,
+ * когда пароль диктуют голосом или переписывают с экрана на бумажку.
+ */
+const PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const PASSWORD_LENGTH = 10;
+
+export function temporaryPassword(): string {
+  let out = "";
+  for (let i = 0; i < PASSWORD_LENGTH; i += 1) out += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
+  // Хотя бы одна цифра: иначе пароль из одних букв выглядит как слово с
+  // опечаткой, и его «исправляют», переписывая.
+  if (!/\d/.test(out)) out = out.slice(0, -1) + "23456789"[randomInt(8)];
+  return out;
+}
+
+/** Процент из ячейки: пусто — не трогаем, иначе число от 0 до 100. */
+const percent = (raw: string | undefined): number | undefined => {
+  const n = numOrUndef(raw);
+  return n === undefined ? undefined : Math.min(100, Math.max(0, n));
+};
+
+async function applyStaffRows(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  rows: ParsedRow[],
+  actorId: string | null,
+  ctx: ApplyContext,
+  result: ApplyResult
+): Promise<ApplyResult> {
+  result.passwords = [];
+  result.revoke = [];
+  const mine = new Set(ctx.permissions);
+
+  const roles = await tx.role.findMany({ select: { id: true, name: true, permissions: true } });
+  const roleByKey = new Map(roles.map((r) => [roleKey(r.name), r]));
+  let active = await tx.user.count({ where: { deletedAt: null } });
+
+  for (const row of rows) {
+    const v = row.values;
+    await tx.$executeRawUnsafe("SAVEPOINT import_row");
+    try {
+      const wanted = splitRoles(v["Роли"]).map((n) => roleByKey.get(roleKey(n)));
+      if (wanted.some((r) => !r)) throw new Error(`роли «${v["Роли"]}» больше нет — обновите файл`);
+      const picked = wanted as typeof roles;
+      // Та же проверка, что в форме сотрудника: через загрузку управляющий
+      // не должен выписать себе в помощники роль с правами владельца.
+      const excess = [...new Set(picked.flatMap((r) => r.permissions))].filter((p) => !mine.has(p));
+      if (excess.length) throw new Error(`роль «${picked.map((r) => r.name).join(", ")}» даёт права, которых нет у вас`);
+
+      const disabled = yesNo(v["Отключён"]);
+      const fields = {
+        fullName: val(v["Имя"]),
+        phone: val(v["Телефон"]),
+        contactEmail: val(v["Почта для связи"])?.toLowerCase(),
+        workPercent: percent(v["% с работ"]),
+        partPercent: percent(v["% с запчастей"]),
+        ...(picked.length ? { roleId: picked[0].id, extraRoleIds: picked.slice(1).map((r) => r.id) } : {}),
+        ...(disabled === undefined || disabled === null ? {} : { isActive: !disabled }),
+      };
+      const roleNames = picked.map((r) => r.name);
+
+      if (row.action === "update" && row.existingId && !row.existingDeleted) {
+        const user = await tx.user.findFirst({ where: { id: row.existingId, deletedAt: null } });
+        if (!user) throw new Error("сотрудник пропал, пока шла загрузка — загрузите файл ещё раз");
+        if (user.isOwner) throw new Error("это владелец мастерской — строка пропущена");
+        await tx.user.update({ where: { id: user.id }, data: fields });
+        await writeAudit(tx, {
+          tenantId,
+          userId: actorId,
+          entity: "User",
+          entityId: user.id,
+          action: "UPDATE",
+          diff: safeDiff({ ...fields, ...(roleNames.length ? { roleNames } : {}), via: "import" }),
+          ip: ctx.ip,
+        });
+        await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
+        if (fields.isActive === false && user.isActive) result.revoke.push(user.id);
+        result.updated += 1;
+        continue;
+      }
+
+      // Новый или возвращённый из удалённых — занимает место по тарифу.
+      if (active >= ctx.maxUsers) {
+        throw new Error(`тариф позволяет не больше ${ctx.maxUsers} сотрудников — строка не загружена`);
+      }
+      if (!picked.length) throw new Error("новому сотруднику нужна хотя бы одна роль");
+
+      // Возвращённому — тоже новый пароль: старый мог остаться у человека,
+      // которого удаляли не просто так.
+      const password = temporaryPassword();
+      const passwordHash = await hashPassword(password);
+      let id: string;
+      if (row.existingId) {
+        const back = await tx.user.update({
+          where: { id: row.existingId },
+          data: { ...fields, deletedAt: null, isActive: fields.isActive ?? true, passwordHash },
+        });
+        id = back.id;
+      } else {
+        const created = await tx.user.create({
+          data: {
+            tenantId,
+            email: v["Логин"],
+            passwordHash,
+            fullName: fields.fullName ?? v["Логин"],
+            phone: fields.phone ?? null,
+            contactEmail: fields.contactEmail ?? null,
+            roleId: picked[0].id,
+            extraRoleIds: picked.slice(1).map((r) => r.id),
+            workPercent: fields.workPercent ?? null,
+            partPercent: fields.partPercent ?? null,
+            isActive: fields.isActive ?? true,
+          },
+        });
+        id = created.id;
+      }
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorId,
+        entity: "User",
+        entityId: id,
+        action: "CREATE",
+        diff: safeDiff({ ...fields, email: v["Логин"], roleNames, via: "import", restored: !!row.existingId }),
+        ip: ctx.ip,
+      });
+      await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
+
+      active += 1;
+      if (row.existingId) result.restored += 1;
+      else result.created += 1;
+      result.passwords.push({ name: fields.fullName ?? v["Логин"], login: v["Логин"], password });
+    } catch (err) {
+      await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT import_row");
+      await tx.$executeRawUnsafe("RELEASE SAVEPOINT import_row");
+      result.failed.push({ row: row.row, message: humanMessage(err) });
+    }
+  }
+  return result;
 }
