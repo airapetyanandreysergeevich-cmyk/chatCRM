@@ -8,6 +8,8 @@ import { env, pushConfigured } from "./lib/env";
 import { errorHandler } from "./lib/errors";
 import { securityHeaders } from "./lib/security";
 import { authRouter } from "./modules/auth/auth.routes";
+import { boxApiRouter } from "./modules/relay/boxApi.routes";
+import { workshopNameRouter } from "./modules/relay/workshopName.routes";
 import { platformRouter } from "./modules/platform/platform.routes";
 import { customersRouter } from "./modules/customers/customers.routes";
 import { dataRouter } from "./modules/data/data.routes";
@@ -105,6 +107,8 @@ app.get("/api/health", async (req, res) => {
 // что до него доходит, и заявка на регистрацию упиралась бы в 401.
 app.use("/api/public", publicRouter);
 app.use("/api/auth", authRouter);
+// Облако для Основ: свободно ли имя мастерской. Только там, где принимаем Основы.
+if (env.relayEnabled) app.use("/api/box", boxApiRouter);
 app.use("/api/platform", platformRouter);
 // История ремонта — раньше заказов: иначе /:id заказа перехватил бы адрес.
 app.use("/api/orders/:id/messages", messagesRouter);
@@ -125,6 +129,9 @@ app.use("/api/hints", hintsRouter);
 app.use("/api/quick-picks", quickPicksRouter);
 app.use("/api/plate", plateRouter);
 app.use("/api/services", servicesRouter);
+// Имя мастерской — раньше общих настроек: иначе их обработчик ответил бы
+// «метод не найден» раньше, чем очередь дошла бы сюда.
+app.use("/api/settings/workshop-name", workshopNameRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/push", pushRouter);

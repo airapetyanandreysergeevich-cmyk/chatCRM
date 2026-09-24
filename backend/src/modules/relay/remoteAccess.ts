@@ -25,12 +25,11 @@ export type RemoteAccess = {
   /** Почта, на которую выдан доступ: видно, чья это фраза. */
   email?: string;
   /**
-   * Имя мастерской в облаке: local20. По нему её сотрудники входят на общем
-   * сайте — пишут свою почту с этим хвостом. Приходит во фразе подключения, а
-   * у мастерских, подключённых прежними фразами, — от узла связи при
-   * очередном соединении.
+   * Имя мастерской: lenina. Логины сотрудников — nikita@lenina. Выбирает его
+   * владелец, закрепляет облако; узел связи напоминает его при каждом
+   * подключении. Пусто — имя ещё не выбрано.
    */
-  tag?: string;
+  name?: string;
 };
 
 const KEY = "remoteAccess";
@@ -50,7 +49,7 @@ export async function readRemoteAccess(): Promise<RemoteAccess | null> {
     key: typeof raw.key === "string" ? raw.key : "",
     code: typeof raw.code === "string" ? raw.code : "",
     email: typeof raw.email === "string" ? raw.email : "",
-    tag: typeof raw.tag === "string" ? raw.tag : "",
+    name: typeof raw.name === "string" ? raw.name : "",
   };
 }
 
@@ -59,4 +58,30 @@ export async function saveRemoteAccess(next: RemoteAccess): Promise<void> {
   if (!tenant) return;
   const settings = { ...((tenant.settings as object) ?? {}), [KEY]: next };
   await prisma.tenant.update({ where: { id: tenant.id }, data: { settings } });
+}
+
+/**
+ * Адрес облака для обычных запросов — по адресу узла связи.
+ * wss://www.finecrm.ru/relay/agent → https://www.finecrm.ru
+ */
+export function cloudBase(relayUrl: string): string {
+  try {
+    const u = new URL(relayUrl);
+    return `${u.protocol === "ws:" ? "http:" : "https:"}//${u.host}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Имя мастерской для входа в локальной сети.
+ *
+ * Только у Основы: в облаке мастерских много, и «своего» имени у сервера нет.
+ * Нужно, чтобы в локальной сети можно было войти просто «nikita» — Основа
+ * допишет «@lenina» сама.
+ */
+export async function localLoginDomain(): Promise<string> {
+  if (env.relayEnabled || env.storageDriver !== "local") return "";
+  const saved = await readRemoteAccess().catch(() => null);
+  return saved?.name ?? "";
 }

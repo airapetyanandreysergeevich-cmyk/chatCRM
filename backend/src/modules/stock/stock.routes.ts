@@ -3,6 +3,7 @@ import { z } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
+import { compareKeys, desc, type Key } from "../../lib/listOrder";
 import { pageFields } from "../../lib/paging";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
@@ -68,6 +69,9 @@ stockRouter.get(
  */
 const MAX_SCAN = 2000;
 
+/** Порядок склада. По названию — как было: так его отдаёт база. */
+const STOCK_SORTS = ["name", "low", "qty", "category", "sku", "recent"] as const;
+
 stockRouter.get(
   "/",
   requirePermission(PERMISSIONS.STOCK_VIEW),
@@ -76,6 +80,7 @@ stockRouter.get(
       .object({
         search: z.string().trim().max(120).optional(),
         filter: z.enum(["all", "low", "zero", "in"]).default("all"),
+        sort: z.enum(STOCK_SORTS).catch("name").default("name"),
         ...pageFields,
       })
       .parse(req.query);
@@ -142,7 +147,35 @@ stockRouter.get(
             ? items.filter((i) => i.qty > 0)
             : items;
 
-    const page = filtered.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
+    // Порядок — по всему отобранному, а не по странице. «Недавно менявшиеся»
+    // — по последнему движению: у позиции своей даты правки нет, а приход,
+    // списание и перемещение и есть её жизнь.
+    let lastMove = new Map<string, number>();
+    if (q.sort === "recent" && filtered.length) {
+      const moves = await withTenant(tenantOf(req), (tx) =>
+        tx.stockMovement.groupBy({ by: ["stockItemId"], _max: { createdAt: true } })
+      );
+      lastMove = new Map(moves.map((m) => [m.stockItemId, m._max.createdAt?.getTime() ?? 0]));
+    }
+    const keyOf = (i: (typeof items)[number]): Key[] => {
+      switch (q.sort) {
+        case "low":
+          // Сначала то, что ниже минимума, потом — чего меньше всего.
+          return [i.low ? 0 : 1, i.qty, i.name];
+        case "qty":
+          return [desc(i.qty), i.name];
+        case "category":
+          return [i.category || null, i.name];
+        case "sku":
+          return [i.sku || null, i.name];
+        case "recent":
+          return [desc(lastMove.get(i.id) ?? null), i.name];
+        default:
+          return [i.name];
+      }
+    };
+    const ordered = q.sort === "name" ? filtered : [...filtered].sort((a, b) => compareKeys(keyOf(a), keyOf(b)));
+    const page = ordered.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
 
     res.json({
       items: page.map(({ avgCost, value, ...rest }) => (cost ? { ...rest, avgCost, value } : rest)),

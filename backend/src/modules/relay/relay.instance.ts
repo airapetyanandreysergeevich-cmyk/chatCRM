@@ -71,15 +71,16 @@ export function applyRemoteAccess(next: { url: string; key: string } | null) {
       state = { state: s, detail };
       console.log(`[доступ из интернета] ${s}${detail ? `: ${detail}` : ""}`);
     },
-    // Код и имя мастерской в облаке приходят при каждом подключении.
-    // Запоминаем их: во фразе, выданной до этой возможности, имени нет, а
-    // владельцу его надо показать — по нему входят его сотрудники.
-    onReady: ({ code, tag }) => {
+    // Код и имя мастерской приходят при каждом подключении. Облако —
+    // единственный, кто знает, чьё имя чьё, поэтому его слово последнее:
+    // имя освободили в панели — пропадает и здесь.
+    onReady: ({ code, name }) => {
       void (async () => {
         const saved = await readRemoteAccess().catch(() => null);
         if (!saved) return;
-        if (saved.code === code && saved.tag === tag) return;
-        await saveRemoteAccess({ ...saved, code, tag: tag ?? saved.tag }).catch(() => undefined);
+        const nextName = name === undefined ? saved.name : name ?? "";
+        if (saved.code === code && saved.name === nextName) return;
+        await saveRemoteAccess({ ...saved, code, name: nextName }).catch(() => undefined);
       })();
     },
   });

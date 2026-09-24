@@ -7,6 +7,7 @@ import { signAccessToken, type PlatformTokenPayload, type TenantTokenPayload } f
 import { hashPassword, verifyPassword } from "../../lib/password";
 import { ALL_PERMISSIONS } from "../../lib/permissions";
 import { clientIp } from "../../lib/audit";
+import { localLoginDomain } from "../relay/remoteAccess";
 
 const hashToken = (raw: string) => createHash("sha256").update(raw).digest("hex");
 
@@ -71,6 +72,24 @@ async function locateTenantUser(email: string) {
   );
 }
 
+/**
+ * Новый логин по прежнему — если пароль к нему подходит.
+ *
+ * Прежний логин остаётся у сотрудника после того, как владелец дал
+ * мастерской имя и логины стали вида nikita@lenina. Человек по привычке
+ * вводит старую почту — и вместо «неверный пароль» узнаёт, как входить теперь.
+ */
+async function renamedLogin(previous: string, password: string): Promise<string | null> {
+  const user = await withPlatform((tx) =>
+    tx.user.findFirst({
+      where: { previousLogin: previous, deletedAt: null, isActive: true },
+      select: { email: true, passwordHash: true },
+    })
+  );
+  if (!user || user.email === previous) return null;
+  return (await verifyPassword(password, user.passwordHash)) ? user.email : null;
+}
+
 function assertTenantUsable(status: string) {
   if (status === "SUSPENDED") throw forbidden("Доступ к мастерской приостановлен. Обратитесь в поддержку.");
 }
@@ -106,7 +125,14 @@ export interface LoginResult {
  * сотрудников мастерских — email уникален по всей платформе, так что пересечься они не могут.
  */
 export async function login(input: { email: string; password: string; req: Request }): Promise<LoginResult> {
-  const email = input.email.toLowerCase().trim();
+  let email = input.email.toLowerCase().trim();
+  // В локальной сети можно войти просто «nikita»: Основа знает своё имя и
+  // допишет «@lenina» сама. В облаке своего имени нет — там логин полный.
+  if (!email.includes("@")) {
+    const domain = await localLoginDomain();
+    if (!domain) throw unauthorized(WRONG);
+    email = `${email}@${domain}`;
+  }
 
   const platformUser = await prisma.platformUser.findUnique({ where: { email } });
   if (platformUser) {
@@ -128,6 +154,11 @@ export async function login(input: { email: string; password: string; req: Reque
 
   const located = await locateTenantUser(email);
   if (!located) {
+    // Вошёл по старому логину — подскажем новый. Только если пароль верный:
+    // иначе форма входа раздавала бы логины всем, кто знает чью-то почту.
+    const renamed = await renamedLogin(email, input.password);
+    if (renamed) throw unauthorized(`Ваш логин изменился: теперь входите как ${renamed}`);
+
     // Учётки нет — возможно, заявка ещё не одобрена. Стадию раскрываем только тому,
     // кто знает пароль от этой заявки: иначе форма выдавала бы, кто к нам обращался.
     const application = await prisma.tenantApplication.findFirst({

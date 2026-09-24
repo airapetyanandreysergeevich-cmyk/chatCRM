@@ -64,7 +64,7 @@ interface Connection {
 
 export interface RelayOptions {
   /** Проверка ключа Основы: вернуть код и имя мастерской или null. */
-  authenticate: (key: string) => Promise<{ code: string; tag: string } | null>;
+  authenticate: (key: string) => Promise<{ code: string; name: string | null } | null>;
   /** Путь, на котором Основа устанавливает соединение. */
   path?: string;
   /** Сколько ждать ответ Основы. Загрузка фотографий по мобильному интернету бывает долгой. */
@@ -221,9 +221,10 @@ export function createRelayHub(opts: RelayOptions) {
       opts.onSeen?.(box.code);
       log(`Основа ${box.code} на связи`, { address: conn.address });
 
-      // Имя мастерской в облаке отдаём при каждом подключении: Основа,
-      // подключённая старой фразой, узнаёт его сама и показывает владельцу.
-      ws.send(encodeControl({ t: "ready", code: box.code, tag: box.tag, server: "finecrm" }));
+      // Имя мастерской отдаём при каждом подключении: его могли сменить
+      // или освободить в панели, и Основа должна показывать владельцу то,
+      // по которому в облако действительно входят. null — имени нет.
+      ws.send(encodeControl({ t: "ready", code: box.code, name: box.name ?? null, server: "finecrm" }));
       ws.on("message", (data, isBinary) => {
         if (isBinary) onFrame(conn, Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
         else onControl(conn, String(data));

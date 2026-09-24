@@ -17,6 +17,7 @@ import {
 import { Pager } from "../components/Pager";
 import { ApiError, api, type Page } from "../lib/api";
 import { formatDateTime, plural } from "../lib/format";
+import { useAuth } from "../lib/auth";
 
 interface Role {
   id: string;
@@ -31,6 +32,8 @@ interface StaffRow {
   fullName: string;
   phone: string | null;
   email: string;
+  /** Настоящая почта для связи — отдельно от логина. */
+  contactEmail?: string | null;
   isOwner: boolean;
   isActive: boolean;
   lastLoginAt: string | null;
@@ -224,10 +227,17 @@ function StaffModal({
   onDone: () => void;
 }) {
   const editing = !!user;
+  // У мастерской с именем логин — «часть до @» плюс имя мастерской, которое
+  // дописывается само. Владелец вводит только «nikita».
+  const { me } = useAuth();
+  const domain = me?.kind === "tenant" ? me.loginDomain ?? "" : "";
+  const localOf = (login: string) =>
+    domain && login.endsWith(`@${domain}`) ? login.slice(0, -(domain.length + 1)) : domain ? login.split("@")[0] : login;
   const pct = (v: string | number | null | undefined) => (v === null || v === undefined ? "" : String(Number(v)));
   const [form, setForm] = useState({
     fullName: user?.fullName ?? "",
-    email: user?.email ?? "",
+    email: localOf(user?.email ?? ""),
+    contactEmail: user?.contactEmail ?? "",
     password: "",
     phone: user?.phone ?? "",
     workPercent: pct(user?.workPercent),
@@ -263,7 +273,13 @@ function StaffModal({
     try {
       const common = {
         fullName: form.fullName,
-        email: form.email,
+        // Логин шлём, только если его правда меняли: у сотрудника, которого
+        // ещё не перевели на логины мастерской, правка телефона не должна
+        // молча менять и логин — это делается таблицей в «Доступе из интернета».
+        ...(!user || form.email !== localOf(user.email)
+          ? { email: domain ? `${form.email.trim()}@${domain}` : form.email }
+          : {}),
+        contactEmail: form.contactEmail,
         phone: form.phone,
         ...(rolesChanged && roleIds.length ? { roleIds } : {}),
         workPercent: percent(form.workPercent),
@@ -325,17 +341,56 @@ function StaffModal({
           )}
         </div>
 
+        {domain ? (
+          <Field
+            label="Логин"
+            error={error?.field("email")}
+            hint={`Сотрудник входит как ${form.email.trim() || "имя"}@${domain} — и в программе, и на www.finecrm.ru. В локальной сети можно просто ${form.email.trim() || "имя"}.`}
+          >
+            <div
+              className={
+                "flex min-h-[46px] items-center rounded-field border bg-surface-input pr-3.5 focus-within:border-brand " +
+                (error?.field("email") ? "border-state-off" : "border-line")
+              }
+            >
+              <input
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value.replace(/@.*$/, "").toLowerCase() }))}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="nikita"
+                className="min-w-0 flex-1 bg-transparent px-3.5 text-[15px] text-ink outline-none placeholder:text-ink-dim"
+              />
+              <span className="shrink-0 font-semibold text-ink-muted">@{domain}</span>
+            </div>
+          </Field>
+        ) : (
+          <Field
+            label="Email"
+            error={error?.field("email")}
+            hint="По нему сотрудник входит в систему. Нет почты — подойдёт адрес вида master1@masterskaya.local"
+          >
+            <Input
+              type="email"
+              value={form.email}
+              onChange={set("email")}
+              autoCapitalize="none"
+              invalid={!!error?.field("email")}
+            />
+          </Field>
+        )}
         <Field
-          label="Email"
-          error={error?.field("email")}
-          hint="По нему сотрудник входит в систему. Нет почты — подойдёт адрес вида master1@masterskaya.local"
+          label="Почта для связи"
+          error={error?.field("contactEmail")}
+          hint="Необязательно. Настоящая почта сотрудника — чтобы было куда написать."
         >
           <Input
             type="email"
-            value={form.email}
-            onChange={set("email")}
+            value={form.contactEmail}
+            onChange={set("contactEmail")}
             autoCapitalize="none"
-            invalid={!!error?.field("email")}
+            invalid={!!error?.field("contactEmail")}
           />
         </Field>
         {!editing && (

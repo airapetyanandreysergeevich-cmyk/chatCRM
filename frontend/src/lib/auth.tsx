@@ -13,6 +13,8 @@ export interface TenantMe {
     branch: { id: string; name: string } | null;
   };
   tenant: { id: string; name: string; slug: string; status: string } | null;
+  /** Имя мастерской для логинов (nikita@lenina) — только у Основы, где оно выбрано. */
+  loginDomain?: string | null;
   permissions: string[];
 }
 

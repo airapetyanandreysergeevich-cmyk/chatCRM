@@ -23,8 +23,6 @@ export interface Invite {
   code: string;
   /** Почта, на которую выдан доступ: видно, кому принадлежит фраза. */
   email?: string;
-  /** Имя мастерской в облаке (local20): по нему входят её сотрудники. */
-  tag?: string;
 }
 
 export function encodeInvite(invite: Invite): string {
@@ -34,7 +32,6 @@ export function encodeInvite(invite: Invite): string {
     k: invite.key,
     c: invite.code,
     e: invite.email,
-    t: invite.tag,
   });
   return INVITE_PREFIX + Buffer.from(payload, "utf8").toString("base64url");
 }
@@ -66,7 +63,6 @@ export function parseInvite(raw: string, defaultUrl: string): Invite | null {
       c?: string;
       e?: string;
       n?: string;
-      t?: string;
     };
     if (!data.k || !/^[\x21-\x7e]+$/.test(data.k)) return null;
     const url = typeof data.u === "string" && /^wss?:\/\//.test(data.u) ? data.u : defaultUrl;
@@ -75,8 +71,9 @@ export function parseInvite(raw: string, defaultUrl: string): Invite | null {
       url,
       key: data.k,
       code: typeof data.c === "string" ? data.c : "",
+      // t — от фраз, где было имя вида local20. Его больше нет: имя
+      // мастерская выбирает сама, облако присылает его при подключении.
       email: data.e ?? data.n,
-      tag: typeof data.t === "string" ? data.t : undefined,
     };
   } catch {
     return null;

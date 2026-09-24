@@ -10,6 +10,7 @@ import {
   Textarea,
 } from "../components/ui";
 import { ApiError, api } from "../lib/api";
+import { WorkshopName } from "../components/WorkshopName";
 
 /**
  * Доступ к Основе из интернета — экран владельца мастерской.
@@ -34,8 +35,8 @@ interface State {
   code: string;
   /** Почта, на которую поставщик выдал доступ. */
   email: string;
-  /** Имя мастерской в облаке: по нему входят сотрудники на общем сайте. */
-  tag: string;
+  /** Имя мастерской: логины сотрудников — имя@мастерская. */
+  name: string;
   address: string;
   state: "off" | "connecting" | "online" | "error";
   detail: string | null;
@@ -128,7 +129,7 @@ export default function RemoteAccess() {
           </p>
         )}
 
-        {data.tag && <StaffLogin tag={data.tag} email={data.email} />}
+        {data.connected && <WorkshopName name={data.name} onChanged={() => void load()} />}
 
         <div className="mt-4">
           <Checkbox
@@ -189,8 +190,7 @@ export default function RemoteAccess() {
             передаёт запросы туда и обратно и ничего не хранит.
           </li>
           <li>
-            Вход остаётся прежним: логин и пароль сотрудника. Тот, у кого их нет, ничего не увидит,
-            даже зная адрес.
+            Вход — логином и паролем сотрудника. Тот, у кого их нет, ничего не увидит, даже зная адрес.
           </li>
           <li>
             Выключили здесь — доступ снаружи пропал сразу. Работа в самой мастерской, по локальной
@@ -206,66 +206,6 @@ export default function RemoteAccess() {
           </li>
         </ul>
       </Card>
-    </div>
-  );
-}
-
-/**
- * Как входят сотрудники этой мастерской.
- *
- * Самое нужное на экране: приставка, которую владелец будет диктовать людям.
- * Показываем не одно голое имя, а готовую строку целиком — по ней сразу видно,
- * куда её дописывать, и переспрашивать не придётся. Пример строим из почты,
- * на которую выдан доступ: свою человек узнаёт с одного взгляда, а выдуманный
- * «anton@repair.ru» каждый раз приходится примерять на себя.
- */
-function StaffLogin({ tag, email }: { tag: string; email: string }) {
-  const [copied, setCopied] = useState(false);
-  const sample = (email && email.includes("@") ? email : "admin@admin.ru") + "." + tag;
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText("." + tag);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  return (
-    <div className="mt-4 rounded-field border border-line bg-surface-input px-3.5 py-3">
-      <p className="text-[13px] font-semibold text-ink-soft">Как входят ваши сотрудники</p>
-
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-[13.5px] text-ink-muted">Приставка вашей мастерской:</span>
-        <span className="rounded-md bg-surface px-2 py-1 font-mono text-[15px] font-bold text-brand-ink">
-          .{tag}
-        </span>
-        <Button
-          type="button"
-          variant="secondary"
-          className="min-h-[30px] px-2.5 text-[12.5px]"
-          onClick={() => void copy()}
-        >
-          {copied ? "Скопировано" : "Скопировать"}
-        </Button>
-      </div>
-
-      <p className="mt-3 text-[13.5px] leading-relaxed text-ink-muted">
-        На <span className="font-semibold text-ink">www.finecrm.ru</span>, обычной формой входа.
-        В поле «Email» — та почта, которой человек входит здесь, у вас, плюс приставка в конце:
-      </p>
-
-      <p className="mt-2 break-all rounded-field border border-line bg-surface px-3 py-2.5 font-mono text-[13.5px]">
-        {sample.slice(0, sample.length - tag.length - 1)}
-        <span className="font-bold text-brand-ink">.{tag}</span>
-      </p>
-
-      <ul className="mt-3 space-y-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-        <li>Пароль — тот же, что и в мастерской, и проверяется здесь, у вас: облако его не видит.</li>
-        <li>Заводить людей по-прежнему в разделе «Сотрудники» — отдельно создавать ничего не нужно.</li>
-        <li>Приставка одна на всю мастерскую: разным сотрудникам разные не нужны.</li>
-      </ul>
     </div>
   );
 }

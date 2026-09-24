@@ -11,6 +11,17 @@ import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors"
 import { notifyTenant } from "../../lib/notify";
 import { nextOrderNumber } from "../../lib/orderNumber";
 import { pageFields, paged, skipTake } from "../../lib/paging";
+import {
+  MAX_SCAN,
+  colorFilterField,
+  colorRank,
+  customerColorWhere,
+  desc,
+  inOrder,
+  pageIds,
+  time,
+  type Key,
+} from "../../lib/listOrder";
 import { nextCustomerNumber } from "../../lib/customerNumber";
 import { takePayment } from "../../lib/payment";
 import { PERMISSIONS } from "../../lib/permissions";
@@ -117,6 +128,14 @@ function searchWhere(search: string, withContacts: boolean): Prisma.OrderWhereIn
   ];
 }
 
+/**
+ * Порядок списка заказов. «default» — как было всегда: срочные сверху, дальше
+ * свежие. Сортировку по деньгам сервер молча заменяет на обычную тем, кто
+ * денег не видит.
+ */
+const ORDER_SORTS = ["default", "new", "old", "due", "number", "color", "total"] as const;
+type OrderSort = (typeof ORDER_SORTS)[number];
+
 ordersRouter.get(
   "/",
   requirePermission(
@@ -131,9 +150,13 @@ ordersRouter.get(
         statusId: z.string().uuid().optional(),
         group: z.enum(["NEW", "IN_PROGRESS", "WAITING", "DONE", "CLOSED", "CANCELLED"]).optional(),
         mine: z.enum(["1", "0"]).optional(),
+        sort: z.enum(ORDER_SORTS).catch("default").default("default"),
+        color: colorFilterField,
         ...pageFields,
       })
       .parse(req.query);
+    // По сумме — только тому, кто видит деньги: порядок строк выдал бы суммы.
+    const sort: OrderSort = q.sort === "total" && !seesMoney(req) ? "default" : q.sort;
 
     const me = req.auth?.kind === "tenant" ? req.auth.userId : null;
     // Мастер видит только назначенное ему — фильтр стоит в запросе, а не в интерфейсе.
@@ -148,19 +171,53 @@ ordersRouter.get(
       ...(q.statusId ? { statusId: q.statusId } : {}),
       ...(q.group ? { status: { group: q.group } } : {}),
       ...(q.search ? { OR: searchWhere(q.search, seesCustomerContacts(req)) } : {}),
-    };
+      ...(q.color ? { customer: { is: customerColorWhere(q.color) } } : {}),
+    } satisfies Prisma.OrderWhereInput;
 
-    const [rows, total] = await withTenant(tenantOf(req), (tx) =>
-      Promise.all([
-        tx.order.findMany({
-          where,
-          orderBy: [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
-          ...skipTake(q),
-          include: orderInclude,
-        }),
-        tx.order.count({ where }),
-      ])
-    );
+    const [rows, total] = await withTenant(tenantOf(req), async (tx) => {
+      const count = tx.order.count({ where });
+
+      const byBase: Partial<Record<OrderSort, Prisma.OrderOrderByWithRelationInput[]>> = {
+        default: [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
+        new: [{ acceptedAt: "desc" }],
+        old: [{ acceptedAt: "asc" }],
+        total: [{ total: "desc" }, { acceptedAt: "desc" }],
+      };
+      const orderBy = byBase[sort];
+      if (orderBy) {
+        return Promise.all([tx.order.findMany({ where, orderBy, ...skipTake(q), include: orderInclude }), count]);
+      }
+
+      // Остальные порядки — своим правилом, по короткой выжимке (lib/listOrder).
+      const all = await tx.order.findMany({
+        where,
+        select: {
+          id: true,
+          number: true,
+          dueAt: true,
+          acceptedAt: true,
+          status: { select: { group: true } },
+          customer: { select: { color: true } },
+        },
+        take: MAX_SCAN,
+      });
+      const newest = (o: (typeof all)[number]) => desc(o.acceptedAt.getTime());
+      const done = (o: (typeof all)[number]) =>
+        o.status.group === "CLOSED" || o.status.group === "CANCELLED" ? 1 : 0;
+      const keyOf: (o: (typeof all)[number]) => Key[] =
+        sort === "color"
+          ? (o) => [colorRank(o.customer.color), newest(o)]
+          : sort === "due"
+            ? // «Сначала горящие»: открытые заказы по сроку, без срока — за
+              // ними, выданные и отменённые — в самом конце. Иначе первыми
+              // оказались бы выданные в прошлом году: их срок давно прошёл.
+              (o) => [done(o), time(o.dueAt), newest(o)]
+            : // По номеру — как читает человек: Р-999 раньше Р-1021.
+              (o) => [desc(Number(o.number.replace(/\D+/g, "")) || 0), o.number];
+      const ids = pageIds(all, keyOf, q);
+      const page = await tx.order.findMany({ where: { id: { in: ids } }, include: orderInclude });
+      return Promise.all([inOrder(ids, page), count]);
+    });
 
     const contacts = seesCustomerContacts(req);
     const money = seesMoney(req);

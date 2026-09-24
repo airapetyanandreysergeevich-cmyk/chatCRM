@@ -4,7 +4,7 @@ import http from "http";
 import { createRelayAgent } from "../src/modules/relay/relay.agent";
 import { createRelayHub, withBase, withCookiePath } from "../src/modules/relay/relay.hub";
 import { z } from "zod";
-import { isTag, splitTag } from "../src/modules/relay/boxes.service";
+import { isWorkshopLogin, localProblem, looksLikeMailbox, nameProblem, splitWorkshopLogin, suggestLocal } from "../src/lib/login";
 import { encodeInvite, parseInvite, publicAddress } from "../src/modules/relay/invite";
 import { newCode } from "../src/modules/relay/boxes.service";
 
@@ -26,7 +26,7 @@ const check = (ok: boolean, what: string) => {
 
 const KEY = "kluch-masterskoj-0001";
 const CODE = "servis-na-lenina";
-const TAG = "local20";
+const NAME = "lenina";
 
 /** Поддельная Основа: отвечает так же, как настоящий сервер мастерской. */
 function startBox(): Promise<{ url: string; close: () => void }> {
@@ -51,7 +51,7 @@ function startBox(): Promise<{ url: string; close: () => void }> {
     // Пароль знает только мастерская — в этом весь смысл: облако его не видит
     // и не хранит, а лишь передаёт запрос сюда.
     const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
-    if (email && password && email !== "anton@repair.ru") {
+    if (email && password && email !== "nikita@lenina") {
       return res.status(401).json({ error: "Неверная почта или пароль" });
     }
     if (password && password !== "verniy-parol") {
@@ -187,7 +187,7 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
 
   const box = await startBox();
   const hub = createRelayHub({
-    authenticate: async (key) => (key === KEY ? { code: CODE, tag: TAG } : null),
+    authenticate: async (key) => (key === KEY ? { code: CODE, name: NAME } : null),
     timeoutMs: 5_000,
     log: () => {},
   });
@@ -197,7 +197,7 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   const offline = await ask(cloud.port, `/b/${CODE}/`);
   check(offline.status === 503 && offline.body.toString().includes("не на связи"), "без Основы — понятная страница, а не ошибка");
 
-  let told: { code: string; tag?: string } | null = null;
+  let told: { code: string; name?: string | null } | null = null;
   const agent = createRelayAgent({
     url: `ws://127.0.0.1:${cloud.port}/relay/agent`,
     key: KEY,
@@ -209,8 +209,8 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   agent.start();
   check(await waitFor(() => hub.online(CODE)), "Основа подключилась");
   check(
-    await waitFor(() => told?.tag === TAG),
-    "мастерская узнаёт своё имя в облаке при подключении — даже по старой фразе"
+    await waitFor(() => told?.name === NAME),
+    "мастерская узнаёт своё имя при каждом подключении"
   );
 
   const page = await ask(cloud.port, `/b/${CODE}/`);
@@ -287,28 +287,31 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
 
   // ---------- вход сотрудника с общего сайта ----------
   //
-  // Человек пишет anton@repair.ru.local20 на www.finecrm.ru; облако отрезает
-  // хвост, находит мастерскую и спрашивает пароль у неё самой.
-  check(splitTag("anton@repair.ru.local20")?.email === "anton@repair.ru", "почта отделяется от имени мастерской");
-  check(splitTag("anton@repair.ru.local20")?.tag === "local20", "имя мастерской читается из хвоста");
-  check(splitTag("ANTON@Repair.RU.LOCAL20")?.tag === "local20", "заглавные буквы не мешают");
-  check(splitTag("anton@repair.ru") === null, "обычная почта остаётся целой");
-  check(splitTag("anton@repair.ru.localhost") === null, "похожий хвост не считается именем");
-  check(splitTag("anton.local20") === null, "строка без собаки почтой не считается");
-  check(isTag("local20") && !isTag("local") && !isTag("local20a"), "имя мастерской — слово и число, и только");
-  // Обычная проверка почты отвергает mail.ru.local4: цифры в последней части
-  // домена. Поэтому хвост отрезается до проверки, а не после.
-  const asEmail = z.string().email();
-  check(!asEmail.safeParse("ivan@mail.ru.local4").success, "почта с хвостом обычную проверку не проходит");
-  check(
-    asEmail.safeParse(splitTag("ivan@mail.ru.local4")?.email ?? "").success,
-    "а без хвоста — проходит, поэтому отрезаем первым делом"
-  );
+  // Человек пишет nikita@lenina на www.finecrm.ru; облако по части после @
+  // находит мастерскую и спрашивает пароль у неё самой.
+  check(splitWorkshopLogin("nikita@lenina")?.local === "nikita", "логин отделяется от имени мастерской");
+  check(splitWorkshopLogin("nikita@lenina")?.name === "lenina", "имя мастерской — часть после @");
+  check(splitWorkshopLogin("NIKITA@Lenina")?.name === "lenina", "заглавные буквы не мешают");
+  check(splitWorkshopLogin("anton@repair.ru") === null, "настоящая почта логином мастерской не считается");
+  check(splitWorkshopLogin("anton@mail") !== null && !isWorkshopLogin("anton@mail.ru"), "точка после @ — почта, без точки — мастерская");
+  check(splitWorkshopLogin("nikita") === null && splitWorkshopLogin("@lenina") === null, "без @ или без имени — не логин мастерской");
+  check(splitWorkshopLogin("anton.petrov@lenina")?.local === "anton.petrov", "точка до @ разрешена");
+  check(nameProblem("lenina") === null && nameProblem("servis-24") === null, "обычные имена годятся");
+  check(nameProblem("le") !== null && nameProblem("a".repeat(31)) !== null, "слишком короткое и слишком длинное — нет");
+  check(nameProblem("-lenina") !== null && nameProblem("lenina-") !== null, "дефис по краям — нет");
+  check(nameProblem("ленина") !== null && nameProblem("len ina") !== null && nameProblem("len.ina") !== null, "кириллица, пробел и точка — нет");
+  check(nameProblem("admin") !== null && nameProblem("www") !== null && nameProblem("finecrm") !== null, "служебные слова заняты");
+  check(nameProblem("local4") !== null && nameProblem("local") !== null, "прежние приставки не путаются с именами");
+  check(localProblem("nikita") === null && localProblem("") !== null && localProblem("ni kita") !== null, "часть до @ проверяется");
+  check(suggestLocal("nikita@mail.ru", "Никита") === "nikita", "из почты берётся часть до @");
+  check(suggestLocal("ivan.petrov+crm@x.ru", "Иван") === "ivan.petrov", "что после плюса — служебное, отрезается");
+  check(suggestLocal("", "Олег Иванов") === "oleg", "без почты — по имени, латиницей");
+  check(looksLikeMailbox("nikita@mail.ru") && !looksLikeMailbox("master1@proba.local") && !looksLikeMailbox("nikita@lenina"), "почтой для связи становится только настоящая почта");
 
   const entered = await hub.request(CODE, "/api/auth/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: Buffer.from(JSON.stringify({ email: "anton@repair.ru", password: "verniy-parol" }), "utf8"),
+    body: Buffer.from(JSON.stringify({ email: "nikita@lenina", password: "verniy-parol" }), "utf8"),
   });
   check(entered.status === 200, "облако может спросить пароль у мастерской само");
   const given = entered.headers["set-cookie"];
@@ -324,7 +327,7 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   const wrong = await hub.request(CODE, "/api/auth/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: Buffer.from(JSON.stringify({ email: "anton@repair.ru", password: "ne-tot" }), "utf8"),
+    body: Buffer.from(JSON.stringify({ email: "nikita@lenina", password: "ne-tot" }), "utf8"),
   });
   check(wrong.status === 401, "неверный пароль отвергает сама мастерская");
   check(wrong.body.toString().includes("Неверная почта"), "и её словами, а не нашими");

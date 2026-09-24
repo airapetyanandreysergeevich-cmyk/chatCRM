@@ -274,8 +274,8 @@ settingsRouter.get(
       keyHint: saved?.key ? saved.key.slice(-4) : "",
       code: saved?.code ?? "",
       email: saved?.email ?? "",
-      /** Имя мастерской в облаке: по нему входят её сотрудники. */
-      tag: saved?.tag ?? "",
+      /** Имя мастерской: логины сотрудников — имя@мастерская. */
+      name: saved?.name ?? "",
       address: publicAddress(url, saved?.code ?? ""),
       state: agent.state,
       detail: agent.detail ?? null,
@@ -299,12 +299,13 @@ settingsRouter.put(
     const url = invite?.url ?? saved?.url ?? defaultRelayUrl();
     const code = invite?.code || saved?.code || "";
     const email = invite?.email || saved?.email || "";
-    // Имя в облаке приходит во фразе, а у прежних фраз его нет — тогда его
-    // пришлёт узел связи при подключении (см. relay.instance).
-    const tag = invite?.tag || saved?.tag || "";
+    // Имя принадлежит мастерской в облаке, а не фразе: вставили фразу другой
+    // мастерской — прежнее имя больше не наше. Настоящее пришлёт узел связи
+    // при подключении (см. relay.instance).
+    const name = !invite || invite.code === saved?.code ? saved?.name ?? "" : "";
     if (body.enabled && !key) throw badRequest("Вставьте фразу подключения — её выдаёт поставщик программы");
 
-    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email, tag });
+    await saveRemoteAccess({ enabled: body.enabled, url, key, code, email, name });
     const agent = applyRemoteAccess(body.enabled ? { url, key } : null);
 
     await withTenant(tenantOf(req), (tx) =>
@@ -326,7 +327,7 @@ settingsRouter.put(
       keyHint: key.slice(-4),
       code,
       email,
-      tag,
+      name,
       address: publicAddress(url, code),
       state: agent.state,
     });

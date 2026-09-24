@@ -69,9 +69,15 @@ export default function Login() {
           )}
 
           <div className="space-y-4">
-            <Field label="Email" error={error?.field("email")}>
+            {/* Не type="email": логин сотрудника мастерской — nikita@lenina, а в
+                локальной сети и вовсе просто nikita, и браузер отказался бы
+                отправлять форму. Клавиатура на телефоне всё равно с «@». */}
+            <Field label="Логин или email" error={error?.field("email")}>
               <Input
-                type="email"
+                type="text"
+                inputMode="email"
+                autoCorrect="off"
+                spellCheck={false}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="username"

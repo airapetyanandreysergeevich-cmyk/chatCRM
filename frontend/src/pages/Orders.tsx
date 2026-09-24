@@ -28,6 +28,19 @@ import {
   type Order,
 } from "../lib/orders";
 import { STAGES } from "../lib/stages";
+import { listPref } from "../lib/listPrefs";
+import { COLOR_FILTER_VALUES, ColorFilter, SortSelect, type ColorFilterValue } from "../components/ListControls";
+
+const SORTS = [
+  { value: "default", label: "Срочные, потом новые" },
+  { value: "new", label: "Сначала новые" },
+  { value: "old", label: "Сначала старые" },
+  { value: "due", label: "Сначала горящие" },
+  { value: "number", label: "По номеру" },
+  { value: "color", label: "По цвету метки клиента" },
+  { value: "total", label: "По сумме", money: true },
+] as const;
+type Sort = (typeof SORTS)[number]["value"];
 
 /**
  * Фильтры повторяют колонки на главной: человек нажал панель «Ремонт» и
@@ -64,6 +77,22 @@ export default function Orders() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Деньги видит не каждый — и сортировку по ним тоже.
+  const seesMoney = can("orders.cost", "orders.view.all");
+  const sorts = SORTS.filter((s) => !("money" in s) || seesMoney);
+  const [sort, setSort] = listPref<Sort>(params, setParams, {
+    key: "sort",
+    storageKey: "finecrm.orders.sort",
+    fallback: "default",
+    allowed: sorts.map((s) => s.value),
+  });
+  const [color, setColor] = listPref<ColorFilterValue>(params, setParams, {
+    key: "color",
+    storageKey: "finecrm.orders.color",
+    fallback: "",
+    allowed: COLOR_FILTER_VALUES,
+  });
+
   const canCreate = can("orders.create");
   const onlyAssigned = !can("orders.view.all") && can("orders.view.assigned");
 
@@ -84,13 +113,15 @@ export default function Orders() {
       const query: Record<string, string> = { page: String(page) };
       if (group) query.group = group;
       if (search.trim()) query.search = search.trim();
+      if (sort !== "default") query.sort = sort;
+      if (color) query.color = color;
       const data = await ordersApi.list(query);
       setRows(data.rows);
       setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [group, search, page]);
+  }, [group, search, page, sort, color]);
 
   useEffect(() => {
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
@@ -121,8 +152,8 @@ export default function Orders() {
         }
       />
 
-      <Card className="p-3.5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <Card className="space-y-3 p-3.5">
+        <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
           <SearchInput
             placeholder="Номер, техника, неисправность, комментарий или запись в истории ремонта"
             value={search}
@@ -132,6 +163,12 @@ export default function Orders() {
             }}
             className="lg:max-w-[380px]"
           />
+          <div className="flex flex-col gap-2.5 sm:flex-row lg:ml-auto">
+            <SortSelect value={sort} options={sorts} onChange={setSort} />
+            <ColorFilter value={color} onChange={setColor} />
+          </div>
+        </div>
+        <div>
           <div className="flex flex-wrap gap-1.5">
             {FILTERS.map((f) => {
               const active = group === f.value;
@@ -168,16 +205,16 @@ export default function Orders() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<IconOrders />}
-          title={search || group ? "Ничего не нашлось" : "Заказов пока нет"}
+          title={search || group || color ? "Ничего не нашлось" : "Заказов пока нет"}
           action={
-            canCreate && !search && !group ? (
+            canCreate && !search && !group && !color ? (
               <Button icon={<IconPlus />} onClick={() => navigate("/orders/new")}>
                 Принять первую технику
               </Button>
             ) : undefined
           }
         >
-          {search || group
+          {search || group || color
             ? "Попробуйте изменить запрос или снять фильтр."
             : "Заведите первый заказ — заполните бланк приёма, и он появится здесь."}
         </EmptyState>

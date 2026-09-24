@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
@@ -676,14 +676,27 @@ export default function OrderCard() {
                       label: "Имя",
                       // Цветная метка клиента — та же, что в списках: приёмщик
                       // узнаёт человека до того, как назовёт срок и цену.
+                      // Имя — ссылка на карточку клиента: там все его ремонты
+                      // и сколько он заплатил за всё время.
                       value: order.customer.name ? (
-                        <span
-                          className="font-semibold"
-                          style={nameStyle(order.customer.color)}
-                          title={customerColor(order.customer.color)?.label}
-                        >
-                          {order.customer.name}
-                        </span>
+                        can("customers.view") ? (
+                          <Link
+                            to={`/clients/${order.customer.id}`}
+                            className="font-semibold underline decoration-dotted underline-offset-4 hover:decoration-solid"
+                            style={nameStyle(order.customer.color)}
+                            title={`${customerColor(order.customer.color)?.label ?? "Клиент"} — открыть карточку`}
+                          >
+                            {order.customer.name}
+                          </Link>
+                        ) : (
+                          <span
+                            className="font-semibold"
+                            style={nameStyle(order.customer.color)}
+                            title={customerColor(order.customer.color)?.label}
+                          >
+                            {order.customer.name}
+                          </span>
+                        )
                       ) : null,
                     },
                     {

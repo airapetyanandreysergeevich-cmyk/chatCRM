@@ -10,6 +10,7 @@ import Boxes from "./pages/platform/Boxes";
 import FeedbackPage from "./pages/Feedback";
 import PlatformFeedback from "./pages/platform/Feedback";
 import Clients from "./pages/Clients";
+import ClientCard from "./pages/ClientCard";
 import Dashboard from "./pages/Dashboard";
 import DataPage from "./pages/Data";
 import Finance from "./pages/Finance";
@@ -63,6 +64,7 @@ export default function App() {
           <Route path="/orders/new" element={<OrderNew />} />
           <Route path="/orders/:id" element={<OrderCard />} />
           <Route path="/clients" element={<Clients />} />
+          <Route path="/clients/:id" element={<ClientCard />} />
           <Route path="/stock" element={<Stock />} />
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/finance" element={<Finance />} />

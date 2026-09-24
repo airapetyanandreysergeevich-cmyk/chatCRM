@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconAdd, IconClients, IconCompany, IconEdit, IconPerson } from "../components/icons";
 import {
@@ -23,8 +24,11 @@ import { Pager } from "../components/Pager";
 import { formatDateShort, plural } from "../lib/format";
 import { ColorPicker } from "../components/ColorPicker";
 import { customerColor, nameStyle } from "../lib/customerColor";
+import { useAuth } from "../lib/auth";
+import { listPref } from "../lib/listPrefs";
+import { COLOR_FILTER_VALUES, ColorFilter, SortSelect, type ColorFilterValue } from "../components/ListControls";
 
-interface Client {
+export interface Client {
   id: string;
   /** Короткий номер внутри мастерской — по нему клиента удобно продиктовать. */
   number: number;
@@ -71,10 +75,47 @@ const formOf = (c: Client): Form => ({
   discountPercent: String(c.discountPercent ?? 0),
 });
 
+const SORTS = [
+  { value: "new", label: "Сначала новые" },
+  { value: "old", label: "Сначала старые" },
+  { value: "name", label: "По имени, А–Я" },
+  { value: "color", label: "По цвету метки" },
+  { value: "orders", label: "По числу заказов" },
+  { value: "paid", label: "По сумме оплат", money: true },
+  { value: "visit", label: "По последнему визиту" },
+] as const;
+type Sort = (typeof SORTS)[number]["value"];
+
 export default function Clients() {
+  const { can } = useAuth();
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Client[] | null>(null);
   const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
-  const [page, setPage] = useState(1);
+  // Страница, порядок и метка живут в адресе: из карточки клиента «назад»
+  // возвращает туда же, откуда ушли, а не на первую страницу.
+  const [params, setParams] = useSearchParams();
+  const page = Math.max(1, Number(params.get("page") ?? 1) || 1);
+  const setPage = (next: number) => {
+    const p = new URLSearchParams(params);
+    if (next > 1) p.set("page", String(next));
+    else p.delete("page");
+    setParams(p, { replace: true });
+  };
+  // Деньги видит не каждый — и сортировку по ним тоже.
+  const seesMoney = can("orders.cost", "orders.view.all");
+  const sorts = SORTS.filter((s) => !("money" in s) || seesMoney);
+  const [sort, setSort] = listPref<Sort>(params, setParams, {
+    key: "sort",
+    storageKey: "finecrm.clients.sort",
+    fallback: "new",
+    allowed: sorts.map((s) => s.value),
+  });
+  const [color, setColor] = listPref<ColorFilterValue>(params, setParams, {
+    key: "color",
+    storageKey: "finecrm.clients.color",
+    fallback: "",
+    allowed: COLOR_FILTER_VALUES,
+  });
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   /** null — окно закрыто, "new" — создание, объект — правка. */
@@ -84,18 +125,22 @@ export default function Clients() {
     try {
       const p = new URLSearchParams({ page: String(page) });
       if (search.trim()) p.set("search", search.trim());
+      if (sort !== "new") p.set("sort", sort);
+      if (color) p.set("color", color);
       const data = await api.get<Page<Client>>(`/customers?${p.toString()}`);
       setRows(data.rows);
       setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить клиентов");
     }
-  }, [search, page]);
+  }, [search, page, sort, color]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
     return () => clearTimeout(t);
   }, [load, search]);
+
+  const open = (c: Client) => navigate(`/clients/${c.id}`);
 
   if (error) return <Banner tone="error">{error}</Banner>;
 
@@ -119,32 +164,50 @@ export default function Clients() {
       />
 
       <Card className="p-3.5">
-        <SearchInput
-          placeholder="Имя, телефон, email или номер"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            // Новый поиск — снова первая страница: иначе человек ищет и
-            // попадает на седьмую страницу того, чего нашлось три строки.
-            setPage(1);
-          }}
-          className="sm:max-w-[380px]"
-        />
+        <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
+          <SearchInput
+            placeholder="Имя, телефон, email или номер"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              // Новый поиск — снова первая страница: иначе человек ищет и
+              // попадает на седьмую страницу того, чего нашлось три строки.
+              if (page > 1) setPage(1);
+            }}
+            className="lg:max-w-[380px]"
+          />
+          <div className="flex flex-col gap-2.5 sm:flex-row lg:ml-auto">
+            <SortSelect value={sort} options={sorts} onChange={setSort} />
+            <ColorFilter value={color} onChange={setColor} />
+          </div>
+        </div>
       </Card>
 
       {!rows ? (
         <Spinner />
       ) : rows.length === 0 ? (
-        <EmptyState icon={<IconClients />} title={search ? "Никого не нашлось" : "Клиентов пока нет"}>
-          {search
-            ? "Попробуйте другой номер или часть имени."
+        <EmptyState icon={<IconClients />} title={search || color ? "Никого не нашлось" : "Клиентов пока нет"}>
+          {search || color
+            ? "Попробуйте другой номер или часть имени, или снимите отбор по метке."
             : "Первый клиент появится здесь сразу после того, как приёмщик заведёт заказ."}
         </EmptyState>
       ) : (
         <List>
           {rows.map((c) => (
-            <ListRow
+            // Строка целиком ведёт в карточку клиента. Не ссылкой, а по
+            // нажатию: внутри уже есть ссылка «позвонить», а ссылка в
+            // ссылке браузер разбирает как попало.
+            <div
               key={c.id}
+              role="link"
+              tabIndex={0}
+              onClick={() => open(c)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") open(c);
+              }}
+              className="block cursor-pointer outline-none focus-visible:bg-surface-raised"
+            >
+            <ListRow
               glyph={
                 // Цвета значков теперь заняты стадиями заказа: покрасить
                 // организацию в цвет «Диагностики» значило бы соврать. Тип
@@ -219,7 +282,10 @@ export default function Clients() {
                   <Button
                     variant="secondary"
                     className="min-h-[36px] w-[36px] px-0"
-                    onClick={() => setEditing(c)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditing(c);
+                    }}
                     title="Редактировать клиента"
                     aria-label={`Редактировать ${c.name}`}
                     icon={<IconEdit />}
@@ -227,6 +293,7 @@ export default function Clients() {
                 </div>
               }
             />
+            </div>
           ))}
         </List>
       )}
@@ -255,7 +322,7 @@ export default function Clients() {
   );
 }
 
-function ClientModal({
+export function ClientModal({
   client,
   onClose,
   onDone,

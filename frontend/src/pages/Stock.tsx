@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { listPref } from "../lib/listPrefs";
+import { SortSelect } from "../components/ListControls";
 import { useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { IconDownload, IconPlus, IconStock, IconUpload } from "../components/icons";
@@ -41,6 +43,16 @@ const FILTERS = [
   { value: "zero", label: "Закончились" },
 ] as const;
 
+const SORTS = [
+  { value: "name", label: "По названию" },
+  { value: "low", label: "Сначала заканчивающиеся" },
+  { value: "qty", label: "Больше всего на складе" },
+  { value: "category", label: "По категории" },
+  { value: "sku", label: "По артикулу" },
+  { value: "recent", label: "Недавно менявшиеся" },
+] as const;
+type Sort = (typeof SORTS)[number]["value"];
+
 export default function Stock() {
   const { can } = useAuth();
   const [params, setParams] = useSearchParams();
@@ -52,6 +64,12 @@ export default function Stock() {
   const [history, setHistory] = useState<StockItem | null>(null);
 
   const filter = params.get("filter") ?? "all";
+  const [sort, setSort] = listPref<Sort>(params, setParams, {
+    key: "sort",
+    storageKey: "finecrm.stock.sort",
+    fallback: "name",
+    allowed: SORTS.map((s) => s.value),
+  });
   const canMove = can("stock.move");
   const canCount = can("stock.inventory");
   const seesCost = can("orders.cost", "finance.view", "stock.move");
@@ -77,11 +95,11 @@ export default function Stock() {
 
   const load = useCallback(async () => {
     try {
-      setData(await stockApi.list({ search: search.trim(), filter, page }));
+      setData(await stockApi.list({ search: search.trim(), filter, page, ...(sort !== "name" ? { sort } : {}) }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить склад");
     }
-  }, [search, filter, page]);
+  }, [search, filter, page, sort]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
@@ -116,6 +134,9 @@ export default function Stock() {
           }}
             className="lg:max-w-[380px]"
           />
+          <div className="flex flex-wrap gap-1.5 lg:order-last lg:ml-auto">
+            <SortSelect value={sort} options={SORTS} onChange={setSort} />
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {FILTERS.map((f) => (
               <button

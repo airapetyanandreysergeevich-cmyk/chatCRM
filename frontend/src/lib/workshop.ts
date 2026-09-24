@@ -166,7 +166,7 @@ export const summaryApi = {
 };
 
 export const stockApi = {
-  list: (params: { search?: string; filter?: string; page?: number } = {}) =>
+  list: (params: { search?: string; filter?: string; sort?: string; page?: number } = {}) =>
     api.get<StockList>(`/stock${qs(params)}`),
   warehouses: () => api.get<Array<{ id: string; name: string; isDefault: boolean }>>("/stock/warehouses"),
   createItem: (body: { sku?: string; name: string; unit?: string; category?: string; minQty?: number }) =>

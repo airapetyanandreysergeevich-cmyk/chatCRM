@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
@@ -11,6 +11,8 @@ import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermi
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { isEmailTaken, revokeAllForUser } from "../auth/auth.service";
 import { listMasters } from "./masters";
+import { localProblem } from "../../lib/login";
+import { localLoginDomain } from "../relay/remoteAccess";
 
 export const staffRouter = Router();
 staffRouter.use(authenticate, requireTenant, enforceTenantStatus);
@@ -86,6 +88,7 @@ staffRouter.get(
           fullName: u.fullName,
           phone: u.phone,
           email: u.email,
+          contactEmail: u.contactEmail,
           isOwner: u.isOwner,
           isActive: u.isActive,
           lastLoginAt: u.lastLoginAt,
@@ -113,10 +116,42 @@ staffRouter.get(
   })
 );
 
+/**
+ * Логин сотрудника.
+ *
+ * У мастерской с именем (lenina) логины одного вида — nikita@lenina, и
+ * владелец вводит только часть до @: окончание дописывается здесь. Чужое
+ * окончание не принимаем — такой логин не заработал бы на общем сайте, и
+ * узнали бы об этом не здесь, а у стойки в понедельник утром.
+ * У мастерской без имени логин — почта, как раньше.
+ */
+async function resolveLogin(raw: string): Promise<string> {
+  const login = raw.trim().toLowerCase();
+  const fail = (message: string): never => {
+    throw new ZodError([{ code: "custom", path: ["email"], message }]);
+  };
+  const domain = await localLoginDomain();
+  if (domain) {
+    const local = login.includes("@") ? login.slice(0, login.lastIndexOf("@")) : login;
+    const tail = login.includes("@") ? login.slice(login.lastIndexOf("@") + 1) : domain;
+    if (tail !== domain) fail(`Логин в этой мастерской оканчивается на @${domain}`);
+    const bad = localProblem(local);
+    if (bad) fail(bad);
+    return `${local}@${domain}`;
+  }
+  // Без имени логин — только настоящая почта. Логин вида nikita@lenina здесь
+  // не годится: в облаке такой вход ушёл бы искать мастерскую lenina.
+  if (!z.string().email().safeParse(login).success) fail("Похоже, это не email");
+  return login;
+}
+
+const contactEmailField = z.string().trim().toLowerCase().email("Похоже, это не email").optional().or(z.literal(""));
+
 const createStaffSchema = z.object({
-  // Вход в систему по email, поэтому он обязателен и уникален по всей платформе.
-  // Нет почты — подойдёт адрес вида master1@<код мастерской>.local.
-  email: z.string().trim().toLowerCase().email("Похоже, это не email"),
+  // Вход общий по всей платформе, поэтому логин обязателен и уникален везде.
+  // У мастерской с именем — nikita@lenina (см. resolveLogin), без имени — почта.
+  email: z.string().trim().toLowerCase().min(1, "Укажите логин"),
+  contactEmail: contactEmailField,
   password: z.string().min(8, "Пароль от 8 символов"),
   fullName: z.string().trim().min(2, "Укажите имя"),
   phone: z.string().trim().optional(),
@@ -130,14 +165,15 @@ staffRouter.post(
   "/staff",
   requirePermission(PERMISSIONS.STAFF_MANAGE),
   ah(async (req, res) => {
-    const body = createStaffSchema.parse(req.body);
+    const parsed = createStaffSchema.parse(req.body);
+    const body = { ...parsed, email: await resolveLogin(parsed.email) };
     const tenantId = tenantOf(req);
 
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) throw notFound("Мастерская не найдена");
 
     // Проверка общая по всей платформе: вход единый, и один адрес не может вести в две учётки.
-    if (await isEmailTaken(body.email)) throw conflict("Этот email уже используется");
+    if (await isEmailTaken(body.email)) throw conflict("Этот логин уже занят");
 
     const created = await withTenant(tenantId, async (tx) => {
       const count = await tx.user.count({ where: { deletedAt: null } });
@@ -152,6 +188,7 @@ staffRouter.post(
         data: {
           tenantId,
           email: body.email,
+          contactEmail: body.contactEmail || null,
           passwordHash: await hashPassword(body.password),
           fullName: body.fullName,
           phone: body.phone || null,
@@ -180,7 +217,8 @@ staffRouter.post(
 const updateStaffSchema = z.object({
   fullName: z.string().trim().min(2).optional(),
   phone: z.string().trim().optional(),
-  email: z.string().trim().toLowerCase().email("Похоже, это не email").optional(),
+  email: z.string().trim().toLowerCase().min(1, "Укажите логин").optional(),
+  contactEmail: contactEmailField,
   roleId: z.string().uuid().optional(),
   roleIds: roleIdsField.optional(),
   isActive: z.boolean().optional(),
@@ -192,11 +230,12 @@ staffRouter.patch(
   "/staff/:id",
   requirePermission(PERMISSIONS.STAFF_MANAGE),
   ah(async (req, res) => {
-    const body = updateStaffSchema.parse(req.body);
+    const parsed = updateStaffSchema.parse(req.body);
+    const body = { ...parsed, ...(parsed.email ? { email: await resolveLogin(parsed.email) } : {}) };
     const tenantId = tenantOf(req);
 
     if (body.email && (await isEmailTaken(body.email, req.params.id)))
-      throw conflict("Этот email уже используется");
+      throw conflict("Этот логин уже занят");
 
     const updated = await withTenant(tenantId, async (tx) => {
       const user = await tx.user.findFirst({ where: { id: req.params.id, deletedAt: null } });
@@ -212,6 +251,7 @@ staffRouter.patch(
         data: {
           ...fields,
           ...(fields.phone !== undefined ? { phone: fields.phone || null } : {}),
+          ...(fields.contactEmail !== undefined ? { contactEmail: fields.contactEmail || null } : {}),
           ...(roles ? { roleId: roles.roleId, extraRoleIds: roles.extraRoleIds } : {}),
         },
       });

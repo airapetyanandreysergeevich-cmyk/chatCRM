@@ -33,8 +33,10 @@ import { formatDateTime } from "../../lib/format";
 interface Box {
   id: string;
   code: string;
-  /** Имя мастерской в облаке: по нему входят её сотрудники (почта.local20). */
-  tag: string;
+  /** Имя, которое выбрал владелец: логины сотрудников — nikita@<имя>. Пусто — не выбрано. */
+  name: string | null;
+  /** Прежнее имя, пока оно ещё держится за мастерской после смены. */
+  previousName: string | null;
   /** Почта того, кто запросил доступ: она же имя мастерской в списке. */
   email: string;
   keyHint: string;
@@ -47,10 +49,9 @@ interface Box {
 
 const addressOf = (code: string) => `${window.location.origin}/b/${code}/`;
 
-/** Что выдаётся мастерской одним разом: фраза, адрес и имя в облаке. */
+/** Что выдаётся мастерской одним разом: фраза и адрес. */
 interface Issued {
   code: string;
-  tag: string;
   email: string;
   phrase: string;
   address: string;
@@ -63,6 +64,7 @@ export default function Boxes() {
   const [issued, setIssued] = useState<Issued | null>(null);
   const [confirmKey, setConfirmKey] = useState<Box | null>(null);
   const [confirmDrop, setConfirmDrop] = useState<Box | null>(null);
+  const [confirmFree, setConfirmFree] = useState<Box | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -92,12 +94,19 @@ export default function Boxes() {
     await load();
   }
 
+  /** Имя освобождается, Основа переподключится и предложит владельцу выбрать новое. */
+  async function freeName(box: Box) {
+    await api.patch(`/platform/boxes/${box.id}`, { name: null });
+    setConfirmFree(null);
+    await load();
+  }
+
   /**
    * Удалить доступ совсем.
    *
    * Выключатель рядом — это пауза: мастерская отвалилась, но запись осталась,
    * и включить обратно можно одним нажатием. Удаление — насовсем: освобождает
-   * и код, и имя в облаке, а мастерской придётся выдавать доступ заново.
+   * и код, и имя мастерской, а ей придётся выдавать доступ заново.
    */
   async function drop(box: Box) {
     await api.del(`/platform/boxes/${box.id}`);
@@ -156,7 +165,15 @@ export default function Boxes() {
                   >
                     /b/{b.code}/
                   </a>
-                  <span className="text-ink-dim"> · имя в облаке {b.tag}</span>
+                  {b.name ? (
+                    <span className="text-ink-dim">
+                      {" · логины "}
+                      <span className="font-mono font-semibold text-ink-soft">@{b.name}</span>
+                      {b.previousName && ` (прежнее @${b.previousName})`}
+                    </span>
+                  ) : (
+                    <span className="text-ink-dim"> · имя не выбрано</span>
+                  )}
                   <span className="text-ink-dim"> · ключ …{b.keyHint}</span>
                   {b.note && <span className="text-ink-dim"> · {b.note}</span>}
                 </>
@@ -182,6 +199,15 @@ export default function Boxes() {
                   >
                     {b.isActive ? "Выключить" : "Включить"}
                   </Button>
+                  {b.name && (
+                    <Button
+                      variant="secondary"
+                      className="min-h-[34px] px-3 text-[13px]"
+                      onClick={() => setConfirmFree(b)}
+                    >
+                      Освободить имя
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     className="min-h-[34px] px-3 text-[13px]"
@@ -226,11 +252,31 @@ export default function Boxes() {
         </Modal>
       )}
 
+      {confirmFree && (
+        <Modal title={`Освободить имя @${confirmFree.name}?`} onClose={() => setConfirmFree(null)}>
+          <div className="space-y-4">
+            <Banner tone="warning">
+              Сотрудники мастерской {confirmFree.email} перестанут входить с общего сайта логинами
+              вида имя@{confirmFree.name}, а само имя сможет занять другая мастерская. В локальной сети
+              всё продолжит работать. Владелец сможет выбрать имя заново у себя в программе.
+            </Banner>
+            <div className="flex flex-col gap-2 sm:flex-row-reverse">
+              <Button variant="danger" onClick={() => void freeName(confirmFree)} className="sm:flex-1">
+                Освободить
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmFree(null)} className="sm:flex-1">
+                Отмена
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {confirmDrop && (
         <Modal title={`Удалить доступ для ${confirmDrop.email}?`} onClose={() => setConfirmDrop(null)}>
           <div className="space-y-4">
             <Banner tone="warning">
-              Мастерская отключится сразу, её адрес и имя в облаке освободятся, а сотрудники перестанут
+              Мастерская отключится сразу, её адрес и имя освободятся, а сотрудники перестанут
               входить с общего сайта. Заказы и база при этом останутся на компьютере мастерской —
               программа продолжит работать по локальной сети.
             </Banner>
@@ -369,14 +415,10 @@ function PhraseModal({
           <div className={box}>{issued.address}</div>
         </div>
 
-        {/* Имя в облаке владелец увидит и у себя, в «Доступе из интернета», —
-            но пусть будет и здесь: с ним сразу понятно, как войдут его люди. */}
-        <div>
-          <span className="text-[13px] font-semibold text-ink-soft">Имя мастерской в облаке</span>
-          <div className={box}>
-            {issued.tag} — сотрудники входят на общем сайте как anton@repair.ru.{issued.tag}
-          </div>
-        </div>
+        <p className="text-[12.5px] leading-relaxed text-ink-dim">
+          Имя мастерской для логинов сотрудников владелец выберет сам — в программе, в «Доступе из
+          интернета», сразу после того как вставит фразу.
+        </p>
 
         {copied && <p className="text-center text-[13px] text-state-done">Скопировано: {copied}</p>}
 

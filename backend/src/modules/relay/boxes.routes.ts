@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { encodeInvite, publicAddress } from "./invite";
-import { fingerprint, freeCode, newKey, nextTag, normalizeCode } from "./boxes.service";
+import { fingerprint, freeCode, newKey, normalizeCode } from "./boxes.service";
 import { relayHub } from "./relay.instance";
 
 /**
@@ -48,7 +48,9 @@ const view = (
   box: {
     id: string;
     code: string;
-    tag: string;
+    name: string | null;
+    previousName: string | null;
+    previousNameUntil: Date | null;
     email: string;
     keyHint: string;
     note: string | null;
@@ -70,7 +72,10 @@ boxesRouter.get(
           {
             id: b.id,
             code: b.code,
-            tag: b.tag,
+            name: b.name,
+            // Прежнее имя показываем, пока оно держится за мастерской.
+            previousName: b.previousNameUntil && b.previousNameUntil > new Date() ? b.previousName : null,
+            previousNameUntil: b.previousNameUntil && b.previousNameUntil > new Date() ? b.previousNameUntil : null,
             email: b.email,
             keyHint: b.keyHint,
             note: b.note,
@@ -102,7 +107,6 @@ boxesRouter.post(
     const box = await prisma.box.create({
       data: {
         code,
-        tag: await nextTag(),
         email: body.email,
         note: body.note || null,
         keyHash: fingerprint(key),
@@ -114,9 +118,9 @@ boxesRouter.post(
     res.status(201).json({
       id: box.id,
       code: box.code,
-      tag: box.tag,
+      name: box.name,
       email: box.email,
-      phrase: encodeInvite({ url, key, code: box.code, email: box.email, tag: box.tag }),
+      phrase: encodeInvite({ url, key, code: box.code, email: box.email }),
       address: publicAddress(url, box.code),
     });
   })
@@ -137,9 +141,9 @@ boxesRouter.post(
     const url = relayUrlFor(req);
     res.json({
       code: box.code,
-      tag: box.tag,
+      name: box.name,
       email: box.email,
-      phrase: encodeInvite({ url, key, code: box.code, email: box.email, tag: box.tag }),
+      phrase: encodeInvite({ url, key, code: box.code, email: box.email }),
       address: publicAddress(url, box.code),
     });
   })
@@ -148,7 +152,15 @@ boxesRouter.post(
 boxesRouter.patch(
   "/:id",
   ah(async (req, res) => {
-    const body = boxSchema.partial().extend({ isActive: z.boolean().optional() }).parse(req.body);
+    const body = boxSchema
+      .partial()
+      .extend({
+        isActive: z.boolean().optional(),
+        // Освободить имя: мастерская закрылась или имя заняли по ошибке.
+        // Задать чужое имя отсюда нельзя — его выбирает владелец мастерской.
+        name: z.null().optional(),
+      })
+      .parse(req.body);
     const box = await prisma.box.findUnique({ where: { id: req.params.id } });
     if (!box) throw notFound("Мастерская не найдена");
 
@@ -163,13 +175,18 @@ boxesRouter.patch(
         ...(code ? { code } : {}),
         ...(body.note !== undefined ? { note: body.note || null } : {}),
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        ...(body.name === null ? { name: null, previousName: null, previousNameUntil: null } : {}),
       },
     });
     // Выключили или переименовали код — прежнее соединение больше не годится.
     if (body.isActive === false || (code && code !== box.code)) {
       relayHub()?.disconnect(box.code, body.isActive === false ? "доступ выключен" : "код изменён");
+    } else if (body.name === null && box.name) {
+      // Переподключившись, Основа узнает, что имени больше нет, и покажет
+      // владельцу предложение выбрать новое.
+      relayHub()?.disconnect(box.code, "имя освобождено");
     }
-    res.json({ id: next.id, code: next.code, isActive: next.isActive });
+    res.json({ id: next.id, code: next.code, name: next.name, isActive: next.isActive });
   })
 );
 
