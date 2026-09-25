@@ -22,7 +22,7 @@ import { localLoginDomain } from "../relay/remoteAccess";
 import { applyRows } from "./apply";
 import { DATASETS, DATASET_KEYS, isDatasetKey, type DatasetKey } from "./dataset";
 import { buildSheets } from "./export";
-import { sortDatasets, wipeBlocker, wipeDatasets, wipeFiles } from "./wipe";
+import { cashWipeImpact, sortDatasets, wipeBlocker, wipeDatasets, wipeFiles } from "./wipe";
 import { MAX_IMPORT_ROWS, parseRows, type ImportPreview, type ParsedRow } from "./import";
 import { contentDisposition, formatDate, readTable, writeCsv, writeHtml, writeXlsx } from "./tableFile";
 
@@ -104,15 +104,34 @@ dataRouter.get(
     // «сотрём Заказы» — это обещание неизвестно чего, а «сотрём 4039
     // заказов» — то, на что человек действительно отвечает «да».
     const counts = await withTenant(tenantOf(req), async (tx) => {
-      const [staff, orders, customers, stock, services] = await Promise.all([
+      const [staff, orders, customers, stock, services, cash] = await Promise.all([
         tx.user.count({ where: { deletedAt: null } }),
         tx.order.count({ where: { deletedAt: null } }),
         tx.customer.count({ where: { deletedAt: null } }),
         tx.stockItem.count(),
         tx.service.count(),
+        tx.transaction.count({ where: { deletedAt: null } }),
       ]);
-      return { staff, orders, customers, stock, services } as Record<DatasetKey, number>;
+      return { staff, orders, customers, stock, services, cash } as Record<DatasetKey, number>;
     });
+
+    // Кассы — для выбора в окне стирания. Все, включая выключенные: именно
+    // выключенную «Старую программу» и захотят стереть после неудачного
+    // переноса. Только тем, кому касса видна вообще.
+    const cashRegisters = mayUse(req, "cash")
+      ? await withTenant(tenantOf(req), async (tx) => {
+          const [registers, sums] = await Promise.all([
+            tx.cashRegister.findMany({ orderBy: [{ isActive: "desc" }, { name: "asc" }] }),
+            tx.transaction.groupBy({ by: ["cashRegisterId"], where: { deletedAt: null }, _count: { _all: true } }),
+          ]);
+          return registers.map((r) => ({
+            id: r.id,
+            name: r.name,
+            isActive: r.isActive,
+            count: sums.find((x) => x.cashRegisterId === r.id)?._count._all ?? 0,
+          }));
+        })
+      : [];
 
     res.json({
       // Раздел, на который нет права, не показываем вовсе: кнопка, которая
@@ -124,6 +143,7 @@ dataRouter.get(
         matchBy: DATASETS[key].matchBy,
         count: counts[key] ?? 0,
         canWipe: !DATASETS[key].noWipe,
+        canImport: !DATASETS[key].exportOnly,
         columns: DATASETS[key].columns.map((c) => ({
           title: c.title,
           required: !!c.required,
@@ -138,6 +158,7 @@ dataRouter.get(
         { key: "html", title: "HTML для печати", canImport: false },
       ],
       maxImportRows: MAX_IMPORT_ROWS,
+      cashRegisters,
     });
   })
 );
@@ -239,15 +260,34 @@ function requireOwner(req: Request, _res: Response, next: NextFunction) {
 const wipeSchema = z.object({
   datasets: z.array(z.string()).min(1),
   confirm: z.string(),
+  /** Только эти кассы — для раздела «Касса». Пусто — все. */
+  registers: z.array(z.string().uuid()).max(50).optional(),
 });
+
+/**
+ * Что будет с долгами, если стереть кассу, — для окна стирания, до нажатия.
+ */
+dataRouter.get(
+  "/wipe/cash-impact",
+  requireOwner,
+  ah(async (req, res) => {
+    assertMayUse(req, ["cash"]);
+    const registers = String(req.query.registers ?? "")
+      .split(",")
+      .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+    const tenantId = tenantOf(req);
+    res.json(await withTenant(tenantId, (tx) => cashWipeImpact(tx, tenantId, registers)));
+  })
+);
 
 dataRouter.delete(
   "/",
   requireOwner,
   ah(async (req, res) => {
-    const { datasets, confirm } = wipeSchema.parse(req.body);
+    const { datasets, confirm, registers } = wipeSchema.parse(req.body);
     const keys = datasets.filter(isDatasetKey);
     if (keys.length === 0) throw badRequest("Не выбрано, что стирать");
+    assertMayUse(req, keys);
     const locked = keys.filter((k) => DATASETS[k].noWipe);
     if (locked.length) {
       throw badRequest(
@@ -285,10 +325,17 @@ dataRouter.delete(
       }
     }
 
+    // Кассы проверяем на своей мастерской: чужой id просто ничего бы не
+    // стёр, но и молча «стереть ничего» на просьбу человека — неправда.
+    if (ordered.includes("cash") && registers?.length) {
+      const found = await withTenant(tenantId, (tx) => tx.cashRegister.count({ where: { id: { in: registers } } }));
+      if (found !== new Set(registers).size) throw badRequest("Касса не найдена — обновите страницу");
+    }
+
     const wiped = await withTenant(
       tenantId,
       async (tx) => {
-        const out = await wipeDatasets(tx, ordered);
+        const out = await wipeDatasets(tx, ordered, { registers: ordered.includes("cash") ? registers : undefined });
         out.files = files;
         // Журнал пишем в той же транзакции: откатится стирание — уйдёт и
         // запись о нём, и в журнале не останется следа от того, чего не было.
@@ -298,7 +345,7 @@ dataRouter.delete(
           entity: "Data",
           entityId: ordered.join(","),
           action: "DELETE",
-          diff: { datasets: ordered, rows: out.rows, files: out.files },
+          diff: { datasets: ordered, rows: out.rows, files: out.files, ...(registers?.length ? { registers } : {}) },
           ip: clientIp(req),
         });
         return out;
@@ -327,6 +374,7 @@ dataRouter.post(
     const dataset = String(req.body?.dataset ?? "");
     if (!isDatasetKey(dataset)) throw badRequest("Не указано, что загружаем");
     assertMayUse(req, [dataset]);
+    if (DATASETS[dataset].exportOnly) throw badRequest(`«${DATASETS[dataset].title}» можно только выгрузить`);
 
     const file = req.file;
     if (!file) throw badRequest("Файл не приложен");

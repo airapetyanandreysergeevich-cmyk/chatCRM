@@ -11,10 +11,12 @@ import type { DatasetKey } from "./dataset";
  *
  * Что именно происходит с чужими ссылками, решено здесь раз и навсегда:
  *
- *  — Деньги не трогаем. Кассовая операция теряет ссылку на удалённый заказ,
- *    но остаётся в кассе. Удалить её вместе с заказом значило бы молча
- *    изменить остаток кассы — сумму, которую мастерская сверяет с наличными
- *    в ящике. Данные можно стирать по просьбе владельца, деньги — нет.
+ *  — Деньги вместе с заказами не трогаем. Кассовая операция теряет ссылку на
+ *    удалённый заказ, но остаётся в кассе. Удалить её заодно с заказом
+ *    значило бы молча изменить остаток кассы — сумму, которую мастерская
+ *    сверяет с наличными в ящике. Стереть деньги можно только отдельным
+ *    разделом «Касса», выбрав его явно (и, по желанию, только некоторые
+ *    кассы) — тогда это решение владельца, а не побочный эффект.
  *
  *  — Заявки на закупку и движения склада тоже остаются, теряя привязку к
  *    заказу. Это их собственная история, а не история заказа.
@@ -47,7 +49,7 @@ const add = (into: Wiped, table: string, count: number) => {
  * жив хоть один её заказ, база не даст. Когда выбрано и то и другое,
  * очерёдность решаем здесь, а не оставляем на порядок галочек на экране.
  */
-const WIPE_ORDER: DatasetKey[] = ["orders", "customers", "stock", "services"];
+const WIPE_ORDER: DatasetKey[] = ["cash", "orders", "customers", "stock", "services"];
 
 export const sortDatasets = (keys: DatasetKey[]): DatasetKey[] =>
   WIPE_ORDER.filter((k) => keys.includes(k));
@@ -129,13 +131,79 @@ async function wipeServices(tx: Prisma.TransactionClient, out: Wiped): Promise<v
   add(out, "service", (await tx.service.deleteMany({})).count);
 }
 
+/**
+ * Касса: только движения денег. Сами кассы и статьи — это настройки
+ * мастерской, как склады при стирании склада, и остаются на месте.
+ */
+async function wipeCash(tx: Prisma.TransactionClient, out: Wiped, registers?: string[]): Promise<void> {
+  add(
+    out,
+    "transaction",
+    (await tx.transaction.deleteMany({ where: registers?.length ? { cashRegisterId: { in: registers } } : {} })).count
+  );
+}
+
+export interface CashImpact {
+  /** Сколько движений денег уйдёт. */
+  transactions: number;
+  /** Сколько выданных заказов станут долгами (или долг у них вырастет). */
+  orders: number;
+  /** На сколько вырастут долги в сумме. */
+  sum: number;
+}
+
+/**
+ * Что станет с долгами, если стереть движения выбранных касс.
+ *
+ * Долг — это итог заказа минус платежи по нему. Платежи уйдут, заказы
+ * останутся — и выданный оплаченный заказ станет долгом. Считаем заранее,
+ * чтобы окно стирания сказало это числом, а не человек узнал из сводки.
+ */
+export async function cashWipeImpact(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  registers?: string[]
+): Promise<CashImpact> {
+  const all = !registers?.length;
+  const picked = registers?.length ? registers : [""];
+  const [row] = await tx.$queryRaw<Array<{ transactions: bigint; orders: bigint; sum: string | null }>>`
+    WITH t AS (
+      SELECT "orderId", "cashRegisterId",
+             CASE WHEN direction = 'IN' THEN amount ELSE -amount END AS signed
+        FROM "Transaction"
+       WHERE "tenantId" = ${tenantId} AND "deletedAt" IS NULL
+    ),
+    paid AS (
+      SELECT "orderId",
+             SUM(signed) AS paid,
+             SUM(CASE WHEN ${all} OR "cashRegisterId" = ANY(${picked}::text[]) THEN signed ELSE 0 END) AS removed
+        FROM t WHERE "orderId" IS NOT NULL GROUP BY "orderId"
+    ),
+    hit AS (
+      SELECT GREATEST(o.total - (p.paid - p.removed), 0) - GREATEST(o.total - p.paid, 0) AS grow
+        FROM "Order" o JOIN paid p ON p."orderId" = o.id
+       WHERE o."tenantId" = ${tenantId} AND o."deletedAt" IS NULL AND o."issuedAt" IS NOT NULL
+    )
+    SELECT (SELECT COUNT(*) FROM t WHERE ${all} OR "cashRegisterId" = ANY(${picked}::text[])) AS transactions,
+           (SELECT COUNT(*) FROM hit WHERE grow > 0.004) AS orders,
+           (SELECT COALESCE(SUM(grow), 0) FROM hit WHERE grow > 0.004)::text AS sum
+  `;
+  return {
+    transactions: Number(row?.transactions ?? 0),
+    orders: Number(row?.orders ?? 0),
+    sum: Math.round(Number(row?.sum ?? 0)),
+  };
+}
+
 export async function wipeDatasets(
   tx: Prisma.TransactionClient,
-  keys: DatasetKey[]
+  keys: DatasetKey[],
+  opts: { registers?: string[] } = {}
 ): Promise<Wiped> {
   const out: Wiped = { rows: {}, files: 0 };
 
   for (const key of sortDatasets(keys)) {
+    if (key === "cash") await wipeCash(tx, out, opts.registers);
     if (key === "orders") await wipeOrders(tx, out);
     if (key === "customers") await wipeCustomers(tx, out);
     if (key === "stock") await wipeStock(tx, out);

@@ -8,7 +8,7 @@
 
 import { PERMISSIONS } from "../../lib/permissions";
 
-export type DatasetKey = "staff" | "customers" | "orders" | "stock" | "services";
+export type DatasetKey = "staff" | "customers" | "orders" | "stock" | "services" | "cash";
 
 export interface ColumnDef {
   /** Заголовок в файле. По нему же колонка узнаётся при загрузке. */
@@ -242,6 +242,36 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
       { title: "Цена, ₽", aliases: ["Цена", "Стоимость", "Прайс", "Сумма"], width: 13, kind: "number" },
       { title: "Примечание", aliases: ["Описание", "Комментарий", "Что входит"], width: 40 },
       { title: "В карточке заказа", aliases: ["Закреплена", "Избранная"], width: 18 },
+    ],
+  },
+
+  /**
+   * Касса: движения денег по всем кассам, включая выключенные — например,
+   * «Старая программа» после переноса. Только выгрузка: заливать чужие
+   * движения денег в свою кассу из файла опаснее, чем полезно.
+   *
+   * Стирается — по просьбе владельца и с его выбором касс. Стереть кассу и
+   * оставить заказы значит превратить выданные заказы в долги: долг — это
+   * итог минус платежи. Окно стирания говорит об этом заранее, с числом.
+   */
+  cash: {
+    key: "cash",
+    title: "Касса",
+    sheet: "Касса",
+    hint: "Движения денег по всем кассам: приход и расход, статья, заказ, клиент. Только выгрузка.",
+    matchBy: "Дата",
+    exportOnly: true,
+    permission: PERMISSIONS.FINANCE_VIEW,
+    columns: [
+      { title: "Дата", width: 18, kind: "date", readOnly: true },
+      { title: "Касса", width: 20, readOnly: true },
+      { title: "Движение", width: 11, readOnly: true },
+      { title: "Сумма, ₽", width: 13, kind: "number", readOnly: true },
+      { title: "Статья", width: 24, readOnly: true },
+      { title: "Заказ", width: 14, readOnly: true },
+      { title: "Клиент", width: 26, readOnly: true },
+      { title: "Кто провёл", width: 22, readOnly: true },
+      { title: "Комментарий", width: 40, readOnly: true },
     ],
   },
 };

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { onUnreadChanged } from "../lib/unread";
 import { BrandMark, BrandRow } from "./Brand";
 import { DemoBanner } from "./DemoBanner";
 import { InstallAppBanner } from "./InstallApp";
@@ -95,6 +96,7 @@ export default function Layout() {
   }, [isPlatformPanel]);
 
   const inWorkshopNow = me?.kind === "tenant" || (me?.kind === "platform" && !!me.impersonating);
+  const loadUnread = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (!inWorkshopNow) return;
     let alive = true;
@@ -103,15 +105,27 @@ export default function Layout() {
         .get<{ unread: number }>("/notifications")
         .then((r) => alive && setUnread(r.unread))
         .catch(() => undefined);
+    loadUnread.current = () => void load();
     void load();
     // Push доносит оповещение мгновенно, но он есть не у всех и не всегда.
     // Счётчик в меню — тот канал, который работает у любого сотрудника.
     const timer = setInterval(load, 60_000);
+    // Экран оповещений отметил прочитанным — кружок гаснет сразу, а не через
+    // минуту и не после перезагрузки.
+    const off = onUnreadChanged(() => void load());
     return () => {
       alive = false;
       clearInterval(timer);
+      off();
+      loadUnread.current = () => undefined;
     };
   }, [inWorkshopNow]);
+
+  // И при каждом переходе между разделами: запрос короткий, а счётчик в
+  // меню перестаёт зависеть от того, кто и когда его сбросил.
+  useEffect(() => {
+    loadUnread.current();
+  }, [location.pathname]);
 
   if (!me) return null;
 

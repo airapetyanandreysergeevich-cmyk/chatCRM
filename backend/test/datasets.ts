@@ -132,6 +132,17 @@ const fakeTx = {
     minQty: 2,
     balances: [{ qty: 5, avgCost: 1200, warehouse: { name: "Основной склад" } }],
   }),
+  transaction: one({
+    createdAt: new Date(),
+    direction: "IN",
+    amount: 5500,
+    comment: "Оплата при выдаче",
+    cashRegister: { name: "Касса" },
+    category: { name: "Оплата заказа" },
+    order: { number: "0412" },
+    customer: { name: "Кузнецов И." },
+    user: null,
+  }),
   service: one({
     name: "Замена экрана",
     price: 1500,
@@ -200,6 +211,13 @@ async function main(): Promise<void> {
   const pw = new Set(Array.from({ length: 200 }, () => temporaryPassword()));
   check(pw.size === 200, "временные пароли не повторяются");
   check([...pw].every((p) => p.length === 10 && /\d/.test(p) && !/[01lIoO]/.test(p)), "10 знаков, есть цифра, нет похожих букв");
+
+  // 2б. Касса: только выгрузка, словами «Приход/Расход», суммы числом.
+  const [cash] = await buildSheets(fakeTx as never, ["cash"]);
+  const ccol = (t: string) => DATASETS.cash.columns.findIndex((c) => c.title === t);
+  check(cash.rows[0][ccol("Движение")] === "Приход" && cash.rows[0][ccol("Сумма, ₽")] === 5500, "касса: приход и сумма числом");
+  check(cash.rows[0][ccol("Заказ")] === "0412" && cash.rows[0][ccol("Кто провёл")] === "", "касса: номер заказа, пустой сотрудник — пусто");
+  check(DATASETS.cash.exportOnly === true && WIPEABLE_KEYS.includes("cash"), "кассу можно выгрузить и стереть, но не загрузить");
 
   // 3. Чужие заголовки узнаются. Регистр, лишние пробелы и «ё» значения не имеют.
   const found = matchColumns(["  УСЛУГА ", "Стоимость", "Что входит"], services);

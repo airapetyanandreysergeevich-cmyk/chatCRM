@@ -2,7 +2,7 @@ import { api } from "./api";
 
 /** Выгрузка и загрузка данных мастерской. */
 
-export type DatasetKey = "staff" | "customers" | "orders" | "stock" | "services";
+export type DatasetKey = "staff" | "customers" | "orders" | "stock" | "services" | "cash";
 export type FormatKey = "xlsx" | "csv" | "html";
 
 export interface DatasetInfo {
@@ -14,6 +14,8 @@ export interface DatasetInfo {
   count: number;
   /** Можно ли стереть раздел целиком. Сотрудников — нельзя. */
   canWipe?: boolean;
+  /** Можно ли загрузить из файла. Кассу — нельзя, только выгрузить. */
+  canImport?: boolean;
   columns: Array<{ title: string; required: boolean; readOnly: boolean }>;
 }
 
@@ -32,10 +34,27 @@ export interface FormatInfo {
   canImport: boolean;
 }
 
+export interface CashRegisterInfo {
+  id: string;
+  name: string;
+  isActive: boolean;
+  /** Сколько движений денег в кассе. */
+  count: number;
+}
+
 export interface DataReference {
   datasets: DatasetInfo[];
   formats: FormatInfo[];
   maxImportRows: number;
+  /** Кассы — для выбора в окне стирания. Пусто, если касса человеку не видна. */
+  cashRegisters?: CashRegisterInfo[];
+}
+
+/** Что станет с долгами, если стереть движения выбранных касс. */
+export interface CashImpact {
+  transactions: number;
+  orders: number;
+  sum: number;
 }
 
 export interface RowIssue {
@@ -84,8 +103,11 @@ export const dataApi = {
    * Стирание разделов насовсем. Слово сверяет и сервер — окно здесь для
    * человека, а не вместо запрета.
    */
-  wipe: (datasets: DatasetKey[], confirm: string) =>
-    api.del<WipeResult>("/data", { datasets, confirm }),
+  wipe: (datasets: DatasetKey[], confirm: string, registers?: string[]) =>
+    api.del<WipeResult>("/data", { datasets, confirm, ...(registers?.length ? { registers } : {}) }),
+
+  cashImpact: (registers: string[]) =>
+    api.get<CashImpact>(`/data/wipe/cash-impact?registers=${registers.join(",")}`),
 
   /**
    * Скачивание идёт обычным запросом с токеном, а не переходом по ссылке:

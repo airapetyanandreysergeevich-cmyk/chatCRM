@@ -5,6 +5,7 @@ import { Banner, Button, Card, PageHeader, SectionLabel, Spinner } from "../comp
 import { ApiError, api } from "../lib/api";
 import { InstallAppCard } from "../components/InstallApp";
 import { useAuth } from "../lib/auth";
+import { announceUnreadChanged } from "../lib/unread";
 import { formatDateTime } from "../lib/format";
 import {
   disablePush,
@@ -196,7 +197,10 @@ function Feed() {
         // Пометка «прочитано» — отдельно и без ожидания: если она не пройдёт,
         // счётчик просто не сбросится, а лента должна остаться на экране.
         if (r.items.some((i) => !i.readAt)) {
-          void api.post("/notifications/read", {}).catch(() => undefined);
+          void api
+            .post("/notifications/read", {})
+            .then(() => announceUnreadChanged())
+            .catch(() => undefined);
         }
       })
       .catch(() => alive && setItems([]));

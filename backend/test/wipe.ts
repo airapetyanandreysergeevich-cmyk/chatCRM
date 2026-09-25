@@ -80,6 +80,13 @@ async function main(): Promise<void> {
   check(money.log.includes("transaction.update"), "но теряют ссылку на стёртый заказ");
   check(!money.log.includes("cashRegister.delete"), "кассы не трогаем вовсе");
 
+  // 3а. Касса — только когда её выбрали явно, и только движения.
+  const cash = recorder({ transaction: 99 });
+  const cashOut = await wipeDatasets(cash.tx, ["cash"]);
+  check(cash.log.join() === "transaction.delete", `касса стирает только движения (${cash.log.join(", ")})`);
+  check(cashOut.rows.transaction === 99, "число стёртых движений возвращается");
+  check(sortDatasets(["orders", "cash"]).join() === "cash,orders", "касса стирается раньше заказов");
+
   // 4. Дети раньше родителей.
   const orders = recorder();
   await wipeDatasets(orders.tx, ["orders"]);

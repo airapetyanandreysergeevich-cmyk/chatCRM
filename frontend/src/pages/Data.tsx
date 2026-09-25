@@ -5,7 +5,7 @@ import { MigrateCard } from "../components/MigrateCard";
 import { Modal } from "../components/Modal";
 import { OrderNumberCard } from "../components/OrderNumberCard";
 import { IconDelete, IconDownload, IconUpload } from "../components/icons";
-import { Banner, Button, Card, Field, Input, PageHeader, SectionLabel, Select, Spinner } from "../components/ui";
+import { Banner, Button, Card, Checkbox, Field, Input, PageHeader, SectionLabel, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
@@ -18,6 +18,8 @@ import {
   type ImportPreview,
   type ImportResult,
   type WipeResult,
+  type CashImpact,
+  type CashRegisterInfo,
 } from "../lib/dataApi";
 import { demoApi, reloadAfterDemo, type DemoState } from "../lib/demoApi";
 
@@ -33,12 +35,15 @@ import { demoApi, reloadAfterDemo, type DemoState } from "../lib/demoApi";
 function WipeModal({
   datasets,
   skipped,
+  registers,
   onClose,
   onDone,
 }: {
   datasets: DatasetInfo[];
   /** Выбранные, но не стираемые разделы — чтобы человек не решил, что стёр и их. */
   skipped: DatasetInfo[];
+  /** Кассы мастерской — если в стирании есть «Касса». */
+  registers: CashRegisterInfo[];
   onClose: () => void;
   onDone: (result: WipeResult) => void;
 }) {
@@ -46,14 +51,38 @@ function WipeModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ready = word.trim().toUpperCase() === WIPE_WORD;
-  const totalRows = datasets.reduce((n, d) => n + d.count, 0);
+  // Касса: какие кассы стереть (по умолчанию все, где есть движения) и что
+  // станет с долгами. Считает сервер — по тем же правилам, что и сам долг.
+  const withCash = datasets.some((d) => d.key === "cash");
+  const withOrders = datasets.some((d) => d.key === "orders");
+  const [picked, setPicked] = useState<string[]>(() => registers.filter((r) => r.count > 0).map((r) => r.id));
+  const [impact, setImpact] = useState<CashImpact | null>(null);
+  const allPicked = picked.length === registers.filter((r) => r.count > 0).length;
+
+  useEffect(() => {
+    if (!withCash || picked.length === 0) {
+      setImpact(null);
+      return;
+    }
+    let alive = true;
+    dataApi
+      .cashImpact(allPicked ? [] : picked)
+      .then((r) => alive && setImpact(r))
+      .catch(() => alive && setImpact(null));
+    return () => {
+      alive = false;
+    };
+  }, [withCash, picked, allPicked]);
+
+  const ready = word.trim().toUpperCase() === WIPE_WORD && (!withCash || picked.length > 0);
+  const rowsOf = (d: DatasetInfo) => (d.key === "cash" && impact ? impact.transactions : d.count);
+  const totalRows = datasets.reduce((n, d) => n + rowsOf(d), 0);
 
   async function run() {
     setBusy(true);
     setError(null);
     try {
-      onDone(await dataApi.wipe(datasets.map((d) => d.key), word));
+      onDone(await dataApi.wipe(datasets.map((d) => d.key), word, withCash && !allPicked ? picked : undefined));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось стереть");
       setBusy(false);
@@ -77,7 +106,7 @@ function WipeModal({
               >
                 <span className="text-[14px] font-semibold">{d.title}</span>
                 <span className="text-[14px] font-bold text-state-off">
-                  {d.count === 0 ? "пусто" : `${d.count.toLocaleString("ru-RU")} записей`}
+                  {rowsOf(d) === 0 ? "пусто" : `${rowsOf(d).toLocaleString("ru-RU")} записей`}
                 </span>
               </li>
             ))}
@@ -90,13 +119,49 @@ function WipeModal({
           )}
         </div>
 
+        {withCash && registers.length > 0 && (
+          <div>
+            <p className="text-[13.5px] text-ink-muted">Из каких касс стереть движения денег:</p>
+            <div className="mt-2 space-y-1.5">
+              {registers.map((r) => (
+                <Checkbox
+                  key={r.id}
+                  checked={picked.includes(r.id)}
+                  disabled={r.count === 0}
+                  onChange={(on) => setPicked((p) => (on ? [...p, r.id] : p.filter((x) => x !== r.id)))}
+                  label={`${r.name}${r.isActive ? "" : " (выключена)"} — ${r.count.toLocaleString("ru-RU")} движений`}
+                />
+              ))}
+            </div>
+            <p className="mt-2 text-[12.5px] text-ink-dim">Сами кассы и статьи останутся — это настройки.</p>
+          </div>
+        )}
+
+        {/* Долги — главное, что ломает стирание кассы. Говорим числом и до
+            нажатия: «станут долгами» без числа читается как формальность. */}
+        {withCash && !withOrders && impact && impact.orders > 0 && (
+          <Banner tone="warning">
+            {impact.orders.toLocaleString("ru-RU")} выданных заказов станут долгами на{" "}
+            {impact.sum.toLocaleString("ru-RU")} ₽: долг — это итог заказа минус платежи, а платежи
+            уйдут. Если заказы тоже больше не нужны — отметьте и «Заказы».
+          </Banner>
+        )}
+
         {/* Про деньги говорим здесь, а не в журнале: владелец должен узнать
             об этом до нажатия, а не после. */}
-        <p className="text-[12.5px] text-ink-dim">
-          Кассовые операции останутся в кассе и потеряют ссылку на заказ: стереть их вместе с
-          заказами значило бы изменить остаток кассы, который вы сверяете с ящиком. Фотографии
-          заказов удалятся из хранилища вместе с ними.
-        </p>
+        {withOrders && !withCash && (
+          <p className="text-[12.5px] text-ink-dim">
+            Кассовые операции останутся в кассе и потеряют ссылку на заказ: стереть их вместе с
+            заказами значило бы изменить остаток кассы, который вы сверяете с ящиком. Чтобы стереть и
+            деньги, отметьте «Касса». Фотографии заказов удалятся из хранилища вместе с заказами.
+          </p>
+        )}
+        {withCash && (
+          <p className="text-[12.5px] text-ink-dim">
+            Остаток выбранных касс станет нулевым. Выгрузите кассу в Excel перед стиранием, если
+            история денег может понадобиться.
+          </p>
+        )}
 
         {error && <Banner tone="error">{error}</Banner>}
 
@@ -232,6 +297,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
         <WipeModal
           datasets={wipeable}
           skipped={pickedInfo.filter((d) => d.canWipe === false)}
+          registers={reference.cashRegisters ?? []}
           onClose={() => setWiping(false)}
           onDone={(result) => {
             setWiping(false);
@@ -515,7 +581,7 @@ function ImportCard({ reference }: { reference: DataReference }) {
 
       <div className="mt-4 max-w-[420px]">
         <Select value={dataset} onChange={(e) => { setDataset(e.target.value as DatasetKey); reset(); }}>
-          {reference.datasets.map((d) => (
+          {reference.datasets.filter((d) => d.canImport !== false).map((d) => (
             <option key={d.key} value={d.key}>
               {d.title}
             </option>
@@ -698,7 +764,7 @@ function ColumnsCard({ reference }: { reference: DataReference }) {
       </p>
 
       <div className="mt-4 space-y-2">
-        {reference.datasets.map((d) => (
+        {reference.datasets.filter((d) => d.canImport !== false).map((d) => (
           <div key={d.key} className="rounded-card border border-line">
             <button
               type="button"

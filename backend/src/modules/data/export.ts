@@ -301,6 +301,42 @@ async function staffSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   };
 }
 
+/** Касса: одно движение денег — одна строка, свежие сверху. */
+async function cashSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
+  const def = DATASETS.cash;
+  const rows = await tx.transaction.findMany({
+    where: { deletedAt: null },
+    orderBy: { createdAt: "desc" },
+    take: MAX_ROWS * 5,
+    select: {
+      createdAt: true,
+      direction: true,
+      amount: true,
+      comment: true,
+      cashRegister: { select: { name: true } },
+      category: { select: { name: true } },
+      order: { select: { number: true } },
+      customer: { select: { name: true } },
+      user: { select: { fullName: true } },
+    },
+  });
+  return {
+    name: def.sheet,
+    columns: def.columns.map((c) => ({ title: c.title, width: c.width })),
+    rows: rows.map((t) => [
+      t.createdAt,
+      t.cashRegister.name,
+      t.direction === "IN" ? "Приход" : "Расход",
+      num(t.amount),
+      t.category?.name ?? "",
+      t.order?.number ?? "",
+      t.customer?.name ?? "",
+      t.user?.fullName ?? "",
+      t.comment ?? "",
+    ]),
+  };
+}
+
 export async function buildSheets(
   tx: Prisma.TransactionClient,
   keys: DatasetKey[]
@@ -312,6 +348,7 @@ export async function buildSheets(
     if (key === "orders") out.push(await ordersSheet(tx));
     if (key === "stock") out.push(await stockSheet(tx));
     if (key === "services") out.push(await servicesSheet(tx));
+    if (key === "cash") out.push(await cashSheet(tx));
   }
   return out;
 }
