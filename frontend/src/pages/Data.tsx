@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { copyText } from "../components/CopyMenu";
 import { RemoveDemoModal } from "../components/DemoBanner";
+import { MigrateCard } from "../components/MigrateCard";
 import { Modal } from "../components/Modal";
 import { OrderNumberCard } from "../components/OrderNumberCard";
 import { IconDelete, IconDownload, IconUpload } from "../components/icons";
@@ -766,10 +767,11 @@ export default function Data() {
       <PageHeader
         eyebrow="Настройки"
         title="Базы"
-        subtitle="Нумерация заказов, тестовые данные, выгрузка и загрузка из файла."
+        subtitle="Нумерация заказов, тестовые данные, перенос из другой программы, выгрузка и загрузка из файла."
       />
       <OrderNumberCard />
       <DemoCard />
+      <MigrateCard />
       <ExportCard reference={reference} onWiped={() => void load()} />
       <ImportCard reference={reference} />
       <ColumnsCard reference={reference} />

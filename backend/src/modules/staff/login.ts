@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withPlatform } from "../../lib/db";
 import { localProblem } from "../../lib/login";
 
 /**
@@ -25,4 +26,26 @@ export function loginFor(raw: string, domain: string): { ok: true; login: string
   }
   if (!z.string().email().safeParse(login).success) return { ok: false, reason: "Похоже, это не email" };
   return { ok: true, login };
+}
+
+/**
+ * Свободный логин «local@tail» во всей системе: olga, olga-2, olga-3…
+ *
+ * Спрашивает базу отдельным соединением, поэтому логины, заведённые в ещё не
+ * закрытой транзакции, оно не видит, — их передают в `used`.
+ */
+export async function freeLogin(local: string, tail: string, used: Set<string> = new Set()): Promise<string> {
+  for (let i = 0; i < 50; i += 1) {
+    const login = `${local}${i ? `-${i + 1}` : ""}@${tail}`;
+    if (used.has(login)) continue;
+    const taken = await withPlatform(
+      async (ptx) =>
+        (await ptx.user.count({ where: { email: login } })) + (await ptx.platformUser.count({ where: { email: login } }))
+    );
+    if (!taken) {
+      used.add(login);
+      return login;
+    }
+  }
+  throw new Error(`не нашлось свободного логина для «${local}»`);
 }

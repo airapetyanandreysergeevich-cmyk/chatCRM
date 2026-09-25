@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { hashPassword } from "../../lib/password";
 import { takePayment } from "../../lib/payment";
-import { withPlatform } from "../../lib/db";
+import { freeLogin } from "../staff/login";
 import { applyRows, temporaryPassword } from "../data/apply";
 import type { DatasetKey } from "../data/dataset";
 import { parseRows } from "../data/import";
@@ -106,18 +106,6 @@ async function load(
   if (res.failed.length) {
     throw new Error(`тестовые данные «${dataset}» не записались: ${res.failed[0].message}`);
   }
-}
-
-/** Логин тестового сотрудника: свободный во всей системе. */
-async function freeLogin(local: string, tail: string): Promise<string> {
-  for (let i = 0; i < 20; i += 1) {
-    const login = `${local}${i ? `-${i + 1}` : ""}@${tail}`;
-    const taken = await withPlatform(async (ptx) =>
-      (await ptx.user.count({ where: { email: login } })) + (await ptx.platformUser.count({ where: { email: login } }))
-    );
-    if (!taken) return login;
-  }
-  throw new Error("не нашлось свободного логина для тестового сотрудника");
 }
 
 /**
