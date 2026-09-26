@@ -192,7 +192,20 @@ export function createRelayHub(opts: RelayOptions) {
   /** Соединение от Основы. Ключ приходит заголовком, как обычный токен. */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     const key = String(req.headers["x-box-key"] ?? "");
-    const box = key ? await opts.authenticate(key).catch(() => null) : null;
+    let box: Awaited<ReturnType<typeof opts.authenticate>> = null;
+    try {
+      box = key ? await opts.authenticate(key) : null;
+    } catch (err) {
+      // Не смогли проверить — это не «ключ неверный». Раньше отвечали 401, и
+      // Основа писала владельцу «ключ не принят» и минуту не пробовала снова,
+      // хотя у нас всего лишь на секунду отвалилась база.
+      socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      log("Соединение Основы отложено: не удалось проверить ключ", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
     if (!box) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();

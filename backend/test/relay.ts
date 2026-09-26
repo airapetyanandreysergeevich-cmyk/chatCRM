@@ -87,7 +87,7 @@ function startBox(): Promise<{ url: string; close: () => void }> {
 }
 
 /** Поддельное облако: узел связи и раздача /b/<код>/… */
-function startCloud(hub: ReturnType<typeof createRelayHub>): Promise<{ port: number; close: () => void }> {
+function startCloud(hub: ReturnType<typeof createRelayHub>, atPort = 0): Promise<{ port: number; close: () => void }> {
   const server = http.createServer((req, res) => {
     const match = /^\/b\/([a-z0-9-]+)(\/.*)?$/i.exec((req.url ?? "").split("?")[0]);
     if (!match) {
@@ -99,9 +99,15 @@ function startCloud(hub: ReturnType<typeof createRelayHub>): Promise<{ port: num
   });
   hub.attach(server, "/relay/agent");
   return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(atPort, "127.0.0.1", () => {
       const { port } = server.address() as { port: number };
-      resolve({ port, close: () => server.close() });
+      resolve({
+        port,
+        close: () => {
+          server.close();
+          server.closeAllConnections();
+        },
+      });
     });
   });
 }
@@ -346,6 +352,93 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   check(await waitFor(() => hub.online(CODE)), "включили обратно — снова на связи");
   const again = await ask(cloud.port, `/b/${CODE}/assets/app.js`);
   check(again.status === 200, "и запросы снова ходят");
+
+  // ---------- облако перезапускается ----------
+  //
+  // Пока сервер обновляется, вместо него несколько секунд отвечает nginx с
+  // 502. Основа, попавшая в эти секунды, раньше больше никогда не пробовала
+  // подключиться — и пропадала из интернета до перезапуска программы.
+  const KEY2 = "kluch-masterskoj-0002";
+  const CODE2 = "servis-na-mira";
+  const hub2 = createRelayHub({
+    authenticate: async (key) => (key === KEY2 ? { code: CODE2, name: null } : null),
+    timeoutMs: 5_000,
+    log: () => {},
+  });
+  let nginxAnswers = 0;
+  const nginx = http.createServer();
+  nginx.on("upgrade", (_req, socket) => {
+    nginxAnswers++;
+    // Как nginx: ответил и держит соединение открытым.
+    socket.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n");
+  });
+  const port2 = await new Promise<number>((r) => nginx.listen(0, "127.0.0.1", () => r((nginx.address() as { port: number }).port)));
+  const states2: string[] = [];
+  const agent2 = createRelayAgent({
+    url: `ws://127.0.0.1:${port2}/relay/agent`,
+    key: KEY2,
+    target: box.url,
+    heartbeatMs: 1_000,
+    log: () => {},
+    onState: (st, detail) => states2.push(`${st}:${detail ?? ""}`),
+  });
+  agent2.start();
+  check(await waitFor(() => nginxAnswers >= 2, 6_000), "после 502 Основа пробует подключиться снова, а не ждёт вечно");
+  check(states2.some((x) => x.includes("502")), "и честно показывает, что сервер ответил 502");
+  nginx.close();
+  nginx.closeAllConnections();
+  const cloud2 = await startCloud(hub2, port2);
+  check(await waitFor(() => hub2.online(CODE2), 10_000), "сервер поднялся — Основа снова на связи сама");
+  agent2.stop();
+  cloud2.close();
+  hub2.close();
+
+  // Облако не смогло проверить ключ (на секунду отвалилась его база) — это
+  // не «ключ неверный»: Основа не должна пугать владельца и ждать минуту.
+  let dbDown = true;
+  const hub3 = createRelayHub({
+    authenticate: async (key) => {
+      if (dbDown) throw new Error("база недоступна");
+      return key === KEY2 ? { code: CODE2, name: null } : null;
+    },
+    timeoutMs: 5_000,
+    log: () => {},
+  });
+  const cloud3 = await startCloud(hub3);
+  const states3: string[] = [];
+  const agent3 = createRelayAgent({
+    url: `ws://127.0.0.1:${cloud3.port}/relay/agent`,
+    key: KEY2,
+    target: box.url,
+    log: () => {},
+    onState: (st, detail) => states3.push(`${st}:${detail ?? ""}`),
+  });
+  agent3.start();
+  check(await waitFor(() => states3.some((x) => x.includes("503"))), "сбой проверки ключа — 503, а не «ключ не принят»");
+  check(!states3.some((x) => x.includes("не принят")), "про ключ владельцу не врём");
+  dbDown = false;
+  check(await waitFor(() => hub3.online(CODE2), 6_000), "база вернулась — Основа подключилась через секунды, а не через минуту");
+  agent3.stop();
+  cloud3.close();
+  hub3.close();
+
+  // Сервер принял соединение и молчит — попытка не висит вечно.
+  const silent = http.createServer();
+  let silentTries = 0;
+  silent.on("upgrade", () => void silentTries++);
+  const port4 = await new Promise<number>((r) => silent.listen(0, "127.0.0.1", () => r((silent.address() as { port: number }).port)));
+  const agent4 = createRelayAgent({
+    url: `ws://127.0.0.1:${port4}/relay/agent`,
+    key: KEY2,
+    target: box.url,
+    handshakeTimeoutMs: 500,
+    log: () => {},
+  });
+  agent4.start();
+  check(await waitFor(() => silentTries >= 2, 6_000), "молчащий сервер — попытка обрывается по времени и повторяется");
+  agent4.stop();
+  silent.close();
+  silent.closeAllConnections();
 
   agent.stop();
   hub.close();

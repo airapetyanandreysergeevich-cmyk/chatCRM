@@ -41,10 +41,18 @@ export interface AgentOptions {
   onReady?: (info: { code: string; name?: string | null }) => void;
   /** Проверка связи: если сервер молчит дольше, соединение считается мёртвым. */
   heartbeatMs?: number;
+  /** Сколько ждать ответа на попытку подключения (для проверок). */
+  handshakeTimeoutMs?: number;
 }
 
 const FIRST_RETRY_MS = 2_000;
 const MAX_RETRY_MS = 60_000;
+/**
+ * Сколько ждать ответа на попытку подключения. Сервер, который принял
+ * соединение и молчит, иначе держал бы попытку вечно — а следующая
+ * начинается только после того, как закончится эта.
+ */
+const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 export function createRelayAgent(opts: AgentOptions) {
   const log = opts.log ?? (() => {});
@@ -152,7 +160,10 @@ export function createRelayAgent(opts: AgentOptions) {
 
     let socket: WebSocket;
     try {
-      socket = new WebSocket(opts.url, { headers: { "x-box-key": key } });
+      socket = new WebSocket(opts.url, {
+        headers: { "x-box-key": key },
+        handshakeTimeout: opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
+      });
     } catch (err) {
       setState("error", err instanceof Error ? err.message : "Не удалось начать соединение");
       timer = setTimeout(connect, MAX_RETRY_MS);
@@ -188,6 +199,16 @@ export function createRelayAgent(opts: AgentOptions) {
       setState("error", fatal ? "Ключ доступа не принят сервером" : `Сервер ответил ${res.statusCode}`);
       log(`Узел связи ответил ${res.statusCode}`);
       if (fatal) retry = MAX_RETRY_MS;
+      // Попытку надо закончить самим. Кто подписался на этот ответ, тому
+      // библиотека соединение не закрывает, — а без закрытия не наступает
+      // «close», и следующая попытка не назначается никогда.
+      //
+      // Именно так Основа и пропадала из интернета после каждого обновления
+      // сервера: пока он перезапускается, вместо него несколько секунд
+      // отвечает nginx с 502, Основа попадала в эти секунды — и дальше
+      // ждала вечно, до перезапуска программы.
+      res.resume();
+      socket.terminate();
     });
 
     socket.on("error", (err) => {

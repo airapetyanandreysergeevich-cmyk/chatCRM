@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { HomeScreenCard } from "../components/HomeScreenCard";
 import { Modal } from "../components/Modal";
 import { IconMoon, IconSun } from "../components/icons";
 import { Banner, Button, Card, Checkbox, Field, Input, SectionLabel, PageHeader } from "../components/ui";
@@ -426,6 +427,8 @@ export default function Interface() {
           Выбор действует только на этом устройстве. У каждого сотрудника он свой.
         </p>
       </Card>
+
+      <HomeScreenCard />
 
       <SearchLayoutCard />
 

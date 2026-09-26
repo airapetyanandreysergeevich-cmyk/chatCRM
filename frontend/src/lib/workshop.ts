@@ -22,9 +22,65 @@ export interface BoardCard {
 
 export interface StageColumn {
   key: StageKey;
-  /** Всего заказов на стадии — items может быть обрезан. */
+  /** Всего заказов на стадии после фильтра — items может быть обрезан. */
   total: number;
+  /** Сколько заказов спрятал фильтр по технике. */
+  filtered?: number;
   items: BoardCard[];
+}
+
+/** Клиент с долгом — строка панели «Должники». */
+export interface Debtor {
+  customerId: string;
+  number: number;
+  name: string;
+  phone: string;
+  due: number;
+  orders: number;
+  since: string;
+  promised: string | null;
+  overdue: boolean;
+}
+
+// ------------------------------------------------------- настройки главной
+
+export type ColumnKey = StageKey | "DEBTORS";
+export const OVERDUE_KEY = "OVERDUE";
+export type StageSort = "urgent" | "due" | "old" | "new" | "number";
+export type DebtorSort = "sum" | "old" | "promised";
+
+export interface PanelPrefs {
+  sort?: string;
+  /** Пусто — «авто», по высоте экрана. */
+  limit?: number | null;
+  /** Выключенные типы техники в нормальном виде (см. kindKey). */
+  hiddenKinds?: string[];
+}
+
+export interface DashboardPrefs {
+  order: ColumnKey[];
+  hidden: string[];
+  panels: Partial<Record<ColumnKey, PanelPrefs>>;
+}
+
+export const STAGE_SORT_LABELS: Record<StageSort, string> = {
+  urgent: "Срочные сверху, потом по сроку",
+  due: "По сроку",
+  old: "Старые сверху",
+  new: "Новые сверху",
+  number: "По номеру",
+};
+
+export const DEBTOR_SORT_LABELS: Record<DebtorSort, string> = {
+  sum: "По сумме долга",
+  old: "Дольше всех должны — сверху",
+  promised: "По обещанной дате",
+};
+
+export interface DeviceKindOption {
+  key: string;
+  label: string;
+  count: number;
 }
 
 /** Просроченный долг на главной: заказ, по которому обещанный срок прошёл. */
@@ -42,6 +98,11 @@ export interface Summary {
   /** Пусто, когда просроченных нет, — и тогда панель не показывается вовсе. */
   overdue: OverdueDebt[];
   overdueTotal: number;
+  prefs: DashboardPrefs;
+  /** Видит ли человек деньги клиентов — от этого есть ли у него «Должники». */
+  money: boolean;
+  /** Пусто, если панель выключена или человеку не положено её видеть. */
+  debtors: { rows: Debtor[]; total: number; sum: number } | null;
 }
 
 // ------------------------------------------------------------------- склад
@@ -165,6 +226,9 @@ const qs = (params: Record<string, string | number | undefined>) => {
 
 export const summaryApi = {
   get: () => api.get<Summary>("/summary"),
+  prefs: () => api.get<{ prefs: DashboardPrefs; money: boolean; personal: boolean }>("/summary/prefs"),
+  savePrefs: (prefs: DashboardPrefs) => api.put<{ prefs: DashboardPrefs }>("/summary/prefs", { prefs }),
+  kinds: () => api.get<{ kinds: DeviceKindOption[] }>("/summary/kinds"),
 };
 
 export const stockApi = {

@@ -346,6 +346,10 @@ model User {
   /// установлено. Пусто — значит его нет или человек работает не с Android.
   /// Нужно владельцу: мастер без приложения не получает оповещений о заказах.
   androidAppAt DateTime?
+  /// Настройки главного экрана этого сотрудника: какие панели, в каком
+  /// порядке, сортировка, фильтр техники (modules/summary/prefs.ts).
+  /// Пусто — всё по умолчанию.
+  dashboardPrefs Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?

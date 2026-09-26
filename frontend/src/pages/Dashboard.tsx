@@ -8,10 +8,16 @@ import { useAuth } from "../lib/auth";
 import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
 import { money } from "../lib/orders";
 import { STAGES, type Stage } from "../lib/stages";
+import { GearButton, PanelMenu } from "../components/PanelMenu";
+import { columnsFor, isShown, panelLabel, withPanel } from "../lib/dashboard";
 import {
   summaryApi,
   type BoardCard,
+  type ColumnKey,
+  type DashboardPrefs,
+  type Debtor,
   type OverdueDebt,
+  type PanelPrefs,
   type StageColumn,
   type Summary,
 } from "../lib/workshop";
@@ -25,6 +31,10 @@ import {
  *
  * Цифры без заказов за ними отсюда убраны намеренно. Показатель, по которому
  * нельзя ткнуть и попасть в работу, на рабочем экране только занимает место.
+ *
+ * Какие колонки стоят, в каком порядке, как отсортированы и какую технику
+ * прячут — у каждого сотрудника своё: шестерёнка на панели и раздел
+ * «Интерфейс». Сортирует и отсеивает сервер, здесь только отрисовка.
  */
 
 /** Часы обновляются раз в секунду — иначе это не часы, а надпись со временем. */
@@ -153,47 +163,100 @@ function OrderCardTile({ card }: { card: BoardCard }) {
   );
 }
 
-function StageColumnPanel({
-  stage,
-  column,
-  fit,
+/** Общая рамка колонки: подсветка сверху, заголовок с числом и шестерёнкой. */
+function PanelShell({
+  title,
+  count,
+  titleHref,
+  titleHint,
+  glow,
+  dot,
+  gear,
+  children,
 }: {
-  stage: Stage;
-  column: StageColumn;
-  /** Сколько карточек помещается на экран. Одно число на все колонки. */
-  fit: number;
+  title: string;
+  count: number;
+  titleHref?: string;
+  titleHint?: string;
+  glow: string;
+  dot: string;
+  gear: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  const shown = column.items.slice(0, fit);
-  const hidden = column.total - shown.length;
+  const heading = (
+    <h2
+      title={title}
+      className="flex min-w-0 items-center gap-1.5 text-[12.5px] font-bold uppercase tracking-[0.05em] text-ink-soft"
+    >
+      <span aria-hidden className={"mr-0.5 h-[7px] w-[7px] shrink-0 rounded-full " + dot} />
+      <span className="truncate">{title}</span>
+      {/* Число — рядом с названием: кружок справа отдан шестерёнке, а
+          сколько лежит на стадии, должно читаться с первого взгляда. */}
+      <span className="ml-0.5 shrink-0 font-mono text-[12.5px] tracking-normal text-ink">{count}</span>
+    </h2>
+  );
 
   return (
     <section className="relative rounded-panel border border-line bg-surface p-3 sm:p-3.5">
       {/* Цвет стадии — тонкая светящаяся полоса по верхней грани. Отдельным
           элементом, а не рамкой: рамка читается как контур, а нужна
           подсветка. Чуть отступает от углов, чтобы не спорить со скруглением. */}
-      <span aria-hidden className={"absolute inset-x-3.5 -top-px h-[2px] rounded-pill " + stage.glow} />
+      <span aria-hidden className={"absolute inset-x-3.5 -top-px h-[2px] rounded-pill " + glow} />
 
-      {/* Заголовок — ссылка в список заказов с тем же фильтром. Сама панель
-          ссылкой быть не может: внутри неё уже лежат ссылки на заказы. */}
-      <Link
-        to={`/orders?group=${stage.key}`}
-        title={`Все заказы: ${stage.label.toLowerCase()}`}
-        className="flex items-center justify-between gap-2 rounded-field px-0.5 pb-3 transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-      >
-        <h2 className="flex items-center gap-2 text-[13px] font-bold uppercase tracking-[0.1em] text-ink-soft">
-          <span aria-hidden className={"h-[7px] w-[7px] shrink-0 rounded-full " + stage.dot} />
-          {stage.label}
-        </h2>
-        <span
-          className={
-            "inline-flex h-6 min-w-[24px] items-center justify-center rounded-pill px-2 text-[12px] font-bold " +
-            stage.chip
-          }
-        >
-          {column.total}
-        </span>
-      </Link>
+      <div className="flex items-center justify-between gap-2 pb-3">
+        {/* Заголовок — ссылка в список заказов с тем же фильтром. Сама панель
+            ссылкой быть не может: внутри неё уже лежат ссылки на заказы. */}
+        {titleHref ? (
+          <Link
+            to={titleHref}
+            title={titleHint}
+            className="min-w-0 rounded-field px-0.5 transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          >
+            {heading}
+          </Link>
+        ) : (
+          <div className="min-w-0 px-0.5">{heading}</div>
+        )}
+        {gear}
+      </div>
 
+      {children}
+    </section>
+  );
+}
+
+function StageColumnPanel({
+  stage,
+  column,
+  fit,
+  prefs,
+  gear,
+  onOpenMenu,
+}: {
+  stage: Stage;
+  column: StageColumn;
+  /** Сколько карточек помещается на экран. Одно число на все колонки. */
+  fit: number;
+  prefs: PanelPrefs | undefined;
+  gear: React.ReactNode;
+  onOpenMenu: () => void;
+}) {
+  // Число задано руками — показываем ровно столько, иначе сколько влезает.
+  const limit = prefs?.limit ?? fit;
+  const shown = column.items.slice(0, limit);
+  const hidden = column.total - shown.length;
+  const filtered = column.filtered ?? 0;
+
+  return (
+    <PanelShell
+      title={stage.label}
+      count={column.total}
+      titleHref={`/orders?group=${stage.key}`}
+      titleHint={`Все заказы: ${stage.label.toLowerCase()}`}
+      glow={stage.glow}
+      dot={stage.dot}
+      gear={gear}
+    >
       {shown.length === 0 ? (
         <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Пусто</p>
       ) : (
@@ -212,7 +275,128 @@ function StageColumnPanel({
           ещё {plural(hidden, "заказ", "заказа", "заказов")}
         </Link>
       )}
-    </section>
+
+      {/* Без этой строки выключенные ноутбуки через неделю превращаются в
+          «заказ пропал с доски». Нажатие открывает ту же шестерёнку. */}
+      {filtered > 0 && (
+        <button
+          type="button"
+          onClick={onOpenMenu}
+          className="mt-1.5 block px-0.5 text-left text-[12px] text-ink-dim hover:text-ink hover:underline"
+        >
+          скрыто фильтром: {filtered}
+        </button>
+      )}
+    </PanelShell>
+  );
+}
+
+/**
+ * Должники: клиент, телефон, сколько должен.
+ *
+ * Строка ведёт в карточку клиента — там все его заказы и погашение долга.
+ * Телефон отдельной ссылкой: с телефона — сразу звонок. Просроченные
+ * (обещанная дата оплаты прошла) стоят первыми и выделены красным.
+ */
+function DebtorTile({ d }: { d: Debtor }) {
+  return (
+    <div className="relative rounded-card border border-line bg-surface-raised p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised">
+      {/* Ссылка растянута на всю плитку, телефон лежит поверх неё. */}
+      <Link
+        to={`/clients/${d.customerId}`}
+        className="block truncate text-[14px] font-semibold after:absolute after:inset-0 after:rounded-card focus-visible:outline-none"
+        title={d.name}
+        {...copyable("name", d.name)}
+      >
+        {d.name}
+      </Link>
+      {d.phone && (
+        <a
+          href={`tel:${d.phone}`}
+          {...copyable("phone", d.phone)}
+          className="relative z-[1] mt-1 inline-block max-w-full truncate text-[13px] font-semibold text-brand-ink hover:underline"
+        >
+          {d.phone}
+        </a>
+      )}
+      <div className="mt-1.5 flex items-baseline justify-between gap-2">
+        <span className={"whitespace-nowrap text-[14px] font-bold " + (d.overdue ? "text-state-off" : "")}>
+          {money(d.due)}
+        </span>
+        <span
+          className={
+            "min-w-0 truncate text-right text-[12px] " + (d.overdue ? "font-semibold text-state-off" : "text-ink-dim")
+          }
+        >
+          {d.overdue && d.promised
+            ? `срок ${formatDateShort(d.promised)}`
+            : d.orders > 1
+              ? plural(d.orders, "заказ", "заказа", "заказов")
+              : `с ${formatDateShort(d.since)}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function DebtorsPanel({
+  data,
+  fit,
+  prefs,
+  gear,
+}: {
+  data: NonNullable<Summary["debtors"]>;
+  fit: number;
+  prefs: PanelPrefs | undefined;
+  gear: React.ReactNode;
+}) {
+  const [all, setAll] = useState(false);
+  const limit = all ? data.rows.length : (prefs?.limit ?? fit);
+  const shown = data.rows.slice(0, limit);
+  const more = data.rows.length - shown.length;
+  const overdue = data.rows.some((r) => r.overdue);
+
+  return (
+    <PanelShell
+      title="Должники"
+      count={data.total}
+      glow={
+        overdue
+          ? "bg-state-off/[0.85] shadow-[0_0_14px_1px_rgb(var(--state-off)/0.45)]"
+          : "bg-line-strong"
+      }
+      dot={overdue ? "bg-state-off" : "bg-ink-dim"}
+      gear={gear}
+    >
+      {shown.length === 0 ? (
+        <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Долгов нет</p>
+      ) : (
+        <>
+          <p className="-mt-1 px-0.5 pb-2.5 text-[12.5px] text-ink-muted">
+            всего <span className="font-bold text-ink">{money(data.sum)}</span>
+          </p>
+          <div className="space-y-2">
+            {shown.map((d) => (
+              <DebtorTile key={d.customerId} d={d} />
+            ))}
+          </div>
+        </>
+      )}
+      {more > 0 && (
+        <button
+          type="button"
+          onClick={() => setAll(true)}
+          className="mt-2 block px-0.5 text-[12.5px] font-semibold text-brand-ink hover:underline"
+        >
+          ещё {plural(more, "клиент", "клиента", "клиентов")}
+        </button>
+      )}
+      {data.total > data.rows.length && (all || more === 0) && (
+        <p className="mt-2 px-0.5 text-[12px] text-ink-dim">
+          показаны первые {data.rows.length} из {data.total}
+        </p>
+      )}
+    </PanelShell>
   );
 }
 
@@ -274,18 +458,79 @@ function useFit(ready: boolean): [number, (el: HTMLDivElement | null) => void] {
   ];
 }
 
+/**
+ * Сколько колонок в ряд на широком экране — по числу включённых. Классы
+ * выписаны целиком: Tailwind собирает только те, что видит в коде.
+ */
+const XL_COLS = [
+  "xl:grid-cols-1",
+  "xl:grid-cols-1",
+  "xl:grid-cols-2",
+  "xl:grid-cols-3",
+  "xl:grid-cols-4",
+  // Пять в ряд — только на по-настоящему широком экране: на обычном
+  // ноутбуке колонка сжимается так, что в ней не читаются ни название
+  // стадии, ни модель техники. Там — три сверху и две под ними.
+  "xl:grid-cols-3 min-[1560px]:grid-cols-5",
+];
+
 export default function Dashboard() {
   const { me } = useAuth();
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<ColumnKey | null>(null);
   const [fit, boardRef] = useFit(data !== null);
 
-  useEffect(() => {
-    summaryApi
+  // Ответы могут прийти не по порядку: человек щёлкает галочки быстрее, чем
+  // сервер отвечает. Показываем только последний запрошенный.
+  const request = useRef(0);
+  const load = useCallback(() => {
+    const n = ++request.current;
+    return summaryApi
       .get()
-      .then(setData)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить доску"));
+      .then((d) => n === request.current && setData(d))
+      .catch((err) => {
+        if (n === request.current) setError(err instanceof ApiError ? err.message : "Не удалось загрузить доску");
+      });
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Сохраняем с небольшой задержкой: пять щелчков по галочкам подряд — это
+  // одна запись и одна перерисовка, а не пять.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<DashboardPrefs | null>(null);
+  const flush = useCallback(() => {
+    const prefs = pending.current;
+    pending.current = null;
+    if (!prefs) return;
+    summaryApi
+      .savePrefs(prefs)
+      .then(() => {
+        setSaveError(null);
+        return load();
+      })
+      .catch((err) => setSaveError(err instanceof ApiError ? err.message : "Не удалось сохранить настройки"));
+  }, [load]);
+
+  useEffect(
+    () => () => {
+      // Ушли со страницы, не дождавшись, — записать всё равно надо.
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      flush();
+    },
+    [flush]
+  );
+
+  const changePrefs = (next: DashboardPrefs) => {
+    setData((d) => (d ? { ...d, prefs: next } : d));
+    pending.current = next;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flush, 450);
+  };
 
   const workshop =
     me?.kind === "tenant"
@@ -328,21 +573,65 @@ export default function Dashboard() {
     );
   }
 
+  const prefs = data.prefs;
   const byKey = new Map(data.stages.map((s) => [s.key, s]));
   const overdue = data.overdue ?? [];
-  const empty = data.stages.every((s) => s.total === 0);
+  const columns = columnsFor(prefs, data.money).filter((k) => isShown(prefs, k));
+  const noOrders = data.stages.every((s) => s.total === 0 && !s.filtered);
+  const noDebts = !data.debtors || data.debtors.total === 0;
+  // Пустая мастерская: вместо пустых колонок — подсказка, с чего начать.
+  const empty = noOrders && noDebts && columns.length > 0;
+
+  const gearFor = (key: ColumnKey) => {
+    const panel = prefs.panels[key];
+    const active = Boolean(panel?.sort || panel?.limit || panel?.hiddenKinds?.length);
+    return (
+      <div className="shrink-0">
+        <GearButton open={menu === key} active={active} onClick={() => setMenu((m) => (m === key ? null : key))} />
+        {menu === key && (
+          <PanelMenu
+            kind={key === "DEBTORS" ? "debtors" : "stage"}
+            title={panelLabel(key)}
+            prefs={panel ?? {}}
+            onChange={(next) => changePrefs(withPanel(prefs, key, next))}
+            onKindsToAll={
+              key === "DEBTORS"
+                ? undefined
+                : (hiddenKinds) => {
+                    let next = prefs;
+                    for (const s of STAGES) next = withPanel(next, s.key, { ...next.panels[s.key], hiddenKinds });
+                    changePrefs(next);
+                  }
+            }
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
       {header}
 
+      {saveError && <Banner tone="error">{saveError}</Banner>}
+
       {/* Просрочка стоит выше доски: это единственное на главной, что не
           решится само и требует звонка сегодня. Панели нет, пока нет
           просроченных, — постоянная панель с нулём перестаёт замечаться, а
-          вместе с ней перестаёт замечаться и непустая. */}
+          вместе с ней перестаёт замечаться и непустая. Выключается в
+          «Интерфейсе» — тогда сервер её и не присылает. */}
       {overdue.length > 0 && <OverduePanel rows={overdue} total={data.overdueTotal} />}
 
-      {empty ? (
+      {columns.length === 0 ? (
+        <EmptyState icon={<IconOrders />} title="Все панели выключены">
+          Включить их и расставить по порядку можно в{" "}
+          <Link to="/settings/interface" className="font-semibold text-brand-ink hover:underline">
+            Настройки → Интерфейс
+          </Link>
+          .
+        </EmptyState>
+      ) : empty ? (
         <EmptyState icon={<IconOrders />} title="Заказов в работе нет">
           Доска показывает то, что сейчас в мастерской. Примите первый заказ — он появится в
           «Диагностике».
@@ -350,15 +639,33 @@ export default function Dashboard() {
       ) : (
         // items-start: колонки не тянутся до высоты самой длинной, а растут
         // каждая на свою высоту — по ней и видно, где скопилась работа.
-        <div ref={boardRef} className="grid items-start gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {STAGES.map((stage) => (
-            <StageColumnPanel
-              key={stage.key}
-              stage={stage}
-              column={byKey.get(stage.key) ?? { key: stage.key, total: 0, items: [] }}
-              fit={fit}
-            />
-          ))}
+        <div
+          ref={boardRef}
+          className={
+            "grid items-start gap-3 sm:gap-4 " +
+            (columns.length > 1 ? "md:grid-cols-2 " : "") +
+            XL_COLS[Math.min(columns.length, 5)]
+          }
+        >
+          {columns.map((key) => {
+            if (key === "DEBTORS") {
+              return data.debtors ? (
+                <DebtorsPanel key={key} data={data.debtors} fit={fit} prefs={prefs.panels.DEBTORS} gear={gearFor(key)} />
+              ) : null;
+            }
+            const stage = STAGES.find((s) => s.key === key)!;
+            return (
+              <StageColumnPanel
+                key={key}
+                stage={stage}
+                column={byKey.get(key) ?? { key, total: 0, items: [] }}
+                fit={fit}
+                prefs={prefs.panels[key]}
+                gear={gearFor(key)}
+                onOpenMenu={() => setMenu(key)}
+              />
+            );
+          })}
         </div>
       )}
     </div>
