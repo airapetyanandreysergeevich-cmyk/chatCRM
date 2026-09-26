@@ -12,6 +12,7 @@ import {
   IconFeedback,
   IconBell,
   IconCash,
+  IconSalary,
   IconChevronLeft,
   IconChevronRight,
   IconClients,
@@ -139,6 +140,7 @@ export default function Layout() {
     { to: "/stock", label: "Склад", icon: <IconStock /> },
     { to: "/purchases", label: "Закупки", icon: <IconPurchases /> },
     { to: "/finance", label: "Касса", icon: <IconCash /> },
+    { to: "/salary", label: "Зарплата", icon: <IconSalary /> },
     { to: "/staff", label: "Сотрудники", icon: <IconStaff /> },
     { to: "/settings", label: "Настройки", icon: <IconSettings /> },
   ].filter((i) => {
@@ -146,6 +148,7 @@ export default function Layout() {
     if (i.to === "/stock") return can("stock.view");
     if (i.to === "/purchases") return can("purchases.view", "purchases.create");
     if (i.to === "/finance") return can("finance.view", "finance.payment", "finance.manage");
+    if (i.to === "/salary") return can("salary.view.all", "salary.view.own", "salary.manage");
     if (i.to === "/staff") return can("staff.manage");
     // «Настройки» видны всем: внутри у каждого своё — мастеру только
     // оповещения, владельцу ещё и базы.

@@ -340,7 +340,7 @@ export default function OrderCard() {
     try {
       const o = await ordersApi.get(id);
       setOrder(o);
-      setWorks(o.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price })));
+      setWorks(o.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price, masterId: w.masterId ?? null })));
       setParts(o.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price, source: p.source })));
       setFinish({
         diagnosis: o.diagnosis ?? "",
@@ -803,10 +803,34 @@ export default function OrderCard() {
             title="Выполненные работы"
             rows={works}
             setRows={setWorks}
-            empty={{ name: "", qty: 1, price: 0 }}
+            empty={{ name: "", qty: 1, price: 0, masterId: null }}
             saving={saving}
             services={ref?.services ?? []}
             onSave={() => void run(() => ordersApi.saveWorks(order.id, works), "Работы сохранены")}
+            // Чья работа — для зарплаты: два мастера на заказе делят деньги по
+            // строкам. Выбирает тот, кто правит любой заказ; мастер пишет на себя.
+            extraColumn={
+              can("orders.edit") && ref
+                ? (row, update) => (
+                    <Select
+                      className="min-h-[42px] w-[150px]"
+                      title="Чья работа — для зарплаты"
+                      value={row.masterId ?? ""}
+                      onChange={(e) => update({ masterId: e.target.value || null })}
+                    >
+                      <option value="">Мастер заказа</option>
+                      {ref.masters.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.fullName}
+                        </option>
+                      ))}
+                      {row.masterId && !ref.masters.some((m) => m.id === row.masterId) && (
+                        <option value={row.masterId}>другой сотрудник</option>
+                      )}
+                    </Select>
+                  )
+                : undefined
+            }
           />
 
           <LineEditor

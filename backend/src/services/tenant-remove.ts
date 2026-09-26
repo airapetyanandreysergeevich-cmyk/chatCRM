@@ -32,6 +32,10 @@ const ORDER: readonly string[] = [
   "notification",
   "auditLog",
   "feedback",
+  // зарплата: ссылается на сотрудников
+  "salaryEntry",
+  "salaryPayout",
+  "salaryMonth",
   // деньги
   "transaction",
   "transactionCategory",

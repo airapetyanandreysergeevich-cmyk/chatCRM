@@ -116,6 +116,9 @@ model Tenant {
   pushSubscriptions   PushSubscription[]
   impersonations      Impersonation[]
   feedback            Feedback[]
+  salaryEntries       SalaryEntry[]
+  salaryPayouts       SalaryPayout[]
+  salaryMonths        SalaryMonth[]
   sessions            Session[]
   application         TenantApplication[]
 }
@@ -368,6 +371,10 @@ model User {
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
   feedback          Feedback[]
+  salaryEntries     SalaryEntry[]        @relation("SalaryEntryUser")
+  salaryEntriesMade SalaryEntry[]        @relation("SalaryEntryAuthor")
+  salaryPayouts     SalaryPayout[]       @relation("SalaryPayoutUser")
+  salaryPayoutsMade SalaryPayout[]       @relation("SalaryPayoutAuthor")
 
   @@index([tenantId])
 }
@@ -1069,4 +1076,77 @@ model PushSubscription {
 
   @@index([tenantId, userId])
   @@index([platformUserId])
+}
+
+// ------------------------------------------------------------
+//  Зарплата
+// ------------------------------------------------------------
+//
+// Расчёт с сотрудниками за месяц: на начало — начислено — получено — итого.
+// Процент мастера считается на лету из оплаченных заказов (salary/calc.ts);
+// здесь хранится только то, что вводят руками, и снимки закрытых месяцев.
+// С кассой не связано: касса в мастерской не про одни ремонты, а выплаты
+// зарплаты — про людей.
+
+enum SalaryEntryKind {
+  /// Остаток на начало месяца — вводится один раз, в первом месяце учёта.
+  OPENING
+  /// Оклад, премия, штраф (штраф — с минусом).
+  BONUS
+}
+
+/// Начисления руками: оклад, премия, штраф, начальный остаток.
+model SalaryEntry {
+  id          String          @id @default(uuid())
+  tenantId    String
+  userId      String
+  /// Месяц «2026-09» — по часам мастерской.
+  month       String
+  kind        SalaryEntryKind @default(BONUS)
+  amount      Decimal         @db.Decimal(12, 2)
+  comment     String?
+  createdById String?
+  createdAt   DateTime        @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  user      User   @relation("SalaryEntryUser", fields: [userId], references: [id])
+  createdBy User?  @relation("SalaryEntryAuthor", fields: [createdById], references: [id])
+
+  @@index([tenantId, month])
+}
+
+/// Выплаты сотрудникам: кому, когда, сколько. Не касса.
+model SalaryPayout {
+  id          String    @id @default(uuid())
+  tenantId    String
+  userId      String
+  amount      Decimal   @db.Decimal(12, 2)
+  paidAt      DateTime
+  /// Месяц выплаты «2026-09» — по часам мастерской; считается из paidAt при записи.
+  month       String
+  comment     String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  user      User   @relation("SalaryPayoutUser", fields: [userId], references: [id])
+  createdBy User?  @relation("SalaryPayoutAuthor", fields: [createdById], references: [id])
+
+  @@index([tenantId, month])
+}
+
+/// Закрытый месяц: снимок ведомости. Поздние правки заказов его не трогают.
+model SalaryMonth {
+  id         String   @id @default(uuid())
+  tenantId   String
+  month      String
+  closedAt   DateTime @default(now())
+  closedById String?
+  snapshot   Json
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, month])
 }

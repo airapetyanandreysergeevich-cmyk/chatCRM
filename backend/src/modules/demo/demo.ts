@@ -380,6 +380,12 @@ export async function removeDemo(
   // ---- сотрудники: не удаляем строкой, а выключаем и освобождаем логин.
   // На них ссылается журнал, а он не правится; логин же должен освободиться —
   // настоящую Ольгу владелец заведёт как olga@…, и тестовая не должна мешать.
+  // Их зарплата — тоже тестовая: начисления и выплаты, которые владелец
+  // пробовал на тестовых мастерах, не должны остаться висеть в ведомости.
+  if (demo.users.length) {
+    await tx.salaryEntry.deleteMany({ where: { userId: { in: demo.users } } });
+    await tx.salaryPayout.deleteMany({ where: { userId: { in: demo.users } } });
+  }
   for (const id of demo.users) {
     const u = await tx.user.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
     if (!u) continue;

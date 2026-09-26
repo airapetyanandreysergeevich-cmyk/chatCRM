@@ -15,6 +15,7 @@ import ClientCard from "./pages/ClientCard";
 import Dashboard from "./pages/Dashboard";
 import DataPage from "./pages/Data";
 import Finance from "./pages/Finance";
+import Salary from "./pages/Salary";
 import InterfacePage from "./pages/Interface";
 import NotificationsPage from "./pages/Notifications";
 import SettingsPage from "./pages/Settings";
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="/stock" element={<Stock />} />
           <Route path="/purchases" element={<Purchases />} />
           <Route path="/finance" element={<Finance />} />
+          <Route path="/salary" element={<Salary />} />
           <Route path="/staff" element={<Staff />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/notifications" element={<NotificationsPage />} />

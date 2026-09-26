@@ -743,6 +743,10 @@ const worksSchema = z.object({
         name: z.string().trim().min(2, "Назовите работу"),
         qty: z.number().min(0.001).default(1),
         price: z.number().min(0),
+        // Чья работа — для зарплаты: два мастера на заказе делят базу по
+        // строкам. null — «мастер заказа». Не прислано (старая вкладка) —
+        // как раньше: мастер пишет на себя, остальные — на мастера заказа.
+        masterId: z.string().uuid().nullable().optional(),
       })
     )
     .max(100),
@@ -757,10 +761,32 @@ ordersRouter.put(
 
     const over = await withTenant(tenantId, async (tx) => {
       const order = await loadEditableOrder(req, tx);
+      // Раньше каждая строка записывалась на того, кто нажал «Сохранить», —
+      // и работы, которые вносил приёмщик, числились за приёмщиком. Для
+      // зарплаты это значит «мастеру ноль». Теперь мастер строки задаётся
+      // явно; без него строка — мастера заказа.
+      const editsAll = has(req, PERMISSIONS.ORDERS_EDIT);
+      const named = [...new Set(works.map((w) => w.masterId).filter((x): x is string => !!x))];
+      if (named.length) {
+        const found = await tx.user.count({ where: { id: { in: named }, deletedAt: null } });
+        if (found !== named.length) throw badRequest("Мастер работы не найден — обновите страницу");
+      }
+      // Мастер без права править чужое пишет новые строки на себя, но чужие
+      // строки (второго мастера) при сохранении не присваивает.
+      const had = new Set(
+        (await tx.orderWork.findMany({ where: { orderId: order.id }, select: { masterId: true } }))
+          .map((w) => w.masterId)
+          .filter((x): x is string => !!x)
+      );
       await tx.orderWork.deleteMany({ where: { orderId: order.id } });
       for (const w of works) {
+        const masterId = editsAll
+          ? (w.masterId ?? null)
+          : w.masterId && had.has(w.masterId)
+            ? w.masterId
+            : me;
         await tx.orderWork.create({
-          data: { tenantId, orderId: order.id, name: w.name, qty: w.qty, price: w.price, masterId: me },
+          data: { tenantId, orderId: order.id, name: w.name, qty: w.qty, price: w.price, masterId },
         });
       }
       await recalcTotals(tx, order.id);

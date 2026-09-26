@@ -18,6 +18,8 @@ export interface OrderWork {
   name: string;
   qty: number;
   price: number;
+  /** Чья работа — для зарплаты. null — мастер заказа. Только у работ. */
+  masterId?: string | null;
 }
 
 export interface OrderPart extends OrderWork {

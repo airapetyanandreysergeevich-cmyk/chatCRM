@@ -330,6 +330,17 @@ export const IconCash = (p: IconProps) => (
   </Icon>
 );
 
+/** Зарплата: стопка монет. */
+export const IconSalary = (p: IconProps) => (
+  <Icon {...p}>
+    <ellipse cx="9" cy="6.5" rx="5.5" ry="2.5" />
+    <path d="M3.5 6.5v4c0 1.4 2.5 2.5 5.5 2.5s5.5-1.1 5.5-2.5v-4" />
+    <path d="M3.5 10.5v4c0 1.4 2.5 2.5 5.5 2.5 1 0 1.9-.1 2.7-.3" />
+    <circle cx="16.5" cy="15.5" r="4.5" />
+    <path d="M16.5 13.5v4M15 15h2.5" />
+  </Icon>
+);
+
 /** Интерфейс: палитра художника. */
 export const IconPalette = (p: IconProps) => (
   <Icon {...p}>
