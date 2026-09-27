@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import PrintFormsPage from "./pages/PrintForms";
 import Layout from "./components/Layout";
 import { CopyMenu } from "./components/CopyMenu";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/settings/remote-access" element={<RemoteAccess />} />
           <Route path="/settings/services" element={<ServicesPage />} />
           <Route path="/settings/interface" element={<InterfacePage />} />
+          <Route path="/settings/print" element={<PrintFormsPage />} />
           <Route path="/settings/feedback" element={<FeedbackPage />} />
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}

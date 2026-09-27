@@ -17,6 +17,25 @@ contextBridge.exposeInMainWorld("setup", {
   apply: (choice) => ipcRenderer.invoke("setup:apply", choice),
   openLogs: (dir) => ipcRenderer.invoke("setup:open-logs", dir),
   retry: () => ipcRenderer.invoke("setup:retry"),
+  pickBackup: () => ipcRenderer.invoke("setup:pick-backup"),
+  restore: (choice) => ipcRenderer.invoke("setup:restore", choice),
   forget: () => ipcRenderer.invoke("setup:forget"),
   onProgress: (fn) => ipcRenderer.on("setup:progress", (_e, step) => fn(step)),
+});
+
+/**
+ * Резервные копии для страницы «Настройки → Базы».
+ *
+ * Мостик отдаётся в любое окно, но главный процесс выполняет действия,
+ * только если страница открыта с самой Основы (см. fromOwnWindow в main.js).
+ * На компьютере сотрудника и в облаке ответ — «не здесь».
+ */
+contextBridge.exposeInMainWorld("finecrmDesktop", {
+  backups: {
+    status: () => ipcRenderer.invoke("desktop:backups-status"),
+    addPlace: () => ipcRenderer.invoke("desktop:backups-add"),
+    removePlace: (placePath) => ipcRenderer.invoke("desktop:backups-remove", placePath),
+    runNow: () => ipcRenderer.invoke("desktop:backups-run"),
+    open: (placePath) => ipcRenderer.invoke("desktop:backups-open", placePath),
+  },
 });

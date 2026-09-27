@@ -150,11 +150,9 @@ export default function Interface() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [printNote, setPrintNote] = useState(branding.printNote ?? "");
   const savedName = currentWorkshopName(me);
   const [name, setName] = useState(savedName);
 
-  useEffect(() => setPrintNote(branding.printNote ?? ""), [branding.printNote]);
   useEffect(() => setName(savedName), [savedName]);
 
   const mayEdit = can("settings.manage");
@@ -295,7 +293,7 @@ export default function Interface() {
           <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <Field
               label="Название компании"
-              hint="Стоит внизу бокового меню, в шапке печатных бланков и в письмах клиентам"
+              hint="Стоит внизу бокового меню, в письмах клиентам и в шапке бланков, если там не задано другое"
               error={name.trim().length > 0 && name.trim().length < 2 ? "Слишком короткое" : undefined}
             >
               <Input
@@ -321,8 +319,8 @@ export default function Interface() {
             Логотип
           </p>
           <p className="mt-1.5 text-[13px] text-ink-dim">
-            Встанет в левый верхний угол вместо знака FineCRM и в шапку печатных бланков.
-            Картинку уменьшим сами, прозрачность сохраним.
+            Встанет в левый верхний угол окна программы вместо знака FineCRM. Картинку уменьшим сами,
+            прозрачность сохраним. Для бумаги логотип задаётся отдельно — в «Бланках».
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-4">
@@ -373,30 +371,13 @@ export default function Interface() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-            <Field
-              label="Строка в бланках"
-              hint="Адрес, телефон, часы работы — печатается под названием мастерской"
-            >
-              <Input
-                value={printNote}
-                onChange={(e) => setPrintNote(e.target.value)}
-                placeholder="г. Москва, ул. Ленина 5 · +7 495 000-00-00"
-              />
-            </Field>
-            <Button
-              variant="secondary"
-              disabled={busy || printNote.trim() === (branding.printNote ?? "")}
-              onClick={() =>
-                void putBranding(
-                  { logo: branding.logo, printNote: printNote.trim() || null },
-                  "Реквизиты сохранены"
-                )
-              }
-            >
-              Сохранить
-            </Button>
-          </div>
+          <p className="mt-4 text-[13px] text-ink-dim">
+            Логотип, реквизиты и тексты на квитанции и акте —{" "}
+            <Link to="/settings/print" className="font-semibold text-brand-ink hover:underline">
+              в «Настройки → Бланки»
+            </Link>
+            .
+          </p>
         </Card>
       )}
 

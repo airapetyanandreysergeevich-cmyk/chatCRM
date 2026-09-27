@@ -13,7 +13,7 @@ const { ensureLayout, backendDir, frontendDir, ocrModelsDir } = require("./paths
 const { prepareMain, backendEnv } = require("./bootstrap");
 const { Backend } = require("./backend");
 const { freePort } = require("./postgres");
-const { Backups } = require("./backup");
+const { Backups, findBackups, tooNew } = require("./backup");
 const network = require("./network");
 const discovery = require("./discovery");
 const { Updater } = require("./updater");
@@ -152,13 +152,13 @@ async function choosePort(cfg) {
 }
 
 /** Запуск в роли Основы: база, миграции, сервер, окно. */
-async function startMain(dataDir, owner = null) {
+async function startMain(dataDir, owner = null, restore = null) {
   const say = (step) => {
     state.step = step;
     if (win && !win.isDestroyed()) win.webContents.send("setup:progress", step);
   };
 
-  const prepared = await prepareMain(dataDir, say, owner);
+  const prepared = await prepareMain(dataDir, say, owner, restore);
   const cfg = prepared.config;
   postgres = prepared.postgres;
   const l = ensureLayout(dataDir);
@@ -187,7 +187,7 @@ async function startMain(dataDir, owner = null) {
 
   // Копии заводим только у Основы и только после того, как база поднялась:
   // это единственный компьютер, где данные действительно лежат.
-  backups = new Backups({ layout: l, config: cfg, binDir: postgres.binDir });
+  backups = new Backups({ layout: l, config: cfg, binDir: postgres.binDir, appVersion: app.getVersion() });
   backups.start((report) => {
     if (!report.ok) {
       dialog.showMessageBox(win, {
@@ -196,6 +196,11 @@ async function startMain(dataDir, owner = null) {
         message: report.error,
         detail: "Данные в порядке, но копии за сегодня нет. Проверьте, доступна ли папка для копий.",
       });
+    } else if (report.placesFailed) {
+      // Основная копия есть — окном не пугаем, но и молчать нельзя: флешку
+      // могли вынуть неделю назад, и узнают об этом в день поломки.
+      const where = report.places.filter((p) => !p.ok).map((p) => p.path).join(", ");
+      notify("Копия записана не везде", `Не удалось записать в: ${where}. Подробности — Настройки → Базы.`);
     }
     refreshTray();
   });
@@ -452,6 +457,17 @@ function refreshTray() {
             },
           ]
         : []),
+      ...(running
+        ? [
+            {
+              label: "Резервные копии…",
+              click: () => {
+                win.show();
+                void win.loadURL(`http://127.0.0.1:${running.port}/settings/data#backups`);
+              },
+            },
+          ]
+        : []),
       // Клиенту — к чему он подключён и как это поменять. Ситуации бывают
       // разные: Основу перенесли на другой компьютер, поставили второй
       // роутер, человек забрал ноутбук домой. Сменить подключение должно
@@ -581,6 +597,132 @@ ipcMain.handle("setup:forget", async () => {
   location.forgetLocation(userData());
   state.error = null;
   await showSetup();
+  return { ok: true };
+});
+
+// --------------------------------------------------- восстановление из копии
+
+/** Папка миграций сервера — чтобы не поднимать копию от более новой версии. */
+function migrationsDir() {
+  try {
+    return path.join(backendDir(), "prisma", "migrations");
+  } catch {
+    return null;
+  }
+}
+
+/** «Где лежат копии»: выбор папки и то, что в ней нашлось. */
+ipcMain.handle("setup:pick-backup", async () => {
+  const res = await dialog.showOpenDialog(win, {
+    title: "Где лежат резервные копии FineCRM",
+    properties: ["openDirectory"],
+  });
+  if (res.canceled) return { ok: false, canceled: true };
+  const found = findBackups(res.filePaths[0]);
+  if (!found.ok) return found;
+  const mig = migrationsDir();
+  return {
+    ...found,
+    dumps: found.dumps.map((d) => ({ ...d, tooNew: tooNew(d.info, mig) })),
+  };
+});
+
+/**
+ * Восстановить: пустая папка данных + выбранная копия.
+ *
+ * Место запоминаем только после успеха. Сорвалось — недоделанную базу
+ * отодвигаем в сторону (не удаляем: вдруг понадобится журнал), и следующая
+ * попытка начинается с чистого листа, а не с половины.
+ */
+ipcMain.handle("setup:restore", async (_e, choice) => {
+  const check = location.checkDataDir(choice && choice.dataDir);
+  if (!check.ok) return { ok: false, error: check.reason };
+  if (check.existing) {
+    return { ok: false, error: "В этой папке уже есть база. Для восстановления выберите пустую папку." };
+  }
+
+  const found = findBackups(choice.root);
+  const dump = found.ok && found.dumps.find((d) => d.file === choice.file);
+  if (!dump) return { ok: false, error: "Копия не найдена — выберите папку с копиями ещё раз." };
+  const newer = tooNew(dump.info, migrationsDir());
+  if (newer) return { ok: false, error: newer };
+
+  try {
+    await startMain(check.path, null, { root: found.root, file: dump.file });
+    location.writeLocation(userData(), { mode: config.MODE.MAIN, dataDir: check.path });
+    return { ok: true };
+  } catch (err) {
+    try {
+      if (backend) await backend.stop();
+      if (postgres) await postgres.stop();
+    } catch {
+      /* останавливаем, что поднялось */
+    }
+    backend = null;
+    postgres = null;
+    running = null;
+    const db = path.join(check.path, "db");
+    if (fs.existsSync(db)) {
+      const aside = `${db}-неудачное-восстановление-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      try {
+        fs.renameSync(db, aside);
+      } catch {
+        /* не отодвинулось — следующая попытка скажет, что папка занята */
+      }
+    }
+    return { ok: false, error: err.message };
+  }
+});
+
+// ------------------------------------------ резервные копии из окна программы
+
+/**
+ * Управлять копиями можно только из окна самой Основы: папки — это диски
+ * этого компьютера. Страницу, открытую с другого адреса (облако, чужая
+ * Основа), к этим действиям не пускаем.
+ */
+function fromOwnWindow(e) {
+  if (!running || !backups) return false;
+  try {
+    const url = new URL(e.senderFrame.url);
+    return url.origin === `http://127.0.0.1:${running.port}`;
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle("desktop:backups-status", (e) =>
+  fromOwnWindow(e) ? { ok: true, here: true, ...backups.status() } : { ok: true, here: false }
+);
+
+ipcMain.handle("desktop:backups-add", async (e) => {
+  if (!fromOwnWindow(e)) return { ok: false, error: "Места копий меняются только на компьютере с Основой" };
+  const res = await dialog.showOpenDialog(win, {
+    title: "Куда ещё складывать резервные копии",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (res.canceled) return { ok: false, canceled: true };
+  const added = backups.addPlace(res.filePaths[0]);
+  return { ...added, status: backups.status() };
+});
+
+ipcMain.handle("desktop:backups-remove", (e, placePath) => {
+  if (!fromOwnWindow(e)) return { ok: false, error: "Места копий меняются только на компьютере с Основой" };
+  return { ...backups.removePlace(placePath), status: backups.status() };
+});
+
+ipcMain.handle("desktop:backups-run", async (e) => {
+  if (!fromOwnWindow(e)) return { ok: false, error: "Копию делает компьютер с Основой" };
+  const report = await backups.run("вручную");
+  refreshTray();
+  return { ...report, status: backups.status() };
+});
+
+ipcMain.handle("desktop:backups-open", (e, placePath) => {
+  if (!fromOwnWindow(e)) return { ok: false };
+  const d = backups.destinations().find((x) => x.path === placePath);
+  if (!d || !fs.existsSync(d.dir)) return { ok: false, error: "Папки нет — диск не подключён?" };
+  void shell.openPath(d.dir);
   return { ok: true };
 });
 
@@ -829,6 +971,18 @@ app.on("before-quit", (e) => {
   // Сначала сервер, потом база: наоборот сервер успеет написать десяток
   // жалоб на пропавшую базу.
   (async () => {
+    // Копия при выходе — если за последние четверть часа её не было: при
+    // обновлении она только что сделана, а выход сразу после ручной копии не
+    // повод ждать ещё раз. Срок ограничен: выключать компьютер из-за копии
+    // полчаса никто не станет.
+    if (backups && running && running.cfg.backup.onExit && !backups.freshWithin(15)) {
+      notify("FineCRM закрывается", "Делаю резервную копию перед выходом — это недолго.");
+      try {
+        await Promise.race([backups.run("при выходе"), new Promise((r) => setTimeout(r, 3 * 60_000))]);
+      } catch {
+        /* не вышло — выходим всё равно */
+      }
+    }
     try {
       if (backups) backups.stop();
       if (responder) responder.close();

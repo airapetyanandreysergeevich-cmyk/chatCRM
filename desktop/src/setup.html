@@ -93,6 +93,17 @@
       .seg button { flex: 1; font-weight: 600; }
       .seg button.on { border-color: var(--brand); background: #1b2a3a; color: #fff; }
 
+      /* Копии для восстановления. */
+      .dump {
+        margin-top: 8px; padding: 12px 14px; border-radius: 12px;
+        border: 1px solid var(--line); background: var(--surface); cursor: pointer;
+      }
+      .dump:hover { border-color: #444a58; }
+      .dump.on { border-color: var(--brand); background: #1b2a3a; }
+      .dump.off { opacity: 0.55; cursor: default; }
+      .dump b { font-size: 14.5px; }
+      .dump div { color: var(--ink-muted); font-size: 12.5px; margin-top: 2px; }
+
       /* Найденные Основы. */
       .found {
         display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -139,12 +150,34 @@
         </div>
 
         <div id="mainFields">
+          <!-- Новая мастерская или та же самая после поломки: диск умер,
+               компьютер поменяли. Во втором случае учётная запись не нужна —
+               все люди, пароли и настройки приедут из копии. -->
+          <div class="seg">
+            <button type="button" id="asNew" class="on">Новая база</button>
+            <button type="button" id="asRestore">Восстановить из резервной копии</button>
+          </div>
+
+          <div id="restoreBox" class="hidden">
+            <p class="sub">Откуда восстановить</p>
+            <div class="row" style="margin-top: 0">
+              <button type="button" id="pickBackup">Выбрать папку с копиями…</button>
+            </div>
+            <p class="hint" id="backupHint">
+              Укажите флешку, диск или папку «FineCRM копии». Подойдёт и старая папка данных — копии лежат в её
+              подпапке backups.
+            </p>
+            <div id="dumpList"></div>
+            <p class="sub">Куда развернуть базу</p>
+          </div>
+
           <div class="folder">
             <input id="dir" placeholder="Папка для базы и фотографий" />
             <button id="pick">Выбрать…</button>
           </div>
           <p class="hint" id="dirHint">
-            Эту папку нужно будет включить в резервное копирование — в ней вся история мастерской.
+            Здесь будут база и фотографии. Резервные копии программа делает сама — потом добавьте для них флешку или
+            второй диск в «Настройки → Базы».
           </p>
 
           <!-- Первый вход. Спрашиваем здесь, а не после запуска: иначе человек
@@ -292,7 +325,11 @@
       /** «Подключиться», когда есть к чему; в остальных случаях — «Продолжить». */
       function updateGoLabel() {
         const connect = mode === "client" && ((how === "auto" && picked) || how === "hand");
-        $("go").textContent = connect ? "Подключиться" : "Продолжить";
+        $("go").textContent = connect
+          ? "Подключиться"
+          : mode === "main" && restoring
+            ? "Восстановить"
+            : "Продолжить";
       }
 
       function setHow(next) {
@@ -411,6 +448,78 @@
         $("againRow").classList.remove("hidden");
       }
 
+      // ------------------------------------------------ восстановление из копии
+
+      let restoring = false;
+      let backup = null; // что нашлось в выбранной папке
+      let dump = null; // выбранная копия
+
+      function setRestore(next) {
+        restoring = next;
+        $("asNew").classList.toggle("on", !restoring);
+        $("asRestore").classList.toggle("on", restoring);
+        $("restoreBox").classList.toggle("hidden", !restoring);
+        $("ownerFields").classList.toggle("hidden", restoring);
+        $("err").classList.add("hidden");
+        $("go").textContent = restoring ? "Восстановить" : "Продолжить";
+      }
+      $("asNew").onclick = () => setRestore(false);
+      $("asRestore").onclick = () => setRestore(true);
+
+      const bytes = (n) =>
+        n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1).replace(".", ",") + " МБ" : Math.max(1, Math.round(n / 1024)) + " КБ";
+      const when = (iso) =>
+        iso ? new Date(iso).toLocaleString("ru-RU", { dateStyle: "long", timeStyle: "short" }) : "дата неизвестна";
+
+      function renderDumps() {
+        const list = $("dumpList");
+        list.innerHTML = "";
+        if (!backup) return;
+        for (const d of backup.dumps) {
+          const row = document.createElement("div");
+          row.className = "dump" + (dump === d ? " on" : "") + (d.tooNew ? " off" : "");
+          const title = document.createElement("b");
+          title.textContent = when(d.at);
+          const info = document.createElement("div");
+          const parts = [];
+          if (d.info && d.info.workshop) parts.push(d.info.workshop);
+          if (d.info && d.info.orders != null) parts.push("заказов: " + d.info.orders);
+          if (d.info && d.info.photos != null) parts.push("снимков: " + d.info.photos);
+          parts.push(bytes(d.bytes));
+          if (d.info && d.info.appVersion) parts.push("версия " + d.info.appVersion);
+          info.textContent = d.tooNew || parts.join(" · ");
+          row.append(title, info);
+          if (!d.tooNew) {
+            row.onclick = () => {
+              dump = d;
+              renderDumps();
+            };
+          }
+          list.append(row);
+        }
+      }
+
+      $("pickBackup").onclick = async () => {
+        const res = await window.setup.pickBackup();
+        if (res.canceled) return;
+        if (!res.ok) {
+          backup = null;
+          dump = null;
+          renderDumps();
+          $("backupHint").className = "hint bad";
+          $("backupHint").textContent = res.error;
+          return;
+        }
+        backup = res;
+        // Самая свежая копия, которую эта программа умеет поднять.
+        dump = res.dumps.find((d) => !d.tooNew) || null;
+        renderDumps();
+        $("backupHint").className = "hint ok";
+        $("backupHint").textContent =
+          `Нашлось копий: ${res.dumps.length}, фотографий: ${res.photos}. Выбрана самая свежая — ` +
+          "можно выбрать и другую.";
+      };
+
       $("pick").onclick = async () => {
         const dir = await window.setup.pickFolder();
         if (dir) {
@@ -420,7 +529,7 @@
           $("dirHint").textContent = check.ok
             ? check.existing
               ? "В этой папке уже есть база — программа продолжит работать с ней."
-              : "Эту папку нужно будет включить в резервное копирование — в ней вся история мастерской."
+              : "Здесь будут база и фотографии. Резервные копии программа делает сама — потом добавьте для них флешку или второй диск в «Настройки → Базы»."
             : check.reason;
         }
       };
@@ -429,6 +538,19 @@
 
       async function go() {
         $("err").classList.add("hidden");
+        if (mode === "main" && restoring) {
+          const dataDir = $("dir").value.trim();
+          if (!backup || !dump) return fail("Выберите папку с копиями и копию, из которой восстановить");
+          if (!dataDir) return fail("Выберите папку, куда развернуть базу");
+          show("working");
+          $("step").innerHTML = '<span class="spin"></span> Начинаю восстановление…';
+          const res = await window.setup.restore({ dataDir, root: backup.root, file: dump.file });
+          if (!res.ok) {
+            show("choice");
+            fail(res.error);
+          }
+          return;
+        }
         const choice =
           mode === "main"
             ? {

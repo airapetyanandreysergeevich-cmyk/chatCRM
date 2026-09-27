@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconFeedback, IconPalette, IconServices, IconGlobe } from "../components/icons";
+import { IconBell, IconDatabase, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ordersApi } from "../lib/orders";
@@ -32,8 +32,15 @@ const SECTIONS: Section[] = [
   {
     to: "/settings/interface",
     title: "Интерфейс",
-    text: "Светлая или тёмная тема и цвета мастерской: стадии заказа, фон, панели, кнопки.",
+    text: "Светлая или тёмная тема, цвета мастерской и логотип в окне программы.",
     icon: <IconPalette />,
+  },
+  {
+    to: "/settings/print",
+    title: "Бланки",
+    text: "Квитанция и акт на печать: логотип, реквизиты, условия приёма, гарантия, подписи.",
+    icon: <IconPrint />,
+    need: "settings.manage",
   },
   {
     to: "/settings/services",

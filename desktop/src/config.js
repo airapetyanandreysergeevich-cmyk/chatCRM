@@ -80,11 +80,25 @@ const DEFAULTS = {
 
   backup: {
     enabled: true,
-    /** Куда складывать копии; пусто — в подпапку backups папки данных. */
+    /**
+     * Прежняя единственная папка копий. Больше не задаётся: основная копия
+     * всегда лежит в подпапке backups папки данных, а дополнительные места —
+     * в places. Старое значение при чтении переезжает в places.
+     */
     folder: "",
-    keep: 14,
+    /**
+     * Дополнительные места: второй диск, флешка, сетевая папка. Каждая копия
+     * идёт во все. У каждого места свой отчёт — флешку вынули, и видно, что
+     * именно там копии нет, а не «что-то не сделалось».
+     *   { path, lastAt, lastOk, lastError }
+     */
+    places: [],
+    /** Сколько копий базы хранить в каждом месте. */
+    keep: 7,
     /** Час, после которого делается суточная копия. */
     atHour: 20,
+    /** Копия при выходе из программы — вдобавок к суточной и перед обновлением. */
+    onExit: true,
 
     /** Отчёт о последней копии — его показывает интерфейс. */
     lastAt: null,
@@ -97,6 +111,24 @@ const DEFAULTS = {
 /** Пароль для машины, а не для человека: его никто не набирает руками. */
 const secret = () => crypto.randomBytes(24).toString("base64url");
 
+/**
+ * Раздел копий из старого файла настроек — в нынешнем виде.
+ *
+ * Две вещи переезжают сами. Прежняя «папка копий» становится одним из
+ * дополнительных мест. И прежнее «хранить 14» — 7: договорились, что недели
+ * хватает, а копий теперь столько же в каждом месте.
+ */
+function normalizeBackup(raw = {}) {
+  const b = { ...DEFAULTS.backup, ...raw };
+  const places = Array.isArray(b.places) ? b.places.filter((p) => p && typeof p.path === "string" && p.path) : [];
+  if (b.folder && !places.some((p) => p.path === b.folder)) places.push({ path: b.folder });
+  b.places = places.map((p) => ({ lastAt: null, lastOk: null, lastError: null, ...p }));
+  b.folder = "";
+  if (!Number.isInteger(b.keep) || b.keep < 1 || b.keep === 14) b.keep = DEFAULTS.backup.keep;
+  if (typeof b.onExit !== "boolean") b.onExit = DEFAULTS.backup.onExit;
+  return b;
+}
+
 function read(configPath) {
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -108,7 +140,7 @@ function read(configPath) {
       db: { ...DEFAULTS.db, ...(raw.db ?? {}) },
       auth: { ...DEFAULTS.auth, ...(raw.auth ?? {}) },
       share: { ...DEFAULTS.share, ...(raw.share ?? {}) },
-      backup: { ...DEFAULTS.backup, ...(raw.backup ?? {}) },
+      backup: normalizeBackup(raw.backup ?? {}),
     };
   } catch {
     return {
@@ -116,7 +148,7 @@ function read(configPath) {
       db: { ...DEFAULTS.db },
       auth: { ...DEFAULTS.auth },
       share: { ...DEFAULTS.share },
-      backup: { ...DEFAULTS.backup },
+      backup: normalizeBackup({}),
     };
   }
 }
@@ -157,4 +189,4 @@ function databaseUrl(config, role) {
   return `postgresql://${user}:${encodeURIComponent(password)}@127.0.0.1:${port}/${name}?schema=public`;
 }
 
-module.exports = { MODE, CLOUD_URL, DEFAULTS, read, write, ensureSecrets, databaseUrl, secret };
+module.exports = { MODE, CLOUD_URL, DEFAULTS, read, write, ensureSecrets, databaseUrl, secret, normalizeBackup };

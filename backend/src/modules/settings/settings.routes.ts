@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import { z, ZodError } from "zod";
 import { clientIp, writeAudit } from "../../lib/audit";
@@ -81,6 +82,44 @@ const brandingSchema = z.object({
   printNote: z.string().trim().max(200).nullable(),
 });
 
+/**
+ * Бланки на печать: логотип, шапка, тексты условий и гарантии, подписи.
+ *
+ * Хранится только то, что мастерская поменяла. Стандартные тексты живут в
+ * интерфейсе (lib/printForms.ts) — там же, где их печатают, — и поле, равное
+ * стандартному, сюда не пишется: улучшим формулировку, и её получат все, кто
+ * свою не задавал.
+ *
+ * Логотип бланков отдельный от логотипа интерфейса: на белой бумаге и на
+ * тёмном окне хорошо смотрятся разные картинки. Пока бланки не трогали, в
+ * них стоит логотип интерфейса — так было до разделения, так и остаётся.
+ */
+const text = (max: number) => z.string().max(max, `Не длиннее ${max} знаков`).nullable().optional();
+const logoField = z
+  .string()
+  .regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, "Подойдёт PNG, JPEG или WebP")
+  .max(LOGO_LIMIT, "Логотип слишком тяжёлый — уменьшите картинку")
+  .nullable()
+  .optional();
+
+const printSchema = z
+  .object({
+    logo: logoField,
+    name: text(80),
+    requisites: text(400),
+    intake: z
+      .object({ title: text(80), terms: text(2000), signClient: text(100), signStaff: text(100) })
+      .strip()
+      .optional(),
+    act: z
+      .object({ title: text(80), warranty: text(2000), signClient: text(100), signStaff: text(100) })
+      .strip()
+      .optional(),
+    footer: text(200),
+    stamp: z.boolean().optional(),
+  })
+  .strip();
+
 async function readSettings(tenantId: string): Promise<Record<string, unknown>> {
   const tenant = await withTenant(tenantId, (tx) =>
     tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } })
@@ -151,6 +190,59 @@ settingsRouter.put(
   })
 );
 
+/** Бланки — всем, кто печатает: мастеру и приёмщику они нужны так же, как владельцу. */
+settingsRouter.get(
+  "/print",
+  ah(async (req, res) => {
+    const settings = await readSettings(tenantOf(req));
+    const branding = (settings.branding ?? {}) as Record<string, unknown>;
+    res.json({
+      print: (settings.print ?? {}) as Record<string, unknown>,
+      // Что стоит в бланках, пока их не настраивали: логотип интерфейса и
+      // прежняя «строка в бланках».
+      fallback: {
+        logo: typeof branding.logo === "string" ? branding.logo : null,
+        requisites: typeof branding.printNote === "string" ? branding.printNote : null,
+      },
+    });
+  })
+);
+
+settingsRouter.put(
+  "/print",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const print = printSchema.parse(req.body);
+    const tenantId = tenantOf(req);
+
+    await withTenant(tenantId, async (tx) => {
+      const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const before = ((tenant?.settings as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+      await tx.tenant.update({ where: { id: tenantId }, data: { settings: { ...before, print } as Prisma.InputJsonObject } });
+
+      const old = (before.print ?? {}) as Record<string, unknown>;
+      const changed = Object.keys({ ...old, ...print }).filter(
+        (k) => JSON.stringify(old[k] ?? null) !== JSON.stringify((print as Record<string, unknown>)[k] ?? null)
+      );
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        // Тексты целиком в журнал не кладём — только что именно правили.
+        diff: {
+          print: changed,
+          ...(changed.includes("logo") ? { printLogo: print.logo ? "загружен" : "убран" } : {}),
+        },
+        ip: clientIp(req),
+      });
+    });
+
+    res.json({ ok: true });
+  })
+);
+
 settingsRouter.put(
   "/branding",
   requirePermission(PERMISSIONS.SETTINGS_MANAGE),
@@ -163,7 +255,25 @@ settingsRouter.put(
         where: { id: tenantId },
         select: { settings: true },
       });
-      const settings = { ...((tenant?.settings as object) ?? {}), branding };
+      const current = ((tenant?.settings as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+      const print = { ...((current.print ?? {}) as Record<string, unknown>) };
+      // Логотип интерфейса меняют — а бланки его до сих пор наследовали.
+      // Закрепляем в бланках прежний: логотипы теперь раздельные, и смена
+      // картинки в окне программы не должна молча менять бумагу. Если
+      // прежнего не было, закреплять нечего: пусть мастерская, которая
+      // бланки ещё не открывала, получит логотип и на бумаге, как раньше.
+      const oldBranding = (current.branding ?? {}) as Record<string, unknown>;
+      if (!("logo" in print) && typeof oldBranding.logo === "string" && oldBranding.logo !== branding.logo) {
+        print.logo = oldBranding.logo;
+      }
+      if (
+        !("requisites" in print) &&
+        typeof oldBranding.printNote === "string" &&
+        oldBranding.printNote !== branding.printNote
+      ) {
+        print.requisites = oldBranding.printNote;
+      }
+      const settings = { ...current, branding, print } as Prisma.InputJsonObject;
       await tx.tenant.update({ where: { id: tenantId }, data: { settings } });
 
       await writeAudit(tx, {

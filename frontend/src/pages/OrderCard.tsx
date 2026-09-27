@@ -627,6 +627,10 @@ export default function OrderCard() {
                   { label: "Принят", value: formatDateTime(order.acceptedAt) },
                   { label: "Приёмщик", value: order.acceptedBy?.fullName },
                   { label: "Срок готовности", value: formatDate(order.dueAt) },
+                  // Когда закончили и когда отдали — разные дни, и путать их
+                  // нельзя: гарантия и претензии клиента считаются от выдачи.
+                  ...(order.completedAt ? [{ label: "Готов", value: formatDateTime(order.completedAt) }] : []),
+                  ...(order.issuedAt ? [{ label: "Выдан", value: formatDateTime(order.issuedAt) }] : []),
                   {
                     label: "Мастер",
                     // Мастера меняет тот, кто вправе править заказ: «взялся

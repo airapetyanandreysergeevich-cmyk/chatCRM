@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
+import { readBackupStatus } from "./backups";
 import multer from "multer";
 import { originalName } from "../../lib/uploadName";
 import { z } from "zod";
@@ -42,6 +43,14 @@ dataRouter.use(
 );
 
 const tenantOf = (req: Request) => currentTenantId(req)!;
+
+/** Резервные копии Основы — посмотреть с любого компьютера (см. backups.ts). */
+dataRouter.get(
+  "/backups",
+  ah(async (_req, res) => {
+    res.json(readBackupStatus());
+  })
+);
 
 /** Раздел доступен, если у человека есть его собственное право (если оно у раздела есть). */
 const mayUse = (req: Request, key: DatasetKey): boolean => {

@@ -439,3 +439,12 @@ export const IconSend = (p: IconProps) => (
     <path d="m12 13.5 3.5-5" />
   </Icon>
 );
+
+export const IconPrint = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 8.5V3.5h10v5" />
+    <rect x="3.5" y="8.5" width="17" height="8" rx="2" />
+    <path d="M7 14h10v6.5H7z" />
+    <path d="M17 11.5h.01" />
+  </Icon>
+);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BackupsCard } from "../components/BackupsCard";
 import { copyText } from "../components/CopyMenu";
 import { RemoveDemoModal } from "../components/DemoBanner";
 import { MigrateCard } from "../components/MigrateCard";
@@ -833,8 +834,9 @@ export default function Data() {
       <PageHeader
         eyebrow="Настройки"
         title="Базы"
-        subtitle="Нумерация заказов, тестовые данные, перенос из другой программы, выгрузка и загрузка из файла."
+        subtitle="Резервные копии, нумерация заказов, тестовые данные, перенос из другой программы, выгрузка и загрузка из файла."
       />
+      <BackupsCard />
       <OrderNumberCard />
       <DemoCard />
       <MigrateCard />

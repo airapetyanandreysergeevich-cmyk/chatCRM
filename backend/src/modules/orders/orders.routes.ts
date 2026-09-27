@@ -196,7 +196,11 @@ ordersRouter.get(
       const count = tx.order.count({ where });
 
       const byBase: Partial<Record<OrderSort, Prisma.OrderOrderByWithRelationInput[]>> = {
-        default: [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
+        // У выданных срочность уже ничего не значит: сверху — отданные последними.
+        default:
+          q.group === "CLOSED"
+            ? [{ issuedAt: { sort: "desc", nulls: "last" } }, { acceptedAt: "desc" }]
+            : [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
         new: [{ acceptedAt: "desc" }],
         old: [{ acceptedAt: "asc" }],
         total: [{ total: "desc" }, { acceptedAt: "desc" }],

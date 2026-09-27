@@ -53,6 +53,10 @@ type Sort = (typeof SORTS)[number]["value"];
 const FILTERS: Array<{ value: string; label: string; pill: string | null }> = [
   { value: "", label: "Все", pill: null },
   ...STAGES.map((s) => ({ value: s.key, label: s.label, pill: s.pill })),
+  // Выданные — уже не стадия работы, поэтому на главной их нет, а здесь
+  // есть: найти, что и когда отдали. Сюда же попадает выданное без ремонта —
+  // техника ушла к клиенту так же. Отменённые (клиент так и не сдал) — нет.
+  { value: "CLOSED", label: "Выдан", pill: "border-line-strong bg-surface-hover text-ink" },
 ];
 
 const deviceTitle = (o: Order) =>

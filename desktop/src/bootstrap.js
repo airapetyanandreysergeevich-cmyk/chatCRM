@@ -7,6 +7,7 @@ const { spawn } = require("child_process");
 const { ensureLayout, backendDir } = require("./paths");
 const config = require("./config");
 const { LocalPostgres, freePort } = require("./postgres");
+const { mirror, restoreDump, countFiles } = require("./backup");
 
 /**
  * Подготовка Основы к работе.
@@ -101,8 +102,11 @@ function prismaCli(backend) {
  *        запуске это единственное, что человек видит минуту-другую
  * @param {{workshop, fullName, email, password}|null} [owner] данные первого
  *        входа; передаются только на первом запуске, дальше мастерская уже есть
+ * @param {{root: string, file: string}|null} [restore] восстановление из
+ *        резервной копии: папка копий и выбранный файл базы. Только в пустую
+ *        папку — поверх работающей базы не восстанавливаем.
  */
-async function prepareMain(dataDir, say = () => {}, owner = null) {
+async function prepareMain(dataDir, say = () => {}, owner = null, restore = null) {
   const l = ensureLayout(dataDir);
 
   say("Читаю настройки");
@@ -110,6 +114,16 @@ async function prepareMain(dataDir, say = () => {}, owner = null) {
   cfg.mode = config.MODE.MAIN;
 
   const pg = new LocalPostgres({ dataDir: l.db, logDir: l.logs });
+
+  if (restore) {
+    if (pg.initialized) throw new Error("В этой папке уже есть база. Для восстановления выберите пустую папку.");
+    adoptBackupConfig(cfg, restore.root);
+    config.write(l.config, cfg);
+
+    const photos = countFiles(path.join(restore.root, "files"));
+    say(photos ? `Возвращаю фотографии заказов (${photos})` : "Фотографий в копии нет");
+    mirror(path.join(restore.root, "files"), l.files);
+  }
 
   if (!pg.initialized) {
     say("Создаю базу данных — это делается один раз и занимает до минуты");
@@ -127,6 +141,19 @@ async function prepareMain(dataDir, say = () => {}, owner = null) {
   try {
     say("Проверяю роли и права");
     await pg.provision(cfg.db, cfg.db.ownerPassword);
+
+    if (restore) {
+      say("Восстанавливаю базу из копии — это может занять несколько минут");
+      await restoreDump({
+        binDir: pg.binDir,
+        port: cfg.db.port,
+        db: cfg.db,
+        superPassword: cfg.db.ownerPassword,
+        file: restore.file,
+      });
+      // Права роли приложения — ещё раз, уже на восстановленные таблицы.
+      await pg.provision(cfg.db, cfg.db.ownerPassword);
+    }
 
     const be = backendDir();
     say("Обновляю структуру базы");
@@ -174,6 +201,32 @@ async function prepareMain(dataDir, say = () => {}, owner = null) {
   }
 }
 
+/**
+ * Настройки из копии — то, что делает установку той же самой мастерской.
+ *
+ * Берём имя мастерской, места и расписание копий, порт в сети (его знают
+ * компьютеры сотрудников) и ключи подписи входа — с ними сотрудникам не
+ * придётся входить заново. Пароли и порт базы не берём: база создаётся
+ * заново, на этом компьютере, со своими.
+ */
+function adoptBackupConfig(cfg, root) {
+  const file = path.join(root, "config.json");
+  if (!fs.existsSync(file)) return cfg;
+  const old = config.read(file);
+  if (old.workshopName) cfg.workshopName = old.workshopName;
+  if (old.auth.accessSecret && old.auth.refreshSecret) cfg.auth = { ...old.auth };
+  if (old.share && old.share.port) cfg.share.port = old.share.port;
+  cfg.backup = {
+    ...cfg.backup,
+    enabled: old.backup.enabled,
+    keep: old.backup.keep,
+    atHour: old.backup.atHour,
+    onExit: old.backup.onExit,
+    places: old.backup.places.map((p) => ({ path: p.path, lastAt: null, lastOk: null, lastError: null })),
+  };
+  return cfg;
+}
+
 /** Окружение для бэкенда в локальном режиме. */
 function backendEnv(cfg, l) {
   return {
@@ -194,8 +247,11 @@ function backendEnv(cfg, l) {
     // Файлы вместо S3.
     STORAGE_DRIVER: "local",
     STORAGE_DIR: l.files,
+    // Отсюда сервер читает отчёт о резервных копиях для «Настройки → Базы»,
+    // чтобы его видели и с других компьютеров. Только чтение раздела backup.
+    FINECRM_CONFIG: l.config,
     CORS_ORIGIN: "*",
   };
 }
 
-module.exports = { prepareMain, backendEnv, runTool };
+module.exports = { prepareMain, backendEnv, runTool, adoptBackupConfig };
