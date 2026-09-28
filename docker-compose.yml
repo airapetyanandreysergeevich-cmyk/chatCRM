@@ -64,7 +64,13 @@ services:
       PLATFORM_OWNER_PASSWORD: ${PLATFORM_OWNER_PASSWORD}
       # Распознаватель шильдиков. Без него сайт работает как раньше, просто
       # без кнопки камеры на бланке, — поэтому и depends_on на него нет.
-      OCR_URL: http://ocr:8000
+      # С 28.09.2026 серверный распознаватель выключен: шильдик читает само
+      # устройство (PLATE_OCR_BROWSER ниже). Вернуть серверный: в deploy/.env
+      # OCR_URL=http://ocr:8000 и COMPOSE_PROFILES=ocr, затем bash deploy/update.sh.
+      OCR_URL: ${OCR_URL:-}
+      # Распознавание на устройстве сотрудника: телефон или компьютер сам читает
+      # шильдик, на сервер уходят только строки текста. Модели раздаёт frontend.
+      PLATE_OCR_BROWSER: "1"
       # Приём коробочных Основ: /relay/agent для них, /b/<код>/ для людей.
       RELAY_ENABLED: "1"
 
@@ -73,6 +79,9 @@ services:
   # потолок памяти: распознавание не должно отнимать сервер у сайта и базы.
   ocr:
     build: ./ocr
+    # Поднимается только с профилем ocr (COMPOSE_PROFILES=ocr в deploy/.env):
+    # выключенный распознаватель не держит память сервера.
+    profiles: ["ocr"]
     restart: unless-stopped
     cpus: 1.0
     mem_limit: 900m
@@ -80,7 +89,11 @@ services:
       OMP_NUM_THREADS: "1"
 
   frontend:
-    build: ./frontend
+    # Контекст — весь репозиторий (лишнее отсекает корневой .dockerignore):
+    # в образ интерфейса нужны ещё модели распознавателя из desktop/ocr-models.
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     restart: unless-stopped
     depends_on:
       - backend

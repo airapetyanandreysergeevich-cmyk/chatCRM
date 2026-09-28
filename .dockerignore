@@ -1,0 +1,10 @@
+# Корневой контекст нужен только образу интерфейса (docker-compose.yml,
+# frontend): ему — сам интерфейс и модели распознавателя. Остальное не
+# отправляем в сборку: там базы, сборки программы и чужие node_modules.
+*
+!frontend
+!desktop/ocr-models
+frontend/node_modules
+frontend/dist
+desktop/ocr-models/*.wasm
+desktop/ocr-models/*.mjs
