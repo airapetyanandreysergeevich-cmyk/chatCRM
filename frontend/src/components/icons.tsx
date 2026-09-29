@@ -448,3 +448,14 @@ export const IconPrint = (p: IconProps) => (
     <path d="M17 11.5h.01" />
   </Icon>
 );
+
+/** Статистика: столбики с линией тренда. */
+export const IconStats = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 20h16" />
+    <rect x="5.5" y="12" width="3" height="6" rx="1" />
+    <rect x="10.5" y="8.5" width="3" height="9.5" rx="1" />
+    <rect x="15.5" y="10.5" width="3" height="7.5" rx="1" />
+    <path d="M5 8.5l5-3.5 4 2.5 5-4" />
+  </Icon>
+);

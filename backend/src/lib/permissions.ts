@@ -36,6 +36,8 @@ export const PERMISSIONS = {
   SALARY_VIEW_OWN: "salary.view.own",
   SALARY_MANAGE: "salary.manage",
 
+  /** Раздел «Статистика»: вся мастерская и все мастера. */
+  STATS_VIEW: "stats.view",
   REPORTS_VIEW: "reports.view",
   REPORTS_FINANCE: "reports.finance",
 
@@ -59,7 +61,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
       P.PURCHASES_VIEW, P.PURCHASES_CREATE, P.PURCHASES_APPROVE,
       P.FINANCE_VIEW, P.FINANCE_PAYMENT, P.FINANCE_MANAGE,
       P.SALARY_VIEW_ALL, P.SALARY_MANAGE,
-      P.REPORTS_VIEW, P.REPORTS_FINANCE,
+      P.STATS_VIEW, P.REPORTS_VIEW, P.REPORTS_FINANCE,
       P.STAFF_MANAGE,
     ],
   },
@@ -180,6 +182,7 @@ export const PERMISSION_GROUPS: Array<{ group: string; items: Array<{ code: Perm
   {
     group: "Отчёты и настройки",
     items: [
+      { code: P.STATS_VIEW, label: "Статистика мастерской", hint: "Все заказы и все мастера. Суммы — если ещё видит кассу. Без права мастер видит только свою статистику" },
       { code: P.REPORTS_VIEW, label: "Отчёты по работе" },
       { code: P.REPORTS_FINANCE, label: "Финансовые отчёты" },
       { code: P.STAFF_MANAGE, label: "Заводит сотрудников" },
