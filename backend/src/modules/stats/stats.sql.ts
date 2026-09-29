@@ -238,12 +238,19 @@ export async function flags(c: Ctx, r: Range) {
   return { urgent: n(x?.urgent), returning: n(x?.returning), total: n(x?.total) };
 }
 
-/** Выданные, пролежавшие готовыми дольше двух недель. */
+/**
+ * Выданные, пролежавшие готовыми дольше двух недель.
+ *
+ * ::int обязателен: настоящий движок Prisma передаёт число из JS как bigint,
+ * а make_interval(days => bigint) в PostgreSQL нет — «Внутренняя ошибка» на
+ * всём «Обзоре». В песочнице (adapter-pg) параметр уходит без типа, и
+ * ошибка не видна (см. «Грабли»).
+ */
 export async function idleLong(c: Ctx, r: Range, days = 14) {
   const [x] = await q<{ n: bigint }>(c, Prisma.sql`
     SELECT count(*) AS n FROM "Order" o
     WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL AND o."issuedAt" IS NOT NULL AND o."completedAt" IS NOT NULL
-      AND o."issuedAt" - o."completedAt" > make_interval(days => ${days}) AND ${within(c, 'o."issuedAt"', r)}`);
+      AND o."issuedAt" - o."completedAt" > make_interval(days => ${days}::int) AND ${within(c, 'o."issuedAt"', r)}`);
   return n(x?.n);
 }
 
