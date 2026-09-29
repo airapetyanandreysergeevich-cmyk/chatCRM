@@ -13,7 +13,8 @@ import { createTenant } from "../../services/tenant";
 import { removeTenantForever } from "../../services/tenant-remove";
 import { boxesRouter } from "../relay/boxes.routes";
 import { dictionarySchema, loadDictionary, saveDictionary } from "../plate/plate.dictionary";
-import { BUILTIN } from "../plate/plate.parse";
+import { brandsByRules, BUILTIN, buildDictionary, modelKeys } from "../plate/plate.parse";
+import { platformKnowledge } from "../plate/plate.learn";
 
 export const platformRouter = Router();
 
@@ -222,8 +223,83 @@ platformRouter.put(
     await logPlatform(req, "PLATE_DICTIONARY_UPDATE", null, {
       brands: saved.brands.length,
       noise: saved.noise.length,
+      models: saved.models?.length ?? 0,
     });
     res.json({ dictionary: saved, builtin: BUILTIN });
+  })
+);
+
+/**
+ * Модели, у которых при распознавании марка не нашлась, — со всех мастерских
+ * облака и Основ. По ним видно, каких правил не хватает словарю.
+ *
+ * Каждая строка сверяется с сегодняшним словарём и памятью мастерских: то,
+ * что уже узнаётся, помечено, и в начале списка — то, что нет. Рядом —
+ * марки, которые мастерские вписывали для этой модели руками, даже если их
+ * пока слишком мало, чтобы поверить им автоматически.
+ */
+/**
+ * Убранные строки помним отдельно: Основа присылает свои промахи заново
+ * каждые шесть часов, и без этого списка убранное возвращалось бы.
+ */
+const HIDDEN_KEY = "plateMissHidden";
+async function hiddenMisses(): Promise<string[]> {
+  const row = await prisma.platformSetting.findUnique({ where: { key: HIDDEN_KEY } });
+  return Array.isArray(row?.value) ? (row!.value as unknown[]).filter((x): x is string => typeof x === "string") : [];
+}
+
+platformRouter.get(
+  "/plate-misses",
+  ah(async (_req, res) => {
+    const hidden = await hiddenMisses();
+    const rows = await prisma.plateMiss.groupBy({
+      by: ["modelKey"],
+      where: { source: { not: "local" }, ...(hidden.length ? { modelKey: { notIn: hidden } } : {}) },
+      _sum: { uses: true },
+      _max: { lastAt: true, model: true },
+      _count: { source: true },
+      orderBy: { _max: { lastAt: "desc" } },
+      take: 300,
+    });
+    const [dictionary, known] = await Promise.all([loadDictionary(), platformKnowledge()]);
+    const rules = buildDictionary({ dictionary }).models;
+
+    const items = rows.map((r) => {
+      const model = r._max.model ?? r.modelKey;
+      const byRule = brandsByRules(model, rules)[0] ?? null;
+      const keys = [...new Set([...modelKeys(model), r.modelKey])];
+      const learned = keys.map((k) => known.decided.get(k)).find(Boolean) ?? null;
+      const votes = keys.map((k) => known.votes.get(k)).find(Boolean)?.brands ?? [];
+      return {
+        modelKey: r.modelKey,
+        model,
+        uses: r._sum.uses ?? 0,
+        workshops: r._count.source,
+        lastAt: r._max.lastAt,
+        resolved: byRule ? { brand: byRule, by: "rule" as const } : learned ? { brand: learned, by: "history" as const } : null,
+        votes: votes.slice(0, 4),
+      };
+    });
+    items.sort((a, b) => Number(!!a.resolved) - Number(!!b.resolved));
+    res.json({ items });
+  })
+);
+
+/** Убрать строку из списка — модель не шильдик, опечатка, не интересно. */
+platformRouter.delete(
+  "/plate-misses/:key",
+  requireOwner,
+  ah(async (req, res) => {
+    const { key } = z.object({ key: z.string().min(1).max(80) }).parse(req.params);
+    const { count } = await prisma.plateMiss.deleteMany({ where: { modelKey: key } });
+    // Последние 2000 убранных: список не должен расти без конца.
+    const hidden = [...(await hiddenMisses()).filter((k) => k !== key), key].slice(-2000);
+    await prisma.platformSetting.upsert({
+      where: { key: HIDDEN_KEY },
+      create: { key: HIDDEN_KEY, value: hidden },
+      update: { value: hidden },
+    });
+    res.json({ ok: true, removed: count });
   })
 );
 

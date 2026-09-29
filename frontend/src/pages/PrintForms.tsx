@@ -6,7 +6,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LOGO_TYPES, prepareLogo } from "../lib/branding";
 import type { Order } from "../lib/orders";
-import { DEFAULT_TEXTS, printFormsApi, type DocTexts, type PrintForms } from "../lib/printForms";
+import { DEFAULT_TEXTS, printFormsApi, TEXT_LEADING, TEXT_SIZE, type DocTexts, type PrintForms } from "../lib/printForms";
 
 /**
  * «Настройки → Бланки»: квитанция и акт так, как их увидит клиент.
@@ -153,6 +153,65 @@ function FieldHead({
   );
 }
 
+/**
+ * Ползунок с числом и кнопками ±: ползунком — быстро и на глаз, кнопками —
+ * точно на шаг, число — чтобы запомнить, что подошло.
+ */
+function Stepper({
+  label,
+  value,
+  min,
+  max,
+  step,
+  show,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  show: (v: number) => string;
+  disabled: boolean;
+  onChange: (v: number) => void;
+}) {
+  const clamp = (v: number) => Math.min(max, Math.max(min, Math.round(v / step) * step));
+  const btn =
+    "grid h-8 w-8 shrink-0 place-items-center rounded-field border border-line bg-surface-raised text-[16px] font-semibold text-ink-muted " +
+    "hover:border-line-strong hover:text-ink disabled:opacity-40";
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="text-[12.5px] font-semibold text-ink-muted">{label}</span>
+        <span className="text-[13px] font-semibold tabular-nums">{show(value)}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button type="button" className={btn} disabled={disabled || value <= min} onClick={() => onChange(clamp(value - step))} aria-label={`${label}: меньше`}>
+          −
+        </button>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(clamp(Number(e.target.value)))}
+          aria-label={label}
+          className="h-2 min-w-0 flex-1 cursor-pointer accent-brand"
+        />
+        <button type="button" className={btn} disabled={disabled || value >= max} onClick={() => onChange(clamp(value + step))} aria-label={`${label}: больше`}>
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 9.5 → «9,5», 10 → «10», 1.45 → «1,45». */
+const decimal = (v: number, digits: number) => String(Number(v.toFixed(digits))).replace(".", ",");
+
 const Hint = ({ children }: { children: ReactNode }) => (
   <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{children}</p>
 );
@@ -179,7 +238,7 @@ function DocCard({
   staffHint: string;
 }) {
   const d = DEFAULT_TEXTS[kind];
-  const set = (k: keyof DocTexts) => (v: string) => onChange({ ...texts, [k]: v });
+  const set = (k: keyof DocTexts) => (v: string | number) => onChange({ ...texts, [k]: v });
   const reset = (k: keyof DocTexts) => (texts[k] !== d[k] ? () => onChange({ ...texts, [k]: d[k] }) : undefined);
 
   return (
@@ -200,6 +259,38 @@ function DocCard({
             onChange={(e) => set("body")(e.target.value)}
           />
           <Hint>{bodyHint}</Hint>
+          <div className="mt-3 rounded-field border border-line px-3 pb-3 pt-2.5">
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <span className="text-[12.5px] font-semibold text-ink-soft">Текст на листе</span>
+              {(texts.size !== d.size || texts.leading !== d.leading) && !disabled && (
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...texts, size: d.size, leading: d.leading })}
+                  className="text-[12.5px] font-semibold text-brand-ink hover:underline"
+                >
+                  Вернуть стандартный
+                </button>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Stepper
+                label="Размер шрифта"
+                value={texts.size}
+                {...TEXT_SIZE}
+                show={(v) => `${decimal(v, 1)} пт`}
+                disabled={disabled}
+                onChange={(v) => set("size")(v)}
+              />
+              <Stepper
+                label="Межстрочный интервал"
+                value={texts.leading}
+                {...TEXT_LEADING}
+                show={(v) => decimal(v, 2)}
+                disabled={disabled}
+                onChange={(v) => set("leading")(Math.round(v * 100) / 100)}
+              />
+            </div>
+          </div>
         </div>
         {/* Подписи одна под другой: фразы длинные, и в две колонки поле
             обрезает их на середине — не видно, что именно правишь. */}

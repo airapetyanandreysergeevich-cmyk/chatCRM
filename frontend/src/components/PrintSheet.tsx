@@ -1,6 +1,6 @@
 import { formatDate, formatDateTime } from "../lib/format";
 import type { Order } from "../lib/orders";
-import type { PrintForms } from "../lib/printForms";
+import type { DocTexts, PrintForms } from "../lib/printForms";
 
 /**
  * Лист бланка — квитанция о приёме или акт выполненных работ.
@@ -33,7 +33,7 @@ function SignLine({ label, stamp = false }: { label: string; stamp?: boolean }) 
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mt-4 break-inside-avoid">
+    <section className="mt-4 break-inside-avoid first:mt-0">
       <h2 className="border-b border-black/30 pb-1 text-[11px] font-bold uppercase tracking-[0.1em]">
         {title}
       </h2>
@@ -42,9 +42,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/**
+ * Пары «название: значение» — друг под другом: лист теперь в две колонки,
+ * и в узкой колонке пары в два ряда разрывали бы строки на середине.
+ */
 function Pairs({ items }: { items: Array<[string, React.ReactNode]> }) {
   return (
-    <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+    <dl className="grid gap-y-1">
       {items.map(([k, v]) => (
         <div key={k} className="flex gap-2 text-[12px]">
           <dt className="shrink-0 text-black/55">{k}:</dt>
@@ -73,6 +77,35 @@ function Checked({ items, empty, strong = [] }: { items: string[]; empty: string
         </span>
       ))}
     </p>
+  );
+}
+
+/**
+ * Условия — во всю ширину листа, в рамке, с размером и интервалом из
+ * «Бланков». Это то, под чем клиент расписывается, и читаться оно должно не
+ * хуже остального листа. Подписи идут сразу под рамкой.
+ */
+function Terms({ title, texts }: { title: string; texts: DocTexts }) {
+  return (
+    <section className="mt-5 break-inside-avoid rounded-[3px] border border-black/30 px-[4mm] py-[3mm]">
+      <h2 className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-black/70">{title}</h2>
+      <p
+        className="mt-1.5 whitespace-pre-line text-black/85"
+        style={{ fontSize: `${texts.size}pt`, lineHeight: texts.leading }}
+      >
+        {texts.body}
+      </p>
+    </section>
+  );
+}
+
+/** Две колонки верха листа: слева кто и что, справа — в каком виде и с чем. */
+function Columns({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-x-[8mm]">
+      <div className="min-w-0">{left}</div>
+      <div className="min-w-0">{right}</div>
+    </div>
   );
 }
 
@@ -165,67 +198,81 @@ export function PrintSheet({
         </div>
       </header>
 
-      <Section title="Клиент">
-        <Pairs
-          items={[
-            ["Клиент", order.customer.name ?? "—"],
-            ["Телефон", order.customer.phone ?? "—"],
-          ]}
-        />
-      </Section>
-
-      <Section title="Техника">
-        <Pairs
-          items={[
-            ["Устройство", deviceLine(order)],
-            ["Серийный номер", order.device?.serial || "—"],
-            ["Принята", formatDateTime(order.acceptedAt)],
-            [
-              doc === "intake" ? "Срок готовности" : "Ремонт завершён",
-              doc === "intake" ? formatDate(order.dueAt) : formatDateTime(order.completedAt),
-            ],
-            ...(doc === "act" && order.issuedAt
-              ? ([["Выдана клиенту", formatDateTime(order.issuedAt)]] as Array<[string, string]>)
-              : []),
-          ]}
-        />
-      </Section>
-
-      {doc === "intake" ? (
-        <>
-          <Section title="Комплектность">
-            <Checked items={order.completeness} empty="Принято без дополнительных принадлежностей" />
-          </Section>
-
-          <Section title="Внешнее состояние">
-            <Checked
-              items={order.appearance}
-              empty="Видимых дефектов не зафиксировано"
-              strong={["Следы вскрытия", "Следы влаги"]}
-            />
-            {order.appearanceNote && <p className="mt-1 text-[12px]">{order.appearanceNote}</p>}
-          </Section>
-
-          <Section title="Неисправность со слов клиента">
-            <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
-          </Section>
-
-          {showMoney && (
-            <Section title="Предварительно">
+      <Columns
+        left={
+          <>
+            <Section title="Клиент">
               <Pairs
                 items={[
-                  ["Ориентировочная стоимость", money(order.estimatedCost)],
-                  ["Согласовано клиентом до", money(order.approvedLimit)],
-                  ["Предоплата", money(order.prepayment)],
+                  ["Клиент", order.customer.name ?? "—"],
+                  ["Телефон", order.customer.phone ?? "—"],
                 ]}
               />
             </Section>
-          )}
+            <Section title="Техника">
+              <Pairs
+                items={[
+                  ["Устройство", deviceLine(order)],
+                  ["Серийный номер", order.device?.serial || "—"],
+                  ["Принята", formatDateTime(order.acceptedAt)],
+                  [
+                    doc === "intake" ? "Срок готовности" : "Ремонт завершён",
+                    doc === "intake" ? formatDate(order.dueAt) : formatDateTime(order.completedAt),
+                  ],
+                  ...(doc === "act" && order.issuedAt
+                    ? ([["Выдана клиенту", formatDateTime(order.issuedAt)]] as Array<[string, string]>)
+                    : []),
+                ]}
+              />
+            </Section>
+          </>
+        }
+        right={
+          doc === "intake" ? (
+            <>
+              <Section title="Комплектность">
+                <Checked items={order.completeness} empty="Принято без дополнительных принадлежностей" />
+              </Section>
+              <Section title="Внешнее состояние">
+                <Checked
+                  items={order.appearance}
+                  empty="Видимых дефектов не зафиксировано"
+                  strong={["Следы вскрытия", "Следы влаги"]}
+                />
+                {order.appearanceNote && <p className="mt-1 text-[12px]">{order.appearanceNote}</p>}
+              </Section>
+              <Section title="Неисправность со слов клиента">
+                <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
+              </Section>
+              {showMoney && (
+                <Section title="Предварительно">
+                  <Pairs
+                    items={[
+                      ["Ориентировочная стоимость", money(order.estimatedCost)],
+                      ["Согласовано клиентом до", money(order.approvedLimit)],
+                      ["Предоплата", money(order.prepayment)],
+                    ]}
+                  />
+                </Section>
+              )}
+            </>
+          ) : (
+            <>
+              <Section title="Заявленная неисправность">
+                <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
+              </Section>
+              <Section title="Что оказалось не так">
+                <p className="text-[12px] leading-relaxed">{order.diagnosis || "—"}</p>
+                {order.masterComment && <p className="mt-1 text-[12px] leading-relaxed">{order.masterComment}</p>}
+              </Section>
+            </>
+          )
+        }
+      />
 
-          <Section title="Условия">
-            <p className="whitespace-pre-line text-[10.5px] leading-relaxed text-black/70">{texts.body}</p>
-          </Section>
-
+      {doc === "intake" ? (
+        <>
+          <Terms title="Условия" texts={texts} />
           <div className="grid grid-cols-2 gap-10">
             <SignLine label={texts.signClient} />
             <SignLine
@@ -236,28 +283,38 @@ export function PrintSheet({
         </>
       ) : (
         <>
-          <Section title="Заявленная неисправность">
-            <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
-          </Section>
-
-          <Section title="Что оказалось не так">
-            <p className="text-[12px] leading-relaxed">{order.diagnosis || "—"}</p>
-            {order.masterComment && (
-              <p className="mt-1 text-[12px] leading-relaxed">{order.masterComment}</p>
-            )}
-          </Section>
-
-          <Section title="Выполненные работы">
-            <LineTable rows={works} showMoney={showMoney} />
-          </Section>
+          <div className="mt-4">
+            <Section title="Выполненные работы">
+              <LineTable rows={works} showMoney={showMoney} />
+            </Section>
+          </div>
 
           <Section title="Запчасти и материалы">
             <LineTable rows={parts} showMoney={showMoney} />
           </Section>
 
-          {showMoney && (
-            <section className="mt-4 flex justify-end break-inside-avoid">
-              <table className="text-[12px]">
+          {/* Гарантия слева, итог справа — одной полосой, а не двумя
+              разделами друг под другом с пустотой рядом. */}
+          <div className="mt-4 grid grid-cols-2 items-start gap-x-[8mm] break-inside-avoid">
+            <Section title="Гарантия">
+              <Pairs
+                items={[
+                  [
+                    "На работы",
+                    order.warrantyDays ? `${order.warrantyDays} дн. — до ${formatDate(order.warrantyUntil)}` : "—",
+                  ],
+                  ["Мастер", order.assignedMaster?.fullName ?? "—"],
+                ]}
+              />
+              {order.recommendation && (
+                <p className="mt-2 text-[12px] leading-relaxed">
+                  <span className="text-black/55">Рекомендации: </span>
+                  {order.recommendation}
+                </p>
+              )}
+            </Section>
+            {showMoney ? (
+              <table className="ml-auto text-[12px]">
                 <tbody>
                   <tr>
                     <td className="py-0.5 pr-6 text-black/55">Работы</td>
@@ -265,9 +322,7 @@ export function PrintSheet({
                   </tr>
                   {!!order.workDiscount && (
                     <tr>
-                      <td className="py-0.5 pr-6 text-black/55">
-                        Скидка на работы, {order.workDiscountPercent}%
-                      </td>
+                      <td className="py-0.5 pr-6 text-black/55">Скидка на работы, {order.workDiscountPercent}%</td>
                       <td className="py-0.5 text-right tabular-nums">−{money(order.workDiscount)}</td>
                     </tr>
                   )}
@@ -295,25 +350,12 @@ export function PrintSheet({
                   </tr>
                 </tbody>
               </table>
-            </section>
-          )}
-
-          <Section title="Гарантия и рекомендации">
-            <Pairs
-              items={[
-                [
-                  "Гарантия на работы",
-                  order.warrantyDays ? `${order.warrantyDays} дн. — до ${formatDate(order.warrantyUntil)}` : "—",
-                ],
-                ["Мастер", order.assignedMaster?.fullName ?? "—"],
-              ]}
-            />
-            {order.recommendation && (
-              <p className="mt-2 text-[12px] leading-relaxed">{order.recommendation}</p>
+            ) : (
+              <div />
             )}
-            <p className="mt-2 whitespace-pre-line text-[10.5px] leading-relaxed text-black/70">{texts.body}</p>
-          </Section>
+          </div>
 
+          <Terms title="Условия гарантии" texts={texts} />
           <div className="grid grid-cols-2 gap-10">
             <SignLine label={texts.signClient} />
             <SignLine

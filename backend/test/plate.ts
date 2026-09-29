@@ -13,7 +13,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePlate, type OcrResult } from "../src/modules/plate/plate.parse";
+import { BUILTIN, brandsByRules, buildDictionary, modelKeys, parsePlate, patternToRegExp, type OcrResult } from "../src/modules/plate/plate.parse";
+import { decide } from "../src/modules/plate/plate.vote";
 
 const fixtures: Record<string, OcrResult> = JSON.parse(
   readFileSync(join(__dirname, "fixtures/plates.json"), "utf8")
@@ -126,6 +127,75 @@ check(!empty.brand && !empty.model && !empty.serial && !empty.serialConfirmed, "
 // Штрихкод без текста — единственный источник, но всё же вариант.
 const onlyCode = parsePlate({ lines: [{ text: "SAMSUNG" }], barcodes: [{ format: "Code128", text: "AB12CD34EF" }] });
 check(onlyCode.serial?.value === "AB12CD34EF" && !onlyCode.serialConfirmed, "штрихкод без подтверждения текстом подставляется, но не помечается подтверждённым");
+
+// ---------------------------------------------------------------- марка по модели
+
+// Настоящий шильдик ASUS, у которого отрезан логотип и строка ASUSTeK.
+const asusLines = fixtures["asus-d509"].lines.filter((l) => !/ASUS|^SUS$/i.test(l.text.replace(/\s+/g, "")));
+const noBrand = parsePlate({ lines: asusLines, barcodes: fixtures["asus-d509"].barcodes });
+check(noBrand.brand?.value === "ASUS" && noBrand.brandFrom === "model", `ASUS без логотипа — марка по модели D509D (${noBrand.brand?.value}, ${noBrand.brandFrom})`);
+check(parsePlate(fixtures["asus-d509"]).brandFrom === "plate", "марка с логотипом помечена как прочитанная на шильдике");
+
+const rules = buildDictionary().models;
+const expectBrand: Array<[string, string | null]> = [
+  ["X540UB", "ASUS"], ["X515EA-BQ1234", "ASUS"], ["UX305FA", "ASUS"], ["FX505DT", "ASUS"], ["E410MA", "ASUS"],
+  ["M3407HA-SF088", "ASUS"], ["X1502ZA", "ASUS"], ["K513EA", "ASUS"], ["TP412FA", "ASUS"],
+  ["A315-21", "Acer"], ["AN515-55", "Acer"], ["N19C1", "Acer"], ["E5-571G", "Acer"], ["SF314-57", "Acer"], ["ES1-512", "Acer"],
+  ["TPN-C139", "HP"], ["TPNC139", "HP"], ["15-DA0123UR", "HP"], ["250 G7", "HP"],
+  ["P89F", "Dell"], ["P112F", "Dell"],
+  ["A1466", "Apple"], ["A2338", "Apple"],
+  ["MS-16W1", "MSI"], ["GF63", "MSI"], ["GF63 Thin", "MSI"],
+  ["NP-R710H", "Samsung"], ["SM-A505F", "Samsung"],
+  ["PCG-71211V", "Sony"], ["SVF152A29V", "Sony"], ["VPCEB3M1R", "Sony"],
+  ["330-15IKB", "Lenovo"], ["S145-15IWL", "Lenovo"], ["G580", "Lenovo"], ["G50-30", "Lenovo"], ["530S-14IKB", "Lenovo"], ["V15-IIL", "Lenovo"],
+  ["TM1701", "Xiaomi"],
+  // Похожее, но чужое или неясное — марку не выдумываем.
+  ["E480", null], ["M720Q", null], ["A505F", null], ["20157", null], ["ZR7C", null], ["12345", null], ["X1", null],
+];
+for (const [model, brand] of expectBrand) {
+  const got = brandsByRules(model, rules);
+  check(brand === null ? got.length === 0 : got[0] === brand && got.length === 1, `правило: ${model} → ${brand ?? "ничего"} (${got.join(", ") || "—"})`);
+}
+check(BUILTIN.models.every((r) => r.patterns.every((p) => !!patternToRegExp(p))), "все встроенные шаблоны разбираются");
+check(!patternToRegExp("*") && !patternToRegExp("-*") && !patternToRegExp("A*"), "слишком общие шаблоны отвергаются");
+
+// Правило словаря платформы важнее встроенного и пишет марку, как она названа среди марок.
+const dictRule = parsePlate(
+  { lines: [{ text: "Model: X540UB" }], barcodes: [] },
+  { dictionary: { brands: [], noise: [], models: [{ brand: "asus", patterns: ["X540*"] }, { brand: "Raybook", patterns: ["RB-1#"] }] } }
+);
+check(dictRule.brand?.value === "ASUS", `правило словаря «asus» даёт встроенное написание ASUS (${dictRule.brand?.value})`);
+const rb = parsePlate(
+  { lines: [{ text: "Model: RB-14" }], barcodes: [] },
+  { dictionary: { brands: [], noise: [], models: [{ brand: "Raybook", patterns: ["RB-1#"] }] } }
+);
+check(rb.brand?.value === "Raybook" && rb.brandFrom === "model", `новая марка правилом словаря (${rb.brand?.value})`);
+check(!parsePlate({ lines: [{ text: "Model: RB-14" }], barcodes: [] }).brand, "без правила незнакомая модель марку не получает");
+
+// Ключи модели.
+check(JSON.stringify(modelKeys("X515EA-BQ1234")) === JSON.stringify(["X515EABQ1234", "X515EA"]), `ключи X515EA-BQ1234 (${modelKeys("X515EA-BQ1234")})`);
+check(JSON.stringify(modelKeys("NP-R710H")) === JSON.stringify(["NPR710H"]), `у NP-R710H основы нет (${modelKeys("NP-R710H")})`);
+check(JSON.stringify(modelKeys("NP-R710H-FS06RU")) === JSON.stringify(["NPR710HFS06RU", "NPR710H"]), `основа NP-R710H-FS06RU — NPR710H (${modelKeys("NP-R710H-FS06RU")})`);
+check(JSON.stringify(modelKeys("250 G7")) === JSON.stringify(["250G7"]), `у «250 G7» основы нет (${modelKeys("250 G7")})`);
+check(modelKeys("Pro").length === 0, "без цифр — не модель");
+
+// Голосование мастерских.
+const pairs = (source: string, model: string, brand: string, uses = 1) => ({ source, model, brand, uses });
+const k1 = decide([pairs("t1", "RB-1401", "Raybook"), pairs("t2", "RB-1401", "RAYBOOK")]);
+check(k1.decided.get("RB1401") === "Raybook", `две мастерские — марка принята (${k1.decided.get("RB1401")})`);
+const k2 = decide([pairs("t1", "RB-1401", "Raybook", 50)]);
+check(!k2.decided.has("RB1401"), "одной мастерской мало, сколько бы аппаратов у неё ни было");
+const k3 = decide([pairs("t1", "RB-1401", "Raybook"), pairs("t2", "RB-1401", "Raybook"), pairs("t3", "RB-1401", "Haier")]);
+check(!k3.decided.has("RB1401"), "две против одной — спорно, не принимаем");
+const k4 = decide([
+  pairs("t1", "RB-1401", "Raybook"), pairs("t2", "RB-1401", "Raybook"), pairs("t3", "RB-1401", "Raybook"),
+  pairs("t4", "RB-1401", "Haier"),
+]);
+check(k4.decided.get("RB1401") === "Raybook", "три против одной — принимаем");
+const k5 = decide([pairs("t1", "X515EA-BQ1234", "ASUS"), pairs("t2", "X515EA-BQ9999", "ASUS")]);
+check(k5.decided.get("X515EA") === "ASUS", "разная комплектация одной модели сходится по основе");
+const k6 = decide([pairs("t1", "RB-1401", "Raybook", 1), pairs("t1", "RB-1401", "Haier", 9), pairs("t2", "RB-1401", "Haier")]);
+check(k6.decided.get("RB1401") === "Haier", "мастерская голосует одной, самой частой своей маркой");
 
 console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
 process.exitCode = fails === 0 ? 0 : 1;

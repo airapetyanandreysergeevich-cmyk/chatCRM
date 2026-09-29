@@ -8,7 +8,8 @@ import { PERMISSIONS } from "../../lib/permissions";
 import { authenticate, currentTenantId, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { loadDictionary } from "./plate.dictionary";
-import { parsePlate, type OcrResult } from "./plate.parse";
+import { brandFromHistory, cloudKnowledge, recordMiss } from "./plate.learn";
+import { parsePlate, type OcrResult, type PlateDictionary } from "./plate.parse";
 
 /**
  * Распознавание шильдика: снимок с камеры бланка → бренд, модель, серийный.
@@ -126,8 +127,9 @@ async function assertEnabled(req: Request): Promise<void> {
 async function parseFor(req: Request, ocr: OcrResult) {
   // Марки, которые мастерская уже вводила не раз, — тоже словарь: мастерская
   // по кофемашинам знает свои марки лучше любого встроенного списка.
-  const [dictionary, hints] = await Promise.all([
+  const [local, cloud, hints] = await Promise.all([
     loadDictionary(),
+    cloudKnowledge(),
     withTenant(tenantOf(req), (tx) =>
       tx.deviceHint.findMany({
         where: { field: "brand", uses: { gte: 2 } },
@@ -137,5 +139,30 @@ async function parseFor(req: Request, ocr: OcrResult) {
       })
     ),
   ]);
-  return parsePlate(ocr, { dictionary, knownBrands: hints.map((h) => h.value) });
+  const result = parsePlate(ocr, { dictionary: merge(local, cloud.dictionary), knownBrands: hints.map((h) => h.value) });
+
+  // Марки нет ни на шильдике, ни в правилах — спрашиваем память заказов.
+  if (!result.brand && result.model) {
+    const found = await brandFromHistory(tenantOf(req), result.model.options).catch(() => null);
+    if (found) {
+      result.brand = { value: found.brand, options: found.options };
+      result.brandFrom = "model";
+    } else {
+      void recordMiss(result.model.value);
+    }
+  }
+  return result;
+}
+
+/**
+ * Словарь Основы — свой плюс полученный из облака. Своего у Основы обычно
+ * нет: словарь правит собственник платформы, и приезжает он оттуда.
+ */
+function merge(a: PlateDictionary, b: PlateDictionary | null): PlateDictionary {
+  if (!b) return a;
+  return {
+    brands: [...a.brands, ...(b.brands ?? [])],
+    noise: [...a.noise, ...(b.noise ?? [])],
+    models: [...(a.models ?? []), ...(b.models ?? [])],
+  };
 }

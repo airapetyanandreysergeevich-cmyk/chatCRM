@@ -102,17 +102,24 @@ const logoField = z
   .nullable()
   .optional();
 
+/**
+ * Размер и межстрочный интервал текста условий (гарантии в акте). Пусто —
+ * стандартные. Пределы — то, что ещё читается и ещё помещается на лист.
+ */
+const textSize = z.number().min(8).max(14).multipleOf(0.5).nullable().optional();
+const textLeading = z.number().min(1.1).max(2).nullable().optional();
+
 const printSchema = z
   .object({
     logo: logoField,
     name: text(80),
     requisites: text(400),
     intake: z
-      .object({ title: text(80), terms: text(2000), signClient: text(100), signStaff: text(100) })
+      .object({ title: text(80), terms: text(2000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
       .strip()
       .optional(),
     act: z
-      .object({ title: text(80), warranty: text(2000), signClient: text(100), signStaff: text(100) })
+      .object({ title: text(80), warranty: text(2000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
       .strip()
       .optional(),
     footer: text(200),

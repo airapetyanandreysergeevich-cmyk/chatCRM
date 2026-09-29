@@ -19,9 +19,14 @@ import { formatDate, plural } from "../../lib/format";
 import {
   brandsFromText,
   brandsToText,
+  modelLinesWithoutBrand,
+  modelsFromText,
+  modelsToText,
   noiseFromText,
+  patternFromModel,
   plateDictionaryApi,
   type DictionaryReply,
+  type PlateMiss,
 } from "../../lib/plateDictionary";
 
 interface TenantRow {
@@ -455,42 +460,67 @@ function ImpersonateModal({
 }
 
 /**
- * Словарь распознавания шильдиков: марки и лишние слова.
+ * Словарь распознавания шильдиков: марки, лишние слова и марка по модели.
  *
  * Встроенное показано рядом, но не правится: оно проверено на настоящих
  * шильдиках тестами. Словарь дополняет встроенное — новая марка, другое
  * написание знакомой («Hewlett-Packard: HP»), фраза, которую надо отрезать
- * от модели («Made in China»).
+ * от модели («Made in China»), шаблон модели для шильдиков без марки.
+ *
+ * Ниже — модели, у которых марка при распознавании не нашлась: по ним видно,
+ * каких правил не хватает, и правило добавляется одной кнопкой.
  */
 function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () => void }) {
   const [reply, setReply] = useState<DictionaryReply | null>(null);
   const [brands, setBrands] = useState("");
   const [noise, setNoise] = useState("");
+  const [models, setModels] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [misses, setMisses] = useState<PlateMiss[] | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
 
   const fill = (r: DictionaryReply) => {
     setReply(r);
     setBrands(brandsToText(r.dictionary.brands));
     setNoise(r.dictionary.noise.join("\n"));
+    setModels(modelsToText(r.dictionary.models));
   };
+
+  const loadMisses = useCallback(() => {
+    plateDictionaryApi
+      .misses()
+      .then((r) => setMisses(r.items))
+      .catch(() => setMisses([]));
+  }, []);
 
   useEffect(() => {
     plateDictionaryApi
       .get()
       .then(fill)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить словарь"));
-  }, []);
+    loadMisses();
+  }, [loadMisses]);
+
+  const orphan = modelLinesWithoutBrand(models);
 
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setSaved(false);
+    setAdded(null);
     try {
-      fill(await plateDictionaryApi.save({ brands: brandsFromText(brands), noise: noiseFromText(noise) }));
+      fill(
+        await plateDictionaryApi.save({
+          brands: brandsFromText(brands),
+          noise: noiseFromText(noise),
+          models: modelsFromText(models),
+        })
+      );
       setSaved(true);
+      loadMisses();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось сохранить словарь");
     } finally {
@@ -498,38 +528,82 @@ function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () =
     }
   }
 
+  function addRule(brand: string, model: string) {
+    const b = brand.replace(/\s+/g, " ").trim();
+    if (b.length < 2) return;
+    const pattern = patternFromModel(model);
+    // Марка уже есть в поле — шаблон дописываем в её строку.
+    const lines = models.split(/\r?\n/);
+    const at = lines.findIndex((l) => l.split(":")[0].trim().toLowerCase() === b.toLowerCase() && l.includes(":"));
+    if (at === -1) lines.push(`${b}: ${pattern}`);
+    else if (!lines[at].toUpperCase().includes(pattern)) lines[at] = `${lines[at].replace(/[\s,]+$/, "")}, ${pattern}`;
+    setModels(lines.filter((l, i) => l.trim() || i < lines.length - 1).join("\n").replace(/^\n+/, ""));
+    setSaved(false);
+    setAdded(`${b}: ${pattern}`);
+  }
+
+  async function hide(key: string) {
+    setMisses((m) => m?.filter((x) => x.modelKey !== key) ?? null);
+    await plateDictionaryApi.hideMiss(key).catch(() => loadMisses());
+  }
+
   return (
-    <Modal title="Словарь шильдиков" onClose={onClose}>
+    <Modal title="Словарь шильдиков" onClose={onClose} wide>
       {!reply && !error ? (
         <Spinner />
       ) : (
         <form onSubmit={save} className="space-y-4">
           {error && <Banner tone="error">{error}</Banner>}
-          {saved && <Banner>Сохранено. Приёмщики получат словарь в течение минуты.</Banner>}
+          {saved && <Banner>Сохранено. Приёмщики получат словарь в течение минуты, Основы — в течение шести часов.</Banner>}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field
+              label="Марки"
+              hint="По одной в строке. Другие написания — через двоеточие и запятые: «Hewlett-Packard: HP, HPE»"
+            >
+              <Textarea
+                value={brands}
+                onChange={(e) => setBrands(e.target.value)}
+                rows={6}
+                readOnly={!canEdit}
+                placeholder={"Haier\nRaybook\nHewlett-Packard: HP"}
+                className="font-mono text-[13.5px]"
+              />
+            </Field>
+            <Field label="Лишние слова" hint="По одной фразе в строке. Модель обрывается на первой такой фразе">
+              <Textarea
+                value={noise}
+                onChange={(e) => setNoise(e.target.value)}
+                rows={6}
+                readOnly={!canEdit}
+                placeholder={"Energy Star\nTUV Rheinland"}
+                className="font-mono text-[13.5px]"
+              />
+            </Field>
+          </div>
 
           <Field
-            label="Марки"
-            hint="По одной в строке. Другие написания — через двоеточие и запятые: «Hewlett-Packard: HP, HPE»"
+            label="Марка по модели"
+            hint="Для шильдиков без марки. Марка, двоеточие, шаблоны через запятую: * — любые знаки, # — цифра, @ — буква. Дефис необязателен, регистр не важен"
+            error={orphan.length ? `Без марки и двоеточия — не сохранится: ${orphan.slice(0, 3).join("; ")}` : undefined}
           >
             <Textarea
-              value={brands}
-              onChange={(e) => setBrands(e.target.value)}
-              rows={7}
+              value={models}
+              onChange={(e) => {
+                setModels(e.target.value);
+                setAdded(null);
+              }}
+              rows={5}
               readOnly={!canEdit}
-              placeholder={"Haier\nRaybook\nHewlett-Packard: HP"}
+              placeholder={"ASUS: X5##@*, D5##@*\nRaybook: RB-1###*"}
               className="font-mono text-[13.5px]"
             />
           </Field>
-          <Field label="Лишние слова" hint="По одной фразе в строке. Модель обрывается на первой такой фразе">
-            <Textarea
-              value={noise}
-              onChange={(e) => setNoise(e.target.value)}
-              rows={4}
-              readOnly={!canEdit}
-              placeholder={"Energy Star\nTUV Rheinland"}
-              className="font-mono text-[13.5px]"
-            />
-          </Field>
+          {added && (
+            <p className="-mt-2 text-[12.5px] text-ink-dim">
+              Добавлено «{added}». Поправьте шаблон, если нужно шире или уже, и нажмите «Сохранить».
+            </p>
+          )}
 
           {reply && (
             <details className="rounded-field border border-line px-3 py-2 text-[13px]">
@@ -542,11 +616,27 @@ function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () =
                 <span className="font-semibold text-ink-soft">Лишние слова: </span>
                 {reply.builtin.noise.join(", ")}
               </p>
+              {reply.builtin.models && (
+                <div className="mt-2 text-ink-dim">
+                  <span className="font-semibold text-ink-soft">Марка по модели:</span>
+                  <ul className="mt-1 space-y-0.5 font-mono text-[12px]">
+                    {reply.builtin.models.map((m) => (
+                      <li key={m.brand}>
+                        {m.brand}: {m.patterns.join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <p className="mt-2 text-ink-dim">
-                Сверх того каждая мастерская узнаёт марки, которые сама вводила в бланке не меньше двух раз.
+                Сверх того каждая мастерская узнаёт марки, которые сама вводила в бланке не меньше двух раз. Марку по
+                модели программа берёт и из заказов: своей мастерской хватает одного заказа с этой моделью, а от других
+                — нужно, чтобы марку вписали хотя бы две мастерские и против почти никто.
               </p>
             </details>
           )}
+
+          <MissList misses={misses} canEdit={canEdit} onAdd={addRule} onHide={hide} />
 
           <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
             {canEdit && (
@@ -561,5 +651,108 @@ function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () =
         </form>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Модели, у которых марка при распознавании не нашлась, — со всех мастерских.
+ * Сначала те, что не узнаются и сейчас. Марку в поле подсказывает то, что
+ * мастерские вписывали руками.
+ */
+function MissList({
+  misses,
+  canEdit,
+  onAdd,
+  onHide,
+}: {
+  misses: PlateMiss[] | null;
+  canEdit: boolean;
+  onAdd: (brand: string, model: string) => void;
+  onHide: (key: string) => void;
+}) {
+  const [all, setAll] = useState(false);
+  const [brandFor, setBrandFor] = useState<Record<string, string>>({});
+  if (!misses) return null;
+  const open = misses.filter((m) => !m.resolved);
+  const shown = all ? misses : misses.slice(0, 12);
+
+  return (
+    <div className="rounded-field border border-line">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line px-3 py-2">
+        <p className="text-[13px] font-semibold text-ink-soft">Модели без марки</p>
+        <p className="text-[12px] text-ink-dim">
+          {misses.length
+            ? `${open.length} не узнаются · ${misses.length - open.length} уже узнаются`
+            : "Пока пусто: все распознанные модели получили марку"}
+        </p>
+      </div>
+      {misses.length > 0 && (
+        <ul className="divide-y divide-line">
+          {shown.map((m) => {
+            const guess = brandFor[m.modelKey] ?? m.votes[0]?.brand ?? "";
+            return (
+              <li key={m.modelKey} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+                <div className="min-w-[150px] flex-1">
+                  <p className="break-all font-mono text-[13.5px] font-semibold">{m.model}</p>
+                  <p className="mt-0.5 text-[12px] text-ink-dim">
+                    {plural(m.uses, "снимок", "снимка", "снимков")} · {formatDate(m.lastAt)}
+                    {m.workshops > 1 ? ` · из ${m.workshops} мест` : ""}
+                  </p>
+                </div>
+                {m.resolved ? (
+                  <p className="text-[12.5px] text-stage-done">
+                    узнаётся: <span className="font-semibold">{m.resolved.brand}</span>{" "}
+                    {m.resolved.by === "rule" ? "по правилу" : "по заказам"}
+                  </p>
+                ) : (
+                  <>
+                    {m.votes.length > 0 && (
+                      <p className="text-[12px] text-ink-dim">
+                        вписывали: {m.votes.map((v) => `${v.brand}${v.sources > 1 ? ` (${v.sources})` : ""}`).join(", ")}
+                      </p>
+                    )}
+                    {canEdit && (
+                      <div className="flex items-center gap-2">
+                        <div className="w-[140px]">
+                          <Input
+                            value={guess}
+                            onChange={(e) => setBrandFor((b) => ({ ...b, [m.modelKey]: e.target.value }))}
+                            placeholder="Марка"
+                            aria-label={`Марка для ${m.model}`}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="whitespace-nowrap"
+                          disabled={guess.trim().length < 2}
+                          onClick={() => onAdd(guess, m.model)}
+                        >
+                          В правила
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+                {canEdit && (
+                  <Button type="button" variant="ghost" onClick={() => onHide(m.modelKey)}>
+                    Убрать
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {misses.length > shown.length && (
+        <button
+          type="button"
+          onClick={() => setAll(true)}
+          className="w-full border-t border-line px-3 py-2 text-[13px] font-semibold text-brand-ink hover:bg-surface-raised"
+        >
+          Показать все ({misses.length})
+        </button>
+      )}
+    </div>
   );
 }

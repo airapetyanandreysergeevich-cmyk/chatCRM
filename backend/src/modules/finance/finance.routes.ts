@@ -154,11 +154,15 @@ financeRouter.get(
         days: z.coerce.number().int().min(1).max(365).default(30),
         direction: z.enum(["IN", "OUT"]).optional(),
         cashRegisterId: z.string().uuid().optional(),
+        // Способ оплаты — это вид кассы: наличные идут в CASH, карта — в
+        // ACQUIRING (lib/payment.ts). Отдельного поля у движения нет и не нужно.
+        kind: z.enum(["CASH", "BANK", "ACQUIRING"]).optional(),
         limit: z.coerce.number().int().min(1).max(300).default(100),
       })
       .parse(req.query);
 
     const from = daysAgo(q.days - 1);
+    const byKind = q.kind ? { cashRegister: { kind: q.kind } } : {};
 
     const data = await withTenant(tenantOf(req), async (tx) => {
       const rows = await tx.transaction.findMany({
@@ -167,6 +171,7 @@ financeRouter.get(
           createdAt: { gte: from },
           ...(q.direction ? { direction: q.direction } : {}),
           ...(q.cashRegisterId ? { cashRegisterId: q.cashRegisterId } : {}),
+          ...byKind,
         },
         orderBy: { createdAt: "desc" },
         take: q.limit,
@@ -181,12 +186,12 @@ financeRouter.get(
 
       const period = await tx.transaction.groupBy({
         by: ["direction"],
-        where: { deletedAt: null, createdAt: { gte: from } },
+        where: { deletedAt: null, createdAt: { gte: from }, ...byKind },
         _sum: { amount: true },
       });
       const today = await tx.transaction.groupBy({
         by: ["direction"],
-        where: { deletedAt: null, createdAt: { gte: startOfToday() } },
+        where: { deletedAt: null, createdAt: { gte: startOfToday() }, ...byKind },
         _sum: { amount: true },
       });
 
@@ -201,6 +206,7 @@ financeRouter.get(
           expense: pick(period, "OUT"),
           todayIncome: pick(today, "IN"),
           todayExpense: pick(today, "OUT"),
+          kind: q.kind ?? null,
         },
       };
     });

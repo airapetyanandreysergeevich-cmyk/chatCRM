@@ -22,7 +22,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDateTime } from "../lib/format";
 import { money } from "../lib/orders";
-import { financeApi, type CashList, type CashRegister, type Transaction } from "../lib/workshop";
+import { financeApi, type CashKind, type CashList, type CashRegister, type Transaction } from "../lib/workshop";
 
 /**
  * Касса.
@@ -42,11 +42,70 @@ const PERIODS = [
   { value: 90, label: "Квартал" },
 ] as const;
 
+/**
+ * Способ оплаты — это вид кассы: наличные падают в кассу «Наличные»,
+ * карта — в кассу эквайринга. Поэтому переключатель фильтрует по виду касс,
+ * а не по полю движения.
+ */
+type View = "ALL" | CashKind;
+const VIEWS: Array<{ value: View; label: string }> = [
+  { value: "ALL", label: "Всё" },
+  { value: "CASH", label: "Наличные" },
+  { value: "ACQUIRING", label: "Эквайринг" },
+  { value: "BANK", label: "Банк" },
+];
+const VIEW_KEY = "finecrm.finance.view";
+
+function savedView(): View {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return VIEWS.some((x) => x.value === v) ? (v as View) : "ALL";
+  } catch {
+    return "ALL";
+  }
+}
+
+/** Переключатель-«пилюли»: тот же вид, что у периода ниже. */
+function Pills<T extends string | number>({
+  items,
+  value,
+  onChange,
+  label,
+}: {
+  items: ReadonlyArray<{ value: T; label: string }>;
+  value: T;
+  onChange: (v: T) => void;
+  label: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
+      {items.map((p) => (
+        <button
+          key={p.value}
+          type="button"
+          role="radio"
+          aria-checked={value === p.value}
+          onClick={() => onChange(p.value)}
+          className={
+            "rounded-pill px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
+            (value === p.value
+              ? "bg-brand text-white"
+              : "border border-line bg-surface-raised text-ink-muted hover:text-ink")
+          }
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Finance() {
   const { can } = useAuth();
   const [data, setData] = useState<CashList | null>(null);
   const [registers, setRegisters] = useState<CashRegister[]>([]);
   const [days, setDays] = useState(30);
+  const [view, setViewState] = useState<View>(savedView);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<"IN" | "OUT" | null>(null);
   const [reversing, setReversing] = useState<Transaction | null>(null);
@@ -54,15 +113,29 @@ export default function Finance() {
   const canManage = can("finance.manage");
   const canPay = can("finance.payment", "finance.manage");
 
+  const setView = (v: View) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* не запомнится — не беда */
+    }
+  };
+
   const load = useCallback(async () => {
     try {
-      const [list, regs] = await Promise.all([financeApi.list({ days }), financeApi.registers()]);
+      const [list, regs] = await Promise.all([
+        financeApi.list({ days, ...(view !== "ALL" ? { kind: view } : {}) }),
+        financeApi.registers(),
+      ]);
+      // Ответ на прежний выбор, пришедший позже нового, не показываем.
+      if (list.totals.kind !== undefined && (list.totals.kind ?? "ALL") !== view) return;
       setData(list);
       setRegisters(regs);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить кассу");
     }
-  }, [days]);
+  }, [days, view]);
 
   useEffect(() => {
     void load();
@@ -70,7 +143,13 @@ export default function Finance() {
 
   if (error) return <Banner tone="error">{error}</Banner>;
 
-  const cash = registers.reduce((n, r) => n + r.balance, 0);
+  // «Банк» — только там, где такая касса заведена: у большинства её нет, и
+  // пустая кнопка лишь путала бы.
+  const views = VIEWS.filter((v) => v.value !== "BANK" || view === "BANK" || registers.some((r) => r.kind === "BANK"));
+  const shown = view === "ALL" ? registers : registers.filter((r) => r.kind === view);
+  const cash = shown.reduce((n, r) => n + r.balance, 0);
+  const viewLabel = VIEWS.find((v) => v.value === view)?.label ?? "";
+  const scope = view === "ALL" ? "" : ` · ${viewLabel.toLowerCase()}`;
 
   return (
     <div className="space-y-5">
@@ -94,12 +173,20 @@ export default function Finance() {
         }
       />
 
+      <Pills items={views} value={view} onChange={setView} label="Какие деньги показывать" />
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="p-4">
           <p className="text-[28px] font-extrabold leading-none tracking-tight">{money(cash)}</p>
-          <p className="mt-2.5 text-[14px] font-semibold">Сейчас в кассах</p>
+          <p className="mt-2.5 text-[14px] font-semibold">
+            {view === "ALL" ? "Сейчас в кассах" : view === "CASH" ? "Наличных сейчас" : `Сейчас · ${viewLabel.toLowerCase()}`}
+          </p>
           <p className="mt-0.5 text-[12.5px] text-ink-dim">
-            {registers.length ? registers.map((r) => r.name).join(", ") : "касса ещё не заведена"}
+            {shown.length
+              ? shown.map((r) => r.name).join(", ")
+              : registers.length
+                ? "касс такого вида нет"
+                : "касса ещё не заведена"}
           </p>
         </Card>
         {data && (
@@ -109,55 +196,49 @@ export default function Finance() {
                 {money(data.totals.todayIncome)}
               </p>
               <p className="mt-2.5 text-[14px] font-semibold">Принято сегодня</p>
-              <p className="mt-0.5 text-[12.5px] text-ink-dim">от клиентов и прочее</p>
+              <p className="mt-0.5 text-[12.5px] text-ink-dim">от клиентов и прочее{scope}</p>
             </Card>
             <Card className="p-4">
               <p className="text-[28px] font-extrabold leading-none tracking-tight">
                 {money(data.totals.income)}
               </p>
               <p className="mt-2.5 text-[14px] font-semibold">Приход за период</p>
-              <p className="mt-0.5 text-[12.5px] text-ink-dim">{PERIODS.find((p) => p.value === days)?.label}</p>
+              <p className="mt-0.5 text-[12.5px] text-ink-dim">
+                {PERIODS.find((p) => p.value === days)?.label}
+                {scope}
+              </p>
             </Card>
             <Card className="p-4">
               <p className="text-[28px] font-extrabold leading-none tracking-tight text-state-off">
                 {money(data.totals.expense)}
               </p>
               <p className="mt-2.5 text-[14px] font-semibold">Расход за период</p>
-              <p className="mt-0.5 text-[12.5px] text-ink-dim">закупки, зарплата, аренда</p>
+              <p className="mt-0.5 text-[12.5px] text-ink-dim">закупки, зарплата, аренда{scope}</p>
             </Card>
           </>
         )}
       </div>
 
       <Card className="p-3.5">
-        <div className="flex flex-wrap gap-1.5">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setDays(p.value)}
-              className={
-                "rounded-pill px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
-                (days === p.value
-                  ? "bg-brand text-white"
-                  : "border border-line bg-surface-raised text-ink-muted hover:text-ink")
-              }
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <Pills items={PERIODS} value={days} onChange={setDays} label="Период" />
       </Card>
 
       {!data ? (
         <Spinner />
       ) : data.items.length === 0 ? (
-        <EmptyState icon={<IconPlus />} title="Движений за период нет">
-          Оплата за выданный ремонт и любой расход мастерской попадают сюда. Начните с первого прихода —
-          дальше остаток считается сам.
-        </EmptyState>
+        view !== "ALL" ? (
+          <EmptyState icon={<IconPlus />} title={`${viewLabel}: движений за период нет`}>
+            Здесь только движения касс вида «{viewLabel}». Всё вместе — на «Всё».
+          </EmptyState>
+        ) : (
+          <EmptyState icon={<IconPlus />} title="Движений за период нет">
+            Оплата за выданный ремонт и любой расход мастерской попадают сюда. Начните с первого прихода —
+            дальше остаток считается сам.
+          </EmptyState>
+        )
       ) : (
         <div className="space-y-2.5">
-          <SectionLabel>Движение денег</SectionLabel>
+          <SectionLabel>{view === "ALL" ? "Движение денег" : `Движение денег · ${viewLabel.toLowerCase()}`}</SectionLabel>
           <List>
             {data.items.map((t) => {
               const income = t.direction === "IN";

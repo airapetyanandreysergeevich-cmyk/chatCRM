@@ -18,7 +18,15 @@ export interface DocTexts {
   body: string;
   signClient: string;
   signStaff: string;
+  /** Размер текста условий, пт. */
+  size: number;
+  /** Межстрочный интервал текста условий. */
+  leading: number;
 }
+
+/** Пределы настроек текста условий — те же, что проверяет сервер. */
+export const TEXT_SIZE = { min: 8, max: 14, step: 0.5 };
+export const TEXT_LEADING = { min: 1.1, max: 2, step: 0.05 };
 
 export interface PrintForms {
   /** Логотип на бумаге. Отдельный от логотипа окна программы. */
@@ -46,6 +54,8 @@ export const DEFAULT_TEXTS: { intake: DocTexts; act: DocTexts } = {
       "техника хранится не более шести месяцев с даты уведомления о готовности.",
     signClient: "Технику сдал, с условиями согласен (подпись клиента)",
     signStaff: "Технику принял",
+    size: 9.5,
+    leading: 1.45,
   },
   act: {
     title: "Акт выполненных работ",
@@ -54,6 +64,8 @@ export const DEFAULT_TEXTS: { intake: DocTexts; act: DocTexts } = {
       "механических повреждениях, попадании влаги и самостоятельном вскрытии после ремонта.",
     signClient: "Работы принял, претензий не имею (подпись клиента)",
     signStaff: "Работы сдал",
+    size: 9.5,
+    leading: 1.45,
   },
 };
 
@@ -64,6 +76,8 @@ interface StoredDoc {
   warranty?: string | null;
   signClient?: string | null;
   signStaff?: string | null;
+  size?: number | null;
+  leading?: number | null;
 }
 export interface StoredPrint {
   logo?: string | null;
@@ -82,6 +96,10 @@ interface PrintResponse {
 
 const clean = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
+/** Число в пределах, иначе — стандартное. */
+const within = (v: unknown, min: number, max: number, d: number) =>
+  typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : d;
+
 function docOf(stored: StoredDoc | undefined, key: "intake" | "act"): DocTexts {
   const d = DEFAULT_TEXTS[key];
   const bodyKey = key === "intake" ? "terms" : "warranty";
@@ -90,6 +108,8 @@ function docOf(stored: StoredDoc | undefined, key: "intake" | "act"): DocTexts {
     body: clean(stored?.[bodyKey]) ?? d.body,
     signClient: clean(stored?.signClient) ?? d.signClient,
     signStaff: clean(stored?.signStaff) ?? d.signStaff,
+    size: within(stored?.size, TEXT_SIZE.min, TEXT_SIZE.max, d.size),
+    leading: within(stored?.leading, TEXT_LEADING.min, TEXT_LEADING.max, d.leading),
   };
 }
 
@@ -121,6 +141,8 @@ export function toStored(f: PrintForms): StoredPrint {
       [key === "intake" ? "terms" : "warranty"]: diff(x.body, d.body),
       signClient: diff(x.signClient, d.signClient),
       signStaff: diff(x.signStaff, d.signStaff),
+      size: x.size === d.size ? null : Math.round(x.size * 2) / 2,
+      leading: x.leading === d.leading ? null : Math.round(x.leading * 100) / 100,
     };
   };
   return {

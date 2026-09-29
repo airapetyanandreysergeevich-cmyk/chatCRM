@@ -190,10 +190,12 @@ export interface Purchase {
 
 // -------------------------------------------------------------------- касса
 
+export type CashKind = "CASH" | "ACQUIRING" | "BANK";
+
 export interface CashRegister {
   id: string;
   name: string;
-  kind: string;
+  kind: CashKind;
   balance: number;
 }
 
@@ -211,7 +213,15 @@ export interface Transaction {
 }
 
 export interface CashList {
-  totals: { days: number; income: number; expense: number; todayIncome: number; todayExpense: number };
+  totals: {
+    days: number;
+    income: number;
+    expense: number;
+    todayIncome: number;
+    todayExpense: number;
+    /** Каким видом касс отфильтровано; null — всеми. */
+    kind?: CashKind | null;
+  };
   items: Transaction[];
 }
 
@@ -271,7 +281,7 @@ export const purchasesApi = {
 
 export const financeApi = {
   registers: () => api.get<CashRegister[]>("/finance/registers"),
-  list: (params: { days?: number; direction?: string; cashRegisterId?: string } = {}) =>
+  list: (params: { days?: number; direction?: string; cashRegisterId?: string; kind?: CashKind } = {}) =>
     api.get<CashList>(`/finance${qs(params)}`),
   add: (body: {
     direction: "IN" | "OUT";

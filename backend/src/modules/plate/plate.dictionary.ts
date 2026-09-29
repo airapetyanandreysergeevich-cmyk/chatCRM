@@ -13,7 +13,7 @@ import type { PlateDictionary } from "./plate.parse";
 const KEY = "plateDictionary";
 const TTL_MS = 60_000;
 
-const EMPTY: PlateDictionary = { brands: [], noise: [] };
+const EMPTY: PlateDictionary = { brands: [], noise: [], models: [] };
 
 const text = (max: number) => z.string().transform((s) => s.replace(/\s+/g, " ").trim()).pipe(z.string().max(max));
 
@@ -27,6 +27,29 @@ export const dictionarySchema = z.object({
     )
     .max(500, "Не больше 500 марок"),
   noise: z.array(text(60).pipe(z.string().min(2))).max(300, "Не больше 300 фраз"),
+  // Марка по модели. Словари, сохранённые до этого поля, его не содержат.
+  models: z
+    .array(
+      z.object({
+        brand: text(40).pipe(z.string().min(2, "Слишком короткое название марки")),
+        patterns: z
+          .array(
+            z
+              .string()
+              .transform((s) => s.replace(/\s+/g, "").toUpperCase())
+              .pipe(
+                z
+                  .string()
+                  .max(40, "Шаблон модели длиннее 40 знаков")
+                  .regex(/^[A-Z0-9*#@?\-/.+_]+$/, "В шаблоне модели — только латиница, цифры и знаки * # @ ? -")
+                  .refine((p) => p.replace(/[*\-]/g, "").length >= 2, "Шаблон модели слишком общий — в нём меньше двух знаков")
+              )
+          )
+          .max(100),
+      })
+    )
+    .max(500, "Не больше 500 строк с моделями")
+    .default([]),
 });
 
 let cache: { value: PlateDictionary; at: number } | null = null;

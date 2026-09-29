@@ -30,6 +30,7 @@ import { filesRouter } from "./modules/files/files.routes";
 import { hintsRouter } from "./modules/hints/hints.routes";
 import { quickPicksRouter } from "./modules/quickpicks/quickpicks.routes";
 import { plateRouter } from "./modules/plate/plate.routes";
+import { startPlateSync } from "./modules/plate/plate.sync";
 import { servicesRouter } from "./modules/services/services.routes";
 import { settingsRouter } from "./modules/settings/settings.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
@@ -179,6 +180,8 @@ const server = app.listen(env.port, env.bindHost, () => {
   // Сторона мастерской — только после того, как свой сервер поднялся:
   // запросы из интернета пойдут в него же.
   startRelayAgent();
+  // Основа сверяет с облаком марки моделей для распознавания шильдиков.
+  startPlateSync();
 });
 
 // Облачная сторона туннеля — на том же сервере, отдельным путём.

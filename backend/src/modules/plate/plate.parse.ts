@@ -49,6 +49,12 @@ export interface PlateField {
 
 export interface PlateResult {
   brand: PlateField | null;
+  /**
+   * Откуда марка: прочитана на шильдике или выведена из модели — по правилу
+   * словаря или по тому, что мастерские уже вписывали для этой модели.
+   * Выведенную приёмщику стоит глянуть: на шильдике её не было.
+   */
+  brandFrom: "plate" | "model" | null;
   model: PlateField | null;
   serial: PlateField | null;
   /** Номер совпал со штрихкодом или QR — прочитан дважды разными способами. */
@@ -144,6 +150,124 @@ const BRANDS: Brand[] = [
   { name: "Realme", words: [], short: ["REALME"] },
 ];
 
+// ----------------------------------------------------------------- марка по модели
+
+/**
+ * Марка по модели — для шильдиков, где марки нет вовсе: наклейка без
+ * логотипа, логотип отрезан краем кадра, стёрт.
+ *
+ * Шаблон сравнивается с моделью целиком, без учёта регистра и пробелов:
+ *   *  — любые знаки, в том числе никаких;
+ *   #  — одна цифра;
+ *   @  — одна латинская буква;
+ *   ?  — одна буква или цифра.
+ * Дефис в шаблоне необязателен в модели: распознаватель его теряет.
+ *
+ * Встроенные правила нарочно осторожные: неверная марка хуже пустой — пустую
+ * приёмщик заметит сам. Поэтому почти везде после цифр требуется буква:
+ * «E410MA» — ASUS, а «E480» — ThinkPad, и его правило не трогает. Серии без
+ * надёжного признака (MateBook и MagicBook, ThinkCentre, телефоны) сюда не
+ * входят — их марку дадут словарь платформы и память мастерских.
+ */
+export interface ModelRule {
+  brand: string;
+  patterns: RegExp[];
+}
+
+const MODEL_RULES: Array<{ brand: string; patterns: string[] }> = [
+  {
+    brand: "ASUS",
+    patterns: [
+      "X4##@*", "X5##@*", "X7##@*", "X1###@*", "K5##@*", "K3###@*", "K6###@*",
+      "D5##@*", "D7##@*", "M5##@*", "M1###@*", "M3###@*", "M6###@*",
+      "E2##@*", "E4##@*", "E5##@*", "F5##@*", "S4##@*", "S5##@*", "S5###@*", "R5##@*", "N5##@*", "N7##@*",
+      "UX###*", "UM###*", "GL###*", "GU###*", "GA###*", "GV###*", "GX###*", "FX###*", "FA###*",
+      "TP###*", "B1###@*", "P1###@*",
+    ],
+  },
+  {
+    brand: "Acer",
+    patterns: [
+      "N##@#", "A###-##*", "AN###-##*", "SF###-##*", "SP###-##*", "PH###-##*", "EX2##-##*", "TMP2##-##*",
+      "ES1-###*", "E1-###*", "E5-###*", "V3-###*", "V5-###*", "MS2###",
+    ],
+  },
+  { brand: "HP", patterns: ["TPN-*", "1#-@@#*", "1#S-@@#*", "2##G#*", "3##G#*", "4##G#*"] },
+  { brand: "Dell", patterns: ["P##F*", "P##G*", "P##E*", "P##T*", "P###F*", "P###G*"] },
+  { brand: "Apple", patterns: ["A1###", "A2###", "A3###"] },
+  {
+    brand: "MSI",
+    patterns: ["MS-1#??*", "MS-7#??*", "GF##", "GF##@*", "GP##", "GP##@*", "GE##", "GE##@*", "GS##", "GS##@*", "GL##", "GL##@*"],
+  },
+  { brand: "Samsung", patterns: ["NP-*", "SM-@###*"] },
+  { brand: "Sony", patterns: ["PCG-*", "SVF###*", "SVE###*", "SVS###*", "SVP###*", "VPC@@*"] },
+  {
+    brand: "Lenovo",
+    patterns: [
+      "###-1#@*", "@###-1#@*", "###@-1#@*", "V1#-@@@*", "B5#-##*", "G5#-##*", "G7#-##*", "Z5#-##*",
+      "B5#0", "G5#0", "G7#0", "Z5#0",
+    ],
+  },
+  { brand: "Xiaomi", patterns: ["TM1###*", "XMA####*"] },
+];
+
+/** Шаблон — в выражение. Пустой или из одних звёздочек не годится: совпал бы со всем. */
+export function patternToRegExp(pattern: string): RegExp | null {
+  const p = pattern.replace(/\s+/g, "").toUpperCase();
+  if (p.replace(/[*\-]/g, "").length < 2) return null;
+  let body = "";
+  for (const ch of p) {
+    if (ch === "*") body += ".*";
+    else if (ch === "#") body += "\\d";
+    else if (ch === "@") body += "[A-Z]";
+    else if (ch === "?") body += "[A-Z0-9]";
+    else if (ch === "-") body += "-?";
+    else body += ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  }
+  return new RegExp(`^${body}$`);
+}
+
+/** Модель в вид, с которым сравниваются шаблоны: заглавные, без пробелов. */
+const ruleForm = (model: string) => model.replace(/\s+/g, "").toUpperCase();
+
+/** Марки, чьи правила подходят к модели, — по порядку правил. */
+export function brandsByRules(model: string, rules: ModelRule[]): string[] {
+  const m = ruleForm(model);
+  if (!m) return [];
+  const out: string[] = [];
+  for (const r of rules) {
+    if (!out.includes(r.brand) && r.patterns.some((re) => re.test(m))) out.push(r.brand);
+  }
+  return out;
+}
+
+/**
+ * Ключи модели для сравнения с тем, что уже вписано в заказах: сама модель
+ * без знаков и её основа — начало до разделителя. «X515EA-BQ1234» и «X515EA»,
+ * «NP-R710H-FS06RU» и «NP-R710H» — одна модель в разной комплектации, и марка
+ * у них одна.
+ *
+ * Основа — самое короткое начало до разделителя, в котором есть и буква, и
+ * цифра и не меньше четырёх знаков: «NP» от «NP-R710H» или «250» от
+ * «250 G7» ничего не значат, поэтому берётся следующее — «NPR710H».
+ */
+export function modelKeys(model: string): string[] {
+  const up = model.trim().toUpperCase();
+  const full = up.replace(/[^A-Z0-9]/g, "");
+  if (full.length < 3 || !/\d/.test(full)) return [];
+  const keys = [full];
+  const parts = up.split(/[\s\-/(_.]+/);
+  let base = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    base += parts[i].replace(/[^A-Z0-9]/g, "");
+    if (base.length >= 4 && /\d/.test(base) && /[A-Z]/.test(base)) {
+      if (base !== full) keys.push(base);
+      break;
+    }
+  }
+  return keys;
+}
+
 // ----------------------------------------------------------------- словарь
 
 /**
@@ -155,6 +279,11 @@ export interface PlateDictionary {
   brands: Array<{ name: string; aliases: string[] }>;
   /** Фразы, на которых модель обрывается: «Made in China», «Rated». */
   noise: string[];
+  /**
+   * Марка по модели — для шильдиков, где марки нет: «ASUS: X5##@*, D5##@*».
+   * Необязательное: словари, сохранённые до этого поля, остаются рабочими.
+   */
+  models?: Array<{ brand: string; patterns: string[] }>;
 }
 
 export interface ParseOptions {
@@ -197,6 +326,8 @@ function phrase(p: string): RegExp[] {
 interface Dict {
   brands: Brand[];
   noise: RegExp[];
+  /** Правила «модель → марка»: сначала словарь платформы, потом встроенные. */
+  models: ModelRule[];
 }
 
 const brandByName = (brands: Brand[], name: string) => brands.find((b) => b.name === name) ?? null;
@@ -239,13 +370,24 @@ export function buildDictionary(options: ParseOptions = {}): Dict {
 
   const noise = [...NOISE, ...(options.dictionary?.noise ?? [])]
     .flatMap((p) => phrase(p));
-  return { brands, noise };
+
+  // Марку из правила словаря пишем так, как она названа среди марок: правило
+  // «asus: …» не должно заводить в бланке вторую «asus» рядом с «ASUS».
+  const models: ModelRule[] = [];
+  for (const rule of [...(options.dictionary?.models ?? []), ...MODEL_RULES]) {
+    const name = rule.brand.replace(/\s+/g, " ").trim();
+    if (name.length < 2) continue;
+    const patterns = rule.patterns.map(patternToRegExp).filter((re): re is RegExp => !!re);
+    if (patterns.length) models.push({ brand: byUpper(name)?.name ?? name, patterns });
+  }
+  return { brands, noise, models };
 }
 
 /** Что встроено в программу — панель показывает это рядом со словарём. */
 export const BUILTIN = {
   brands: BRANDS.map((b) => b.name),
   noise: NOISE,
+  models: MODEL_RULES.map((r) => ({ brand: r.brand, patterns: [...r.patterns] })),
 };
 
 function detectBrand(lines: string[], BRANDS: Brand[]): { brand: Brand | null; options: string[] } {
@@ -512,8 +654,23 @@ export function parsePlate(ocr: OcrResult, options: ParseOptions = {}): PlateRes
   const serial = serialCandidates(lines, ocr.barcodes ?? []);
   const model = ranked(modelCandidates(lines, brand, dict));
 
+  // Марки на шильдике нет — пробуем понять её по модели. Варианты модели по
+  // порядку: основной первым, но и запасной (регистрационный код Acer, TPN
+  // у HP) бывает как раз тем, что узнаётся.
+  let brandField: PlateField | null = brand ? { value: brand.name, options: brandOptions } : null;
+  let brandFrom: PlateResult["brandFrom"] = brand ? "plate" : null;
+  if (!brandField && model) {
+    const found: string[] = [];
+    for (const m of model.options) for (const b of brandsByRules(m, dict.models)) if (!found.includes(b)) found.push(b);
+    if (found.length) {
+      brandField = { value: found[0], options: found };
+      brandFrom = "model";
+    }
+  }
+
   return {
-    brand: brand ? { value: brand.name, options: brandOptions } : null,
+    brand: brandField,
+    brandFrom,
     model,
     serial: serial.field,
     serialConfirmed: serial.confirmed,

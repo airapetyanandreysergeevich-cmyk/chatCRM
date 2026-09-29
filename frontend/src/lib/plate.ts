@@ -14,6 +14,8 @@ export interface PlateField {
 
 export interface PlateResult {
   brand: PlateField | null;
+  /** Марка прочитана на шильдике или выведена из модели (правило, память заказов). */
+  brandFrom?: "plate" | "model" | null;
   model: PlateField | null;
   serial: PlateField | null;
   /** Номер совпал со штрихкодом или QR. */

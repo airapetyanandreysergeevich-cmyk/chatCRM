@@ -183,6 +183,8 @@ model Box {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  plateModels PlateBoxModel[]
+
   @@index([keyHash])
   @@index([email])
   @@index([previousName])
@@ -192,6 +194,41 @@ model PlatformSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// Какие марки у каких моделей вписаны в заказах коробочной Основы.
+/// Облако учится на всех мастерских: свои видит в базе, а Основы присылают
+/// сюда только пары «модель → марка» — ни клиентов, ни заказов.
+/// Каждая Основа при отправке заменяет свои строки целиком.
+model PlateBoxModel {
+  boxId     String
+  /// Модель без пробелов и знаков, заглавными: X515EABQ1234.
+  modelKey  String
+  brand     String
+  /// Как модель написана — для списка у собственника.
+  model     String
+  /// Сколько такой техники в Основе.
+  uses      Int
+  updatedAt DateTime @updatedAt
+
+  box Box @relation(fields: [boxId], references: [id], onDelete: Cascade)
+
+  @@id([boxId, modelKey, brand])
+  @@index([modelKey])
+}
+
+/// Модели, у которых марку при распознавании шильдика определить не удалось.
+/// По этому списку собственник видит, каких правил не хватает словарю.
+model PlateMiss {
+  /// Откуда: "cloud" — мастерские облака, "local" — эта же Основа, иначе id Основы.
+  source   String
+  modelKey String
+  model    String
+  uses     Int      @default(1)
+  lastAt   DateTime @default(now())
+
+  @@id([source, modelKey])
+  @@index([lastAt])
 }
 
 model PlatformAuditLog {
