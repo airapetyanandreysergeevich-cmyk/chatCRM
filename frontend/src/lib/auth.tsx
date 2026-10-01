@@ -66,6 +66,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (ok) return loadMe();
         // Своего сеанса у общего сайта нет, а с этого устройства входили в
         // Основу — уходим туда, её сеанс поднимется сам (см. lastBox.ts).
+        // Бланк, открытый программой для печати, без входа не напечатать —
+        // скажем ей об этом сразу, а не через 45 секунд ожидания.
+        if (new URLSearchParams(window.location.search).get("station") === "1") {
+          document.title = "FINECRM-PRINT-ERROR:Программа на компьютере с принтером не вошла в CRM";
+          setStatus("anon");
+          return;
+        }
         const box = boxToOpen();
         if (box) window.location.replace(box);
         else setStatus("anon");

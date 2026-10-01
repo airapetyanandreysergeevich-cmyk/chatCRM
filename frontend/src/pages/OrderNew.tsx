@@ -9,6 +9,7 @@ import { mergeDevice } from "../lib/plate";
 import { QuickPickEditor } from "../components/QuickPickEditor";
 import {
   Banner,
+  DebtBadge,
   Button,
   Card,
   Checkbox,
@@ -71,6 +72,7 @@ function CustomerHints({ hits, onPick }: { hits: CustomerHit[]; onPick: (c: Cust
               {c.orderCount > 0 && ` · ${plural(c.orderCount, "заказ", "заказа", "заказов")}`}
             </span>
           </span>
+          {c.inDebt && <DebtBadge amount={c.debt} />}
           <span className="shrink-0 text-[12.5px] font-semibold text-brand-ink">выбрать</span>
         </button>
       ))}
@@ -266,7 +268,7 @@ export default function OrderNew() {
     setStuck(null);
     setBusy(true);
     try {
-      if (await uploadPhotos(orderId, files)) navigate(`/orders/${orderId}`);
+      if (await uploadPhotos(orderId, files)) navigate(`/orders/${orderId}`, { state: { printOffer: true } });
     } finally {
       setBusy(false);
       setBusyText(null);
@@ -310,7 +312,7 @@ export default function OrderNew() {
         assignedMasterId: form.assignedMasterId || undefined,
       });
       if (photos.length && !(await uploadPhotos(created.id, photos.map((p) => p.file)))) return;
-      navigate(`/orders/${created.id}`);
+      navigate(`/orders/${created.id}`, { state: { printOffer: true } });
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -333,7 +335,7 @@ export default function OrderNew() {
         subtitle="Всё, что зафиксировано здесь, потом решает споры: комплектность, дефекты и слова клиента."
         actions={
           <>
-            <Button type="button" variant="secondary" onClick={() => navigate(stuck ? `/orders/${stuck.orderId}` : "/orders")}>
+            <Button type="button" variant="secondary" onClick={() => (stuck ? navigate(`/orders/${stuck.orderId}`, { state: { printOffer: true } }) : navigate("/orders"))}>
               {stuck ? "К заказу" : "Отмена"}
             </Button>
             <Button type="submit" disabled={busy}>
@@ -356,7 +358,7 @@ export default function OrderNew() {
               type="button"
               variant="secondary"
               className="px-4 text-[13px]"
-              onClick={() => navigate(`/orders/${stuck.orderId}`)}
+              onClick={() => navigate(`/orders/${stuck.orderId}`, { state: { printOffer: true } })}
             >
               Перейти к заказу без них
             </Button>
@@ -389,6 +391,8 @@ export default function OrderNew() {
                       · скидка на работы {picked.discountPercent}%
                     </span>
                   )}
+                  {/* Должник у стойки: сказать о долге до того, как брать технику. */}
+                  {picked.inDebt && <DebtBadge amount={picked.debt} className="ml-2" />}
                 </span>
                 <button
                   type="button"
@@ -809,7 +813,7 @@ export default function OrderNew() {
         <Button type="submit" disabled={busy} className="sm:min-w-[220px]">
           {busy ? busyText ?? "Сохраняем…" : stuck ? "Загрузить снимки ещё раз" : "Принять в ремонт"}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => navigate(stuck ? `/orders/${stuck.orderId}` : "/orders")}>
+        <Button type="button" variant="secondary" onClick={() => (stuck ? navigate(`/orders/${stuck.orderId}`, { state: { printOffer: true } }) : navigate("/orders"))}>
           {stuck ? "К заказу без снимков" : "Отмена"}
         </Button>
       </div>

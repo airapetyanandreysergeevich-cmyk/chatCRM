@@ -119,6 +119,8 @@ model Tenant {
   salaryEntries       SalaryEntry[]
   salaryPayouts       SalaryPayout[]
   salaryMonths        SalaryMonth[]
+  printStations       PrintStation[]
+  printJobs           PrintJob[]
   sessions            Session[]
   application         TenantApplication[]
 }
@@ -387,6 +389,8 @@ model User {
   /// порядке, сортировка, фильтр техники (modules/summary/prefs.ts).
   /// Пусто — всё по умолчанию.
   dashboardPrefs Json?
+  /// Свой принтер сотрудника и «печатать после приёма» (см. modules/printing).
+  printPrefs     Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -1190,4 +1194,53 @@ model SalaryMonth {
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, month])
+}
+
+/// Компьютер с программой FineCRM, через который мастерская печатает.
+/// Программа сама сообщает, какие принтеры видит её Windows (modules/printing).
+model PrintStation {
+  id         String   @id @default(uuid())
+  tenantId   String
+  /// Постоянный номер программы на этом компьютере — не меняется при смене имени.
+  deviceId   String
+  name       String
+  /// [{ name, displayName, isDefault }] — как их видит Windows.
+  printers   Json     @default("[]")
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id])
+  jobs   PrintJob[]
+
+  @@unique([tenantId, deviceId])
+}
+
+enum PrintJobStatus {
+  QUEUED
+  SENT
+  DONE
+  FAILED
+}
+
+/// Задание печати: кто-то нажал «Печать», компьютер с принтером забирает и печатает.
+model PrintJob {
+  id          String         @id @default(uuid())
+  tenantId    String
+  stationId   String
+  printerName String
+  /// intake — квитанция, act — акт работ, test — тестовая страница.
+  doc         String
+  /// Без связи с заказом: стирание заказов не должно спотыкаться о старые задания.
+  orderId     String?
+  copies      Int            @default(1)
+  status      PrintJobStatus @default(QUEUED)
+  error       String?
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id])
+  station PrintStation @relation(fields: [stationId], references: [id])
+
+  @@index([stationId, status])
 }

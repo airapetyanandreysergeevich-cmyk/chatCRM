@@ -5,6 +5,7 @@ import { Modal } from "../components/Modal";
 import { IconAdd, IconClients, IconCompany, IconEdit, IconPerson } from "../components/icons";
 import {
   Badge,
+  DebtBadge,
   Banner,
   Button,
   Card,
@@ -49,6 +50,9 @@ export interface Client {
   createdAt: string;
   orderCount: number;
   deviceCount: number;
+  /** Должен за выданную технику — ярлык «Задолженность» в списке. */
+  inDebt?: boolean;
+  debt?: number;
 }
 
 /** Пустая карточка для формы: у нового клиента заполнять нечего. */
@@ -244,6 +248,7 @@ export default function Clients() {
                     {c.name}
                   </span>
                   {c.type === "COMPANY" && <Badge>организация</Badge>}
+                  {c.inDebt && <DebtBadge amount={c.debt} />}
                 </>
               }
               subtitle={

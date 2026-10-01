@@ -440,6 +440,17 @@ export const IconSend = (p: IconProps) => (
   </Icon>
 );
 
+/** Периферия: принтер с проводом — всё, что подключено к компьютеру мастерской. */
+export const IconDevices = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.5" y="4.5" width="17" height="11" rx="2" />
+    <path d="M8 19.5h8" />
+    <path d="M12 15.5v4" />
+    <path d="M7.5 9h4" />
+    <path d="M7.5 11.5h6" />
+  </Icon>
+);
+
 export const IconPrint = (p: IconProps) => (
   <Icon {...p}>
     <path d="M7 8.5V3.5h10v5" />

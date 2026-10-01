@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe } from "../components/icons";
+import { IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ordersApi } from "../lib/orders";
@@ -41,6 +41,14 @@ const SECTIONS: Section[] = [
     text: "Квитанция и акт на печать: логотип, реквизиты, условия приёма, гарантия, подписи.",
     icon: <IconPrint />,
     need: "settings.manage",
+  },
+  {
+    // Видна всем: свой принтер выбирает себе любой сотрудник, общий
+    // принтер мастерской внутри меняет только администратор.
+    to: "/settings/peripherals",
+    title: "Периферия",
+    text: "Принтеры для квитанций и актов: печать с телефона и любого компьютера через FineCRM.",
+    icon: <IconDevices />,
   },
   {
     to: "/settings/services",

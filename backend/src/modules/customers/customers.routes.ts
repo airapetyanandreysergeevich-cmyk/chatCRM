@@ -6,7 +6,7 @@ import { withTenant } from "../../lib/db";
 import { ah, notFound } from "../../lib/errors";
 import { pageFields, paged, skipTake } from "../../lib/paging";
 import { nextCustomerNumber } from "../../lib/customerNumber";
-import { debts } from "../../lib/debt";
+import { debtFields, debtMap, debts } from "../../lib/debt";
 import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
@@ -166,7 +166,18 @@ customersRouter.get(
       return Promise.all([inOrder(ids, page), count]);
     });
 
-    res.json({ ...paged(rows.map(customerRow), total, q), searchFixed });
+    const { byCustomer: owed } = await withTenant(tenantId, (tx) =>
+      debtMap(tx, { customerIds: rows.map((c) => c.id) })
+    );
+    const money = seesMoney(req);
+    res.json({
+      ...paged(
+        rows.map((c) => ({ ...customerRow(c), ...debtFields(owed.get(c.id), money) })),
+        total,
+        q
+      ),
+      searchFixed,
+    });
   })
 );
 
@@ -260,13 +271,17 @@ customersRouter.get(
 
       if (ids.size === 0) return [];
 
-      return tx.customer.findMany({
+      const list = await tx.customer.findMany({
         where: { id: { in: [...ids] }, deletedAt: null },
         orderBy: { createdAt: "desc" },
         take: 6,
         include: { _count: { select: { orders: true } } },
       });
+      // Должник у стойки — первое, что должен увидеть приёмщик.
+      const { byCustomer } = await debtMap(tx, { customerIds: list.map((c) => c.id) });
+      return list.map((c) => ({ ...c, owed: byCustomer.get(c.id) }));
     });
+    const money = seesMoney(req);
 
     res.json(
       rows.map((c) => ({
@@ -282,6 +297,7 @@ customersRouter.get(
         color: c.color,
         discountPercent: Number(c.discountPercent),
         orderCount: c._count.orders,
+        ...debtFields(c.owed, money),
       }))
     );
   })
@@ -323,6 +339,7 @@ customersRouter.get(
       ]);
 
       const money = seesMoney(req);
+      const owedIds = new Set(owed.map((d) => d.orderId));
       // «В работе» — всё, что ещё у нас: принято, в ремонте, ждёт запчасть
       // или клиента, готово к выдаче. Выданное и отменённое — уже история.
       const active = orders.filter((o) => o.status.group !== "CLOSED" && o.status.group !== "CANCELLED").length;
@@ -382,11 +399,13 @@ customersRouter.get(
           isUrgent: o.isUrgent,
           complaint: o.complaint,
           acceptedAt: o.acceptedAt,
+          completedAt: o.completedAt,
           issuedAt: o.issuedAt,
           status: o.status,
           device: o.device,
           warrantyUntil: o.warrantyUntil,
           ...(money ? { total: Number(o.total) } : {}),
+          inDebt: owedIds.has(o.id),
         })),
       };
     });

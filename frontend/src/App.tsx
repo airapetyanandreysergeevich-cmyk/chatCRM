@@ -25,6 +25,8 @@ import RemoteAccess from "./pages/RemoteAccess";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import OrderPrint from "./pages/OrderPrint";
+import PrintTest from "./pages/PrintTest";
+import PeripheralsPage from "./pages/Peripherals";
 import Orders from "./pages/Orders";
 import Purchases from "./pages/Purchases";
 import ServicesPage from "./pages/Services";
@@ -64,6 +66,7 @@ export default function App() {
         {/* Бланк печатается на бумагу, поэтому идёт мимо Layout: боковое меню
             и шапка на квитанции клиенту не нужны. */}
         <Route path="/orders/:id/print" element={<OrderPrint />} />
+        <Route path="/print-test" element={<PrintTest />} />
 
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
@@ -85,6 +88,7 @@ export default function App() {
           <Route path="/settings/services" element={<ServicesPage />} />
           <Route path="/settings/interface" element={<InterfacePage />} />
           <Route path="/settings/print" element={<PrintFormsPage />} />
+          <Route path="/settings/peripherals" element={<PeripheralsPage />} />
           <Route path="/settings/feedback" element={<FeedbackPage />} />
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { copyable } from "../components/CopyMenu";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { PrintDialog } from "../components/PrintDialog";
+import { printingApi } from "../lib/printing";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
@@ -15,7 +17,8 @@ import {
   SectionLabel,
   Select,
   Spinner,
-  StatusChip,
+  StatusPill,
+  DebtBadge,
   Textarea,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
@@ -28,7 +31,7 @@ import {
   ORDER_KIND_LABEL,
   ordersApi,
   PART_SOURCE_LABEL,
-  statusTone,
+  statusPill,
   type Order,
   type OrderPart,
   type OrderWork,
@@ -366,6 +369,26 @@ export default function OrderCard() {
     return () => clearTimeout(t);
   }, [loaded]);
 
+  // Печать бланка: окно «на принтер / открыть для печати».
+  const [printing, setPrinting] = useState<{ doc: "intake" | "act"; afterIntake?: boolean; auto?: boolean } | null>(null);
+
+  // Только что приняли — предложить квитанцию (или сразу напечатать, как
+  // настроил сотрудник в «Периферии»). Метка в истории браузера снимается,
+  // чтобы обновление страницы не предлагало печать второй раз.
+  const location = useLocation();
+  const justAccepted = !!(location.state as { printOffer?: boolean } | null)?.printOffer;
+  useEffect(() => {
+    if (!justAccepted) return;
+    navigate(location.pathname + location.search, { replace: true, state: null });
+    printingApi
+      .overview()
+      .then((p) => {
+        if (p.intake === "off") return;
+        setPrinting({ doc: "intake", afterIntake: true, auto: p.intake === "auto" });
+      })
+      .catch(() => setPrinting({ doc: "intake", afterIntake: true }));
+  }, [justAccepted]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function run(action: () => Promise<unknown>, message: string) {
     setSaving(true);
     setError(null);
@@ -405,7 +428,10 @@ export default function OrderCard() {
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
             <h1 className="font-mono text-[26px] font-extrabold tracking-tight" {...copyable("order", order.number)}>{order.number}</h1>
-            <StatusChip tone={statusTone(order.status.group)}>{order.status.name}</StatusChip>
+            <StatusPill tone={statusPill(order).tone} className="text-[13px]">
+              {statusPill(order).label}
+            </StatusPill>
+            {order.inDebt && <DebtBadge amount={order.debt} className="text-[13px]" />}
             {order.isUrgent && (
               <span className="rounded-pill bg-state-off/10 px-2.5 py-1 text-[12px] font-bold text-state-off">срочный</span>
             )}
@@ -447,11 +473,11 @@ export default function OrderCard() {
           )}
           {/* Печать рядом со сменой статуса: квитанцию распечатывают сразу
               после приёма, акт — при выдаче, оба раза отсюда. */}
-          <Button variant="secondary" onClick={() => navigate(`/orders/${order.id}/print?doc=intake`)}>
+          <Button variant="secondary" onClick={() => setPrinting({ doc: "intake" })}>
             Квитанция
           </Button>
           {order.completedAt && (
-            <Button variant="secondary" onClick={() => navigate(`/orders/${order.id}/print?doc=act`)}>
+            <Button variant="secondary" onClick={() => setPrinting({ doc: "act" })}>
               Акт работ
             </Button>
           )}
@@ -988,6 +1014,17 @@ export default function OrderCard() {
             setShooting(false);
             void run(async () => undefined, count === 1 ? "Снимок загружен" : `Загружено снимков: ${count}`);
           }}
+        />
+      )}
+
+      {printing && (
+        <PrintDialog
+          orderId={order.id}
+          number={order.number}
+          doc={printing.doc}
+          afterIntake={printing.afterIntake}
+          auto={printing.auto}
+          onClose={() => setPrinting(null)}
         />
       )}
 

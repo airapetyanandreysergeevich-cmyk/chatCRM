@@ -75,6 +75,18 @@ const STATE: Record<Mode, Record<"new" | "waiting" | "progress" | "done" | "off"
   light: { new: "#2563C9", waiting: "#A96A00", progress: "#1E7F93", done: "#1F8A4C", off: "#C4362F" },
 };
 
+/**
+ * Сплошные ярлыки, которые должны бросаться в глаза: «Выдан» (зелёный),
+ * «Выдан без ремонта» (красный) и «Задолженность» (кукурузный). Пара «фон —
+ * текст» подобрана под тему: на тёмной — светлый фон и тёмный текст, на
+ * светлой — насыщенный фон и белый текст (у кукурузного — тёмный всегда:
+ * белый на жёлтом не читается).
+ */
+const PILL: Record<Mode, Record<"issued" | "issuedInk" | "refused" | "refusedInk" | "debt" | "debtInk", string>> = {
+  dark: { issued: "#45C08A", issuedInk: "#0C2A1B", refused: "#E06B6B", refusedInk: "#2B0D0D", debt: "#F4D44D", debtInk: "#3A2E00" },
+  light: { issued: "#1F8A4C", issuedInk: "#FFFFFF", refused: "#C4362F", refusedInk: "#FFFFFF", debt: "#F6D646", debtInk: "#3A2E00" },
+};
+
 // ------------------------------------------------------------- работа с цветом
 
 const HEX = /^#[0-9A-Fa-f]{6}$/;
@@ -164,6 +176,13 @@ export function deriveTokens(palette: Palette, mode: Mode): Record<string, strin
     "--state-progress": state.progress,
     "--state-done": state.done,
     "--state-off": state.off,
+
+    "--pill-issued": PILL[mode].issued,
+    "--pill-issued-ink": PILL[mode].issuedInk,
+    "--pill-refused": PILL[mode].refused,
+    "--pill-refused-ink": PILL[mode].refusedInk,
+    "--pill-debt": PILL[mode].debt,
+    "--pill-debt-ink": PILL[mode].debtInk,
   };
 
   return Object.fromEntries(Object.entries(tokens).map(([k, v]) => [k, channels(v)]));

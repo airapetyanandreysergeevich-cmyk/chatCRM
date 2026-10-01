@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { onUnreadChanged } from "../lib/unread";
+import { printBridge, startPrintStation } from "../lib/printing";
 import { BrandMark, BrandRow } from "./Brand";
 import { DemoBanner } from "./DemoBanner";
 import { InstallAppBanner } from "./InstallApp";
@@ -74,6 +75,16 @@ export default function Layout() {
       /* не сохранилось — переживём, это всего лишь ширина меню */
     }
   }, [collapsed]);
+
+  // Окно программы FineCRM — станция печати: печатает задания мастерской
+  // на принтеры этого компьютера (lib/printing.ts). В браузере и на
+  // телефоне мостика нет, и ничего не запускается.
+  const stationTenant = me?.kind === "tenant" ? (me.tenant?.id ?? null) : null;
+  useEffect(() => {
+    const bridge = printBridge();
+    if (!bridge || !stationTenant) return;
+    return startPrintStation(bridge);
+  }, [stationTenant]);
 
   const isPlatformPanel = me?.kind === "platform" && !me.impersonating;
   useEffect(() => {

@@ -38,4 +38,10 @@ contextBridge.exposeInMainWorld("finecrmDesktop", {
     runNow: () => ipcRenderer.invoke("desktop:backups-run"),
     open: (placePath) => ipcRenderer.invoke("desktop:backups-open", placePath),
   },
+  // Печать через CRM: этот компьютер печатает задания мастерской (printing.js).
+  printing: {
+    info: () => ipcRenderer.invoke("desktop:print-info"),
+    printers: () => ipcRenderer.invoke("desktop:printers"),
+    print: (job) => ipcRenderer.invoke("desktop:print", job),
+  },
 });

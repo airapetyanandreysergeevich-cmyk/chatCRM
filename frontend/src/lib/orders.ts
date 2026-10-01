@@ -1,6 +1,7 @@
 import { chunks } from "./photos";
 import { api, type Page } from "./api";
 import { fileUrl } from "./basePath";
+import type { PillTone } from "../components/ui";
 import type { PaymentMethod } from "./debt";
 import type { Service } from "./services";
 
@@ -68,6 +69,10 @@ export interface Order {
   dueAt: string | null;
   completedAt: string | null;
   issuedAt: string | null;
+  /** Выдан, а оплачен не весь — ярлык «Задолженность». */
+  inDebt?: boolean;
+  /** Сколько должны — только тому, кто видит деньги. */
+  debt?: number;
 
   customer: {
     id: string;
@@ -164,16 +169,27 @@ export const PART_SOURCE_LABEL: Record<OrderPart["source"], string> = {
   CUSTOMER: "Клиента",
 };
 
-/** Группа статуса решает, каким цветом он показан — переименование ничего не ломает. */
-export const statusTone = (group: StatusGroup) =>
-  ({
-    NEW: "new",
-    IN_PROGRESS: "progress",
-    WAITING: "waiting",
-    DONE: "done",
-    CLOSED: "done",
-    CANCELLED: "cancelled",
-  })[group] as "new" | "progress" | "waiting" | "done" | "cancelled";
+/**
+ * Таблетка статуса. Выданный заказ называем по итогу, а не по имени статуса:
+ * «Выдан» — если был отремонтирован, «Выдан без ремонта» — если отказ или
+ * выдан, не дойдя до готовности. Имена статусов мастерская может менять, а
+ * итог должен читаться одинаково везде.
+ */
+export function statusPill(o: {
+  status: { name: string; group: StatusGroup };
+  issuedAt?: string | null;
+  completedAt?: string | null;
+}): { tone: PillTone; label: string } {
+  if (o.issuedAt) {
+    return o.status.group === "CANCELLED" || !o.completedAt
+      ? { tone: "refused", label: "Выдан без ремонта" }
+      : { tone: "issued", label: "Выдан" };
+  }
+  const tone = (
+    { NEW: "new", IN_PROGRESS: "progress", WAITING: "waiting", DONE: "done", CLOSED: "issued", CANCELLED: "cancelled" } as const
+  )[o.status.group];
+  return { tone, label: o.status.name };
+}
 
 /**
  * Значок строки списка. В отличие от цвета выданный заказ отличается от
@@ -189,24 +205,13 @@ export const statusGlyphTone = (group: StatusGroup) =>
     CANCELLED: "cancelled",
   })[group] as "new" | "progress" | "waiting" | "done" | "closed" | "cancelled";
 
-/**
- * Цвет текста статуса рядом со значком — тот же смысл, что и у плашки.
- * Четыре рабочие группы берут цвета стадий с главной: заказ, который на
- * доске лежит в розовой колонке, и в списке должен быть розовым.
- */
-export const statusTextClass = (group: StatusGroup) =>
-  ({
-    NEW: "text-stage-new",
-    IN_PROGRESS: "text-stage-progress",
-    WAITING: "text-stage-waiting",
-    DONE: "text-stage-done",
-    CLOSED: "text-ink-muted",
-    CANCELLED: "text-state-off",
-  })[group];
 
 /** Найденный клиент в подсказках на приёме техники. */
 export interface CustomerHit {
   id: string;
+  /** Есть выданный и не оплаченный заказ — приёмщик должен увидеть сразу. */
+  inDebt?: boolean;
+  debt?: number;
   type: "INDIVIDUAL" | "COMPANY";
   name: string;
   phone: string;

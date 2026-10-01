@@ -29,7 +29,8 @@ DECLARE
     'Warehouse','StockItem','StockBalance','StockMovement',
     'CashRegister','TransactionCategory','Transaction',
     'AuditLog','Notification','PushSubscription','Feedback',
-    'SalaryEntry','SalaryPayout','SalaryMonth'
+    'SalaryEntry','SalaryPayout','SalaryMonth',
+    'PrintStation','PrintJob'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

@@ -43,6 +43,13 @@
   --state-progress: 70 185 206;
   --state-done: 69 192 138;
   --state-off: 224 107 107;
+
+  --pill-issued: 69 192 138;
+  --pill-issued-ink: 12 42 27;
+  --pill-refused: 224 107 107;
+  --pill-refused-ink: 43 13 13;
+  --pill-debt: 244 212 77;
+  --pill-debt-ink: 58 46 0;
 }
 
 /*

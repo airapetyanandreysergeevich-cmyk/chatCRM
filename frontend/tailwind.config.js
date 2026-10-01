@@ -52,6 +52,15 @@ export default {
           done: v("state-done"),
           off: v("state-off"),
         },
+        /** Сплошные ярлыки: «Выдан», «Выдан без ремонта», «Задолженность» (lib/theme.ts). */
+        pill: {
+          issued: v("pill-issued"),
+          "issued-ink": v("pill-issued-ink"),
+          refused: v("pill-refused"),
+          "refused-ink": v("pill-refused-ink"),
+          debt: v("pill-debt"),
+          "debt-ink": v("pill-debt-ink"),
+        },
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],

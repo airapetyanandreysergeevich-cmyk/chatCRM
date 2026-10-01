@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { PrintBridge } from "./printing";
 
 /**
  * Резервные копии Основы.
@@ -58,6 +59,8 @@ declare global {
         runNow: () => Promise<DesktopResult>;
         open: (placePath: string) => Promise<DesktopResult>;
       };
+      /** Есть у программы с версии 0.1.30 — печать через CRM. */
+      printing?: PrintBridge;
     };
   }
 }

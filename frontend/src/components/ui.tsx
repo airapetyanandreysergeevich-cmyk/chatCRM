@@ -285,6 +285,53 @@ export function StatusChip({
 }
 
 /**
+ * Статус заказа «таблеткой»: цветной фон со скруглёнными краями, читается
+ * издалека. Выданный — сплошной зелёный, выданный без ремонта — сплошной
+ * красный: это итог заказа, его видно первым. Рабочие стадии — мягкой
+ * заливкой своего цвета, как колонки на главной.
+ */
+export type PillTone = "new" | "waiting" | "progress" | "done" | "issued" | "refused" | "cancelled";
+
+export function StatusPill({ tone, children, className }: { tone: PillTone; children: ReactNode; className?: string }) {
+  const map: Record<PillTone, string> = {
+    new: "bg-stage-new/15 text-stage-new",
+    waiting: "bg-stage-waiting/15 text-stage-waiting",
+    progress: "bg-stage-progress/15 text-stage-progress",
+    done: "bg-stage-done/15 text-stage-done",
+    issued: "bg-pill-issued text-pill-issued-ink",
+    refused: "bg-pill-refused text-pill-refused-ink",
+    cancelled: "bg-state-off/15 text-state-off",
+  };
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center whitespace-nowrap rounded-pill px-3 py-1 text-[12.5px] font-bold leading-tight",
+        map[tone],
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** «Задолженность» — кукурузный ярлык, заметный в любом списке. Сумма — в подсказке, если её можно видеть. */
+export function DebtBadge({ amount, className }: { amount?: number; className?: string }) {
+  const sum = amount !== undefined && amount > 0 ? `${Math.round(amount).toLocaleString("ru-RU")} ₽` : null;
+  return (
+    <span
+      title={sum ? `Долг ${sum}` : "Есть неоплаченный выданный заказ"}
+      className={cx(
+        "inline-flex items-center whitespace-nowrap rounded-pill bg-pill-debt px-3 py-1 text-[12.5px] font-bold leading-tight text-pill-debt-ink",
+        className
+      )}
+    >
+      Задолженность{sum ? ` · ${sum}` : ""}
+    </span>
+  );
+}
+
+/**
  * Значок-плашка для строки списка. Форма значка несёт тот же смысл, что и
  * цвет: список должен читаться и в ярком цеховом свете, и тем, кто цвета
  * различает плохо.

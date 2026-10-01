@@ -13,13 +13,15 @@ import {
   SectionLabel,
   Spinner,
   StatusGlyph,
+  StatusPill,
+  DebtBadge,
 } from "../components/ui";
 import { DebtPanel } from "../components/DebtPanel";
 import { ApiError, api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { formatDateShort, plural } from "../lib/format";
-import { money, ORDER_KIND_LABEL, statusGlyphTone, statusTextClass, type Order } from "../lib/orders";
+import { money, ORDER_KIND_LABEL, statusGlyphTone, statusPill, type Order } from "../lib/orders";
 import { ClientModal, type Client } from "./Clients";
 
 /**
@@ -52,7 +54,9 @@ interface Detail {
     isUrgent: boolean;
     complaint: string | null;
     acceptedAt: string;
+    completedAt?: string | null;
     issuedAt: string | null;
+    inDebt?: boolean;
     status: { name: string; group: Order["status"]["group"] };
     device: { kind: string | null; brand: string | null; model: string | null } | null;
     total?: number;
@@ -138,6 +142,7 @@ export default function ClientCard() {
                 )}
                 <span style={nameStyle(c.color)} {...copyable("name", c.name)}>{c.name}</span>
                 {c.type === "COMPANY" && <Badge>организация</Badge>}
+                {data.debt.total > 0 && <DebtBadge amount={seesMoney ? data.debt.total : undefined} />}
                 {c.discountPercent > 0 && <Badge tone="brand">скидка {c.discountPercent}%</Badge>}
               </h1>
               <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[14px] text-ink-muted">
@@ -220,17 +225,14 @@ export default function ClientCard() {
                         </Badge>
                       )}
                       {o.kind !== "REPAIR" && o.kind !== "WARRANTY" && <Badge>{ORDER_KIND_LABEL[o.kind]}</Badge>}
+                      {o.inDebt && <DebtBadge />}
                     </>
                   }
                   subtitle={o.complaint || "без описания"}
                   meta={
                     <>
-                      <span
-                        className={
-                          "whitespace-nowrap font-semibold lg:w-[146px] lg:text-right " + statusTextClass(o.status.group)
-                        }
-                      >
-                        {o.status.name}
+                      <span className="whitespace-nowrap lg:flex lg:w-[156px] lg:justify-end">
+                        <StatusPill tone={statusPill(o).tone}>{statusPill(o).label}</StatusPill>
                       </span>
                       <span className="whitespace-nowrap lg:w-[96px] lg:text-right">{formatDateShort(o.acceptedAt)}</span>
                       {seesMoney && (

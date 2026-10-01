@@ -17,7 +17,9 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public fields?: Array<{ path: string; message: string }>
+    public fields?: Array<{ path: string; message: string }>,
+    /** Код причины от сервера, если он его прислал («offline», «no-printer»…). */
+    public code?: string
   ) {
     super(message);
   }
@@ -68,7 +70,7 @@ async function request<T>(path: string, init: RequestInit = {}, allowRetry = tru
 
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? "Что-то пошло не так", data?.fields);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? "Что-то пошло не так", data?.fields, data?.code);
   return data as T;
 }
 

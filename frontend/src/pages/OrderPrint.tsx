@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { ordersApi, type Order } from "../lib/orders";
 import { printFormsApi, type PrintForms } from "../lib/printForms";
 import { PrintSheet, type Doc } from "../components/PrintSheet";
+import { isStationPage, STATION_FAILED, STATION_READY } from "../lib/printing";
 
 /**
  * Печатные бланки: квитанция о приёме и акт выполненных работ.
@@ -16,6 +17,15 @@ import { PrintSheet, type Doc } from "../components/PrintSheet";
  * PDF не собираем: браузер печатает в файл сам, и любая мастерская умеет
  * это делать, не разбираясь в наших настройках.
  */
+
+/** Картинка дорисована или не загрузилась — ждать её больше нечего. */
+const settled = (img: HTMLImageElement) =>
+  img.complete
+    ? null
+    : new Promise((r) => {
+        img.addEventListener("load", r, { once: true });
+        img.addEventListener("error", r, { once: true });
+      });
 
 export default function OrderPrint() {
   const { id = "" } = useParams();
@@ -46,6 +56,28 @@ export default function OrderPrint() {
       : me?.kind === "platform"
         ? (me.impersonating?.name ?? "Мастерская")
         : "Мастерская";
+
+  // Бланк открыт программой FineCRM для печати без окна: когда он
+  // дорисован, говорим ей об этом заголовком страницы (desktop/src/printing.js).
+  const station = isStationPage();
+  const ready = !!order && !!forms;
+  useEffect(() => {
+    if (!station) return;
+    if (error) {
+      document.title = STATION_FAILED + error;
+      return;
+    }
+    if (!ready) return;
+    let alive = true;
+    void (async () => {
+      await document.fonts?.ready;
+      await Promise.all([...document.images].map(settled));
+      requestAnimationFrame(() => requestAnimationFrame(() => alive && (document.title = STATION_READY)));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [station, ready, error]);
 
   if (error) return <div className="p-8 text-[14px]">{error}</div>;
   if (!order || !forms) return <div className="p-8 text-[14px]">Готовим бланк…</div>;

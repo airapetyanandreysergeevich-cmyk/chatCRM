@@ -115,11 +115,11 @@ const printSchema = z
     name: text(80),
     requisites: text(400),
     intake: z
-      .object({ title: text(80), terms: text(2000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
+      .object({ title: text(80), terms: text(20000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
       .strip()
       .optional(),
     act: z
-      .object({ title: text(80), warranty: text(2000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
+      .object({ title: text(80), warranty: text(20000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
       .strip()
       .optional(),
     footer: text(200),

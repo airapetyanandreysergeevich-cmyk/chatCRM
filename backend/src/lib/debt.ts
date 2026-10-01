@@ -124,3 +124,64 @@ export async function debtOf(tx: Prisma.TransactionClient, customerId: string): 
   const list = await debts(tx, { customerId });
   return Math.round(list.reduce((sum, d) => sum + d.due, 0) * 100) / 100;
 }
+
+/**
+ * Долги для списка — одним запросом на страницу.
+ *
+ * Тот же расчёт, что выше (выданный заказ, итог минус проведённые деньги), но
+ * для заранее известных заказов или клиентов: ярлык «Задолженность» стоит в
+ * каждой строке списка, и считать его по строке значило бы сорок запросов.
+ */
+export async function debtMap(
+  tx: Prisma.TransactionClient,
+  by: { orderIds?: string[]; customerIds?: string[] }
+): Promise<{ byOrder: Map<string, number>; byCustomer: Map<string, number> }> {
+  const byOrder = new Map<string, number>();
+  const byCustomer = new Map<string, number>();
+  const orderIds = by.orderIds ?? [];
+  const customerIds = by.customerIds ?? [];
+  if (!orderIds.length && !customerIds.length) return { byOrder, byCustomer };
+
+  const orders = await tx.order.findMany({
+    where: {
+      deletedAt: null,
+      issuedAt: { not: null },
+      OR: [
+        ...(orderIds.length ? [{ id: { in: orderIds } }] : []),
+        ...(customerIds.length ? [{ customerId: { in: customerIds } }] : []),
+      ],
+    },
+    select: { id: true, customerId: true, total: true },
+  });
+  if (!orders.length) return { byOrder, byCustomer };
+
+  const sums = await tx.transaction.groupBy({
+    by: ["orderId", "direction"],
+    where: { deletedAt: null, orderId: { in: orders.map((o) => o.id) } },
+    _sum: { amount: true },
+  });
+  const paidBy = new Map<string, number>();
+  for (const s of sums) {
+    if (!s.orderId) continue;
+    const signed = (s.direction === "IN" ? 1 : -1) * num(s._sum.amount);
+    paidBy.set(s.orderId, (paidBy.get(s.orderId) ?? 0) + signed);
+  }
+
+  for (const o of orders) {
+    const due = Math.round((num(o.total) - (paidBy.get(o.id) ?? 0)) * 100) / 100;
+    if (due <= 0) continue;
+    byOrder.set(o.id, due);
+    byCustomer.set(o.customerId, Math.round(((byCustomer.get(o.customerId) ?? 0) + due) * 100) / 100);
+  }
+  return { byOrder, byCustomer };
+}
+
+/**
+ * Поля долга для ответа. Сам факт долга — всем, кто видит строку: ярлык
+ * «Задолженность» должен бросаться в глаза и приёмщику. Сумма — только тому,
+ * кто видит деньги.
+ */
+export const debtFields = (due: number | undefined, money: boolean) => ({
+  inDebt: (due ?? 0) > 0,
+  ...(money ? { debt: due ?? 0 } : {}),
+});

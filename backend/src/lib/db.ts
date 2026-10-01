@@ -11,6 +11,7 @@ const TENANT_DELEGATES = new Set([
   "cashRegister", "transactionCategory", "transaction",
   "auditLog", "notification", "pushSubscription", "feedback",
   "salaryEntry", "salaryPayout", "salaryMonth",
+  "printStation", "printJob",
 ]);
 
 const WHERE_OPS = new Set([

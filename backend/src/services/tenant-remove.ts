@@ -32,6 +32,9 @@ const ORDER: readonly string[] = [
   "notification",
   "auditLog",
   "feedback",
+  // печать: задания ссылаются на компьютер
+  "printJob",
+  "printStation",
   // зарплата: ссылается на сотрудников
   "salaryEntry",
   "salaryPayout",

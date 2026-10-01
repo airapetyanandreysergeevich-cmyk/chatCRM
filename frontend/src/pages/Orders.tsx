@@ -14,6 +14,8 @@ import {
   SearchInput,
   Spinner,
   StatusGlyph,
+  StatusPill,
+  DebtBadge,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -25,7 +27,7 @@ import {
   ORDER_KIND_LABEL,
   ordersApi,
   statusGlyphTone,
-  statusTextClass,
+  statusPill,
   type Order,
 } from "../lib/orders";
 import { STAGES } from "../lib/stages";
@@ -264,6 +266,7 @@ export default function Orders() {
                       {o.kind !== "REPAIR" && o.kind !== "WARRANTY" && (
                         <Badge>{ORDER_KIND_LABEL[o.kind]}</Badge>
                       )}
+                      {o.inDebt && <DebtBadge amount={o.debt} />}
                     </>
                   }
                   subtitle={
@@ -295,13 +298,8 @@ export default function Orders() {
                       {/* Пустые ячейки на широком экране остаются на месте:
                           без этого колонки съезжают у заказов без мастера
                           или без суммы, и список перестаёт читаться сверху вниз. */}
-                      <span
-                        className={
-                          "empty:hidden lg:empty:block whitespace-nowrap lg:w-[146px] lg:text-right font-semibold " +
-                          statusTextClass(o.status.group)
-                        }
-                      >
-                        {o.status.name}
+                      <span className="whitespace-nowrap lg:flex lg:w-[156px] lg:justify-end">
+                        <StatusPill tone={statusPill(o).tone}>{statusPill(o).label}</StatusPill>
                       </span>
                       <span
                         className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[104px] lg:text-right"

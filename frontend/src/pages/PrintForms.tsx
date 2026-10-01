@@ -78,6 +78,9 @@ function sampleOrder(): Order {
   } as unknown as Order;
 }
 
+/** Предел текста условий и гарантии — с запасом на 5–6 страниц; совпадает с сервером (settings.routes.ts). */
+const TEXT_MAX = 20000;
+
 /** Ширина A4 в пикселях экрана: 210 мм при 96 точках на дюйм. */
 const A4_PX = 793.7;
 
@@ -250,11 +253,11 @@ function DocCard({
           <Input value={texts.title} maxLength={80} disabled={disabled} onChange={(e) => set("title")(e.target.value)} />
         </div>
         <div>
-          <FieldHead label={bodyLabel} onReset={reset("body")} count={texts.body.length} max={2000} />
+          <FieldHead label={bodyLabel} onReset={reset("body")} count={texts.body.length} max={TEXT_MAX} />
           <Textarea
             rows={7}
             value={texts.body}
-            maxLength={2000}
+            maxLength={TEXT_MAX}
             disabled={disabled}
             onChange={(e) => set("body")(e.target.value)}
           />

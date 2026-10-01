@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { debtFields, debtMap } from "../../lib/debt";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { originalName } from "../../lib/uploadName";
@@ -248,10 +249,18 @@ ordersRouter.get(
     // Иначе строка «заказ 0412» на запрос «шлейф» выглядит случайной: слова
     // из запроса в ней нет, оно внутри ленты сообщений.
     const found = words.length ? await matchedMessages(tenantOf(req), rows, words) : new Map();
+    // Ярлык «Задолженность» в строке: выдан, а оплачен не весь.
+    const { byOrder: owed } = await withTenant(tenantOf(req), (tx) =>
+      debtMap(tx, { orderIds: rows.filter((o) => o.issuedAt).map((o) => o.id) })
+    );
 
     res.json({
       ...paged(
-        rows.map((o) => ({ ...projectOrder(o, { contacts, money }), foundMessage: found.get(o.id) ?? null })),
+        rows.map((o) => ({
+          ...projectOrder(o, { contacts, money }),
+          foundMessage: found.get(o.id) ?? null,
+          ...debtFields(owed.get(o.id), money),
+        })),
         total,
         q
       ),
@@ -533,11 +542,18 @@ ordersRouter.get(
         ? await previousRepairSummary(tx, order.parentOrderId)
         : null;
 
-      return projectOrder(order, {
-        contacts: seesCustomerContacts(req),
-        money: seesMoney(req),
-        previousRepair,
-      });
+      const { byOrder: owed } = order.issuedAt
+        ? await debtMap(tx, { orderIds: [order.id] })
+        : { byOrder: new Map<string, number>() };
+
+      return {
+        ...projectOrder(order, {
+          contacts: seesCustomerContacts(req),
+          money: seesMoney(req),
+          previousRepair,
+        }),
+        ...debtFields(owed.get(order.id), seesMoney(req)),
+      };
     });
     res.json(data);
   })

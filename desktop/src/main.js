@@ -17,6 +17,7 @@ const { Backups, findBackups, tooNew } = require("./backup");
 const network = require("./network");
 const discovery = require("./discovery");
 const { Updater } = require("./updater");
+const printing = require("./printing");
 
 /**
  * Оболочка локальной версии.
@@ -87,6 +88,10 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Окно Основы весь день свёрнуто в трей, а печатает мастерская через
+      // него (printing.js): притормаживать скрытое окно нельзя, иначе
+      // задания с телефона ждали бы минутами.
+      backgroundThrottling: false,
     },
   });
 
@@ -690,6 +695,9 @@ function fromOwnWindow(e) {
     return false;
   }
 }
+
+// Печать через CRM: этот компьютер — станция печати (см. printing.js).
+printing.register({ ipcMain, BrowserWindow, getWindow: () => win, userDataDir: userData() });
 
 ipcMain.handle("desktop:backups-status", (e) =>
   fromOwnWindow(e) ? { ok: true, here: true, ...backups.status() } : { ok: true, here: false }
