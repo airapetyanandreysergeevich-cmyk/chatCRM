@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { fileUrl } from "./basePath";
 
 /** История ремонта: сообщения мастеров в карточке заказа. */
 
@@ -20,13 +21,19 @@ export interface OrderMessage {
   attachments: MessagePhoto[];
 }
 
+/** Ссылки на снимки — с приставкой адреса (см. fileUrl). */
+const withFileUrls = (m: OrderMessage): OrderMessage => ({
+  ...m,
+  attachments: (m.attachments ?? []).map((a) => ({ ...a, url: fileUrl(a.url) })),
+});
+
 export const messagesApi = {
-  list: (orderId: string) => api.get<OrderMessage[]>(`/orders/${orderId}/messages`),
+  list: (orderId: string) => api.get<OrderMessage[]>(`/orders/${orderId}/messages`).then((list) => list.map(withFileUrls)),
   send: (orderId: string, text: string, files: File[]) => {
     const form = new FormData();
     form.append("text", text);
     for (const f of files) form.append("files", f, f.name);
-    return api.upload<OrderMessage>(`/orders/${orderId}/messages`, form);
+    return api.upload<OrderMessage>(`/orders/${orderId}/messages`, form).then(withFileUrls);
   },
   remove: (orderId: string, messageId: string) => api.del(`/orders/${orderId}/messages/${messageId}`),
 };

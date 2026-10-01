@@ -19,7 +19,9 @@ export const env = {
   jwtAccessSecret: required("JWT_ACCESS_SECRET"),
   jwtRefreshSecret: required("JWT_REFRESH_SECRET"),
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL ?? "15m",
-  refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 30),
+  // Вход держится 90 дней и продлевается при каждом заходе: кто открывает
+  // программу хотя бы раз в 90 дней, пароль больше не вводит.
+  refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS) > 0 ? Number(process.env.REFRESH_TOKEN_TTL_DAYS) : 90,
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
   /**
    * Помечать ли печенье сессии как «только по HTTPS».

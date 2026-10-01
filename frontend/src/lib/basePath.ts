@@ -53,3 +53,13 @@ export const ROUTER_BASE = BASE === "/" ? "/" : BASE.slice(0, -1);
 
 /** Адрес файла или запроса с учётом приставки: url("api/orders") → «/b/…/api/orders». */
 export const url = (path: string) => BASE + path.replace(/^\/+/, "");
+
+/**
+ * Ссылка на файл от сервера («/api/files/…») — с приставкой.
+ *
+ * Сервер не знает, под каким адресом его открыли: в Основу из интернета
+ * заходят через /b/<код>/, и ссылка без приставки уводила браузер в облако,
+ * где такого снимка нет, — вместо фотографии был знак вопроса. Полные адреса
+ * (blob:, https:) не трогаем.
+ */
+export const fileUrl = (href: string) => (href.startsWith("/") && !href.startsWith("//") ? url(href) : href);

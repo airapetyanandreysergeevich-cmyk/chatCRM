@@ -1082,7 +1082,23 @@ ordersRouter.post(
     // Права проверяем в короткой транзакции, а сами файлы льём уже снаружи:
     // десяток фотографий по мобильному интернету — это секунды, и держать
     // всё это время открытую транзакцию к базе незачем.
-    const orderId = await withTenant(tenantId, async (tx) => (await loadEditableOrder(req, tx)).id);
+    const orderId = await withTenant(tenantId, async (tx) => {
+      // Снимки при приёме загружает тот, кто принял, — сразу после «Принять
+      // в ремонт», даже если править чужие заказы ему не дано.
+      if (kind === "INTAKE" && has(req, PERMISSIONS.ORDERS_CREATE) && req.auth?.kind === "tenant") {
+        const fresh = await tx.order.findFirst({
+          where: {
+            id: req.params.id,
+            deletedAt: null,
+            acceptedById: req.auth.userId,
+            acceptedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          },
+          select: { id: true },
+        });
+        if (fresh) return fresh.id;
+      }
+      return (await loadEditableOrder(req, tx)).id;
+    });
 
     const uploaded: Array<{ key: string; file: Express.Multer.File }> = [];
     for (const f of files) {

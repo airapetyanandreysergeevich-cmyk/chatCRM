@@ -59,7 +59,14 @@ export function securityHeaders() {
   return helmet({
     contentSecurityPolicy: {
       useDefaults: true,
-      directives: { ...cspDirectives(env.cookieSecure), ...ocrDirectives(inBrowser) },
+      directives: {
+        // Превью снятых, но ещё не загруженных фотографий — blob:-картинки
+        // (съёмка серией, снимки в бланке приёма). Без blob: вместо них
+        // пустые рамки.
+        imgSrc: ["'self'", "data:", "blob:"],
+        ...cspDirectives(env.cookieSecure),
+        ...ocrDirectives(inBrowser),
+      },
     },
     crossOriginEmbedderPolicy: inBrowser,
   });

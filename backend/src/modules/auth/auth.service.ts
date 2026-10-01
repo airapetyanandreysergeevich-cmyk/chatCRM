@@ -199,14 +199,35 @@ export async function login(input: { email: string; password: string; req: Reque
 }
 
 /**
+ * Сколько старый токен ещё принимается после ротации.
+ *
+ * Два окна (или значок на телефоне и вкладка Safari) просыпаются вместе и
+ * продлевают сеанс одним и тем же печеньем. Первое получает новый токен,
+ * второе приходит со старым, уже погашенным, — и раньше это считалось
+ * кражей: гасились все сеансы, человека выкидывало отовсюду. Минута
+ * покрывает такие гонки с запасом, а украденному токену не даёт ничего:
+ * чтобы им воспользоваться, вор должен успеть раньше хозяина.
+ */
+export const ROTATE_GRACE_MS = 60_000;
+
+/**
  * Ротация: старая сессия гасится, выдаётся новая.
  * Если предъявлен уже погашенный токен — считаем, что его украли, и гасим все сессии владельца.
+ * Исключение — токен, погашенный ротацией меньше минуты назад (см. ROTATE_GRACE_MS).
+ * Такую сессию ротация помечает сроком «погашена + минута»; выход и «погасить всё»
+ * срок не трогают, поэтому их токены льготы не получают.
  */
 export async function rotateRefresh(raw: string, req: Request) {
   const session = await prisma.session.findUnique({ where: { refreshHash: hashToken(raw) } });
   if (!session) throw unauthorized("Сессия недействительна");
 
-  if (session.revokedAt) {
+  const now = Date.now();
+  const inGrace =
+    !!session.revokedAt &&
+    session.expiresAt.getTime() - session.revokedAt.getTime() <= ROTATE_GRACE_MS + 1000 &&
+    session.expiresAt.getTime() > now;
+
+  if (session.revokedAt && !inGrace) {
     await prisma.session.updateMany({
       where: session.userId ? { userId: session.userId } : { platformUserId: session.platformUserId },
       data: { revokedAt: new Date() },
@@ -215,7 +236,13 @@ export async function rotateRefresh(raw: string, req: Request) {
   }
   if (session.expiresAt < new Date()) throw unauthorized("Сессия истекла, войдите заново");
 
-  await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+  if (!inGrace) {
+    const at = new Date(now);
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { revokedAt: at, expiresAt: new Date(now + ROTATE_GRACE_MS) },
+    });
+  }
 
   if (session.userId && session.tenantId) {
     const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
@@ -247,7 +274,10 @@ export async function revokeRefresh(raw: string | undefined) {
 
 /** Гасит все сессии сотрудника — при увольнении, смене пароля или отключении учётки. */
 export async function revokeAllForUser(userId: string) {
-  await prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  const now = new Date();
+  await prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } });
+  // Льготная минута после ротации тоже кончается сразу.
+  await prisma.session.updateMany({ where: { userId, expiresAt: { gt: now } }, data: { expiresAt: now } });
 }
 
 /** Занят ли адрес где-нибудь в системе. Вход общий, поэтому и проверка общая. */

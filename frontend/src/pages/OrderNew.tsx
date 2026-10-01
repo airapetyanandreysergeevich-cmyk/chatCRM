@@ -1,7 +1,9 @@
 import { copyable } from "../components/CopyMenu";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { IconCamera, IconCompany, IconPerson, IconSettings } from "../components/icons";
+import { IconCamera, IconClose, IconCompany, IconPerson, IconSettings } from "../components/icons";
+import { PhotoShooter } from "../components/PhotoShooter";
+import { formatSize } from "../lib/photos";
 import { PlateScanner } from "../components/PlateScanner";
 import { mergeDevice } from "../lib/plate";
 import { QuickPickEditor } from "../components/QuickPickEditor";
@@ -93,6 +95,14 @@ export default function OrderNew() {
   const [scannedSerial, setScannedSerial] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Что сейчас делается после «Принять» — подпись на кнопке. */
+  const [busyText, setBusyText] = useState<string | null>(null);
+  /** Снимки при приёме: заказа ещё нет, поэтому держим их здесь и грузим после сохранения. */
+  const [photos, setPhotos] = useState<Array<{ id: number; file: File; url: string }>>([]);
+  const photoSeq = useRef(0);
+  const [shooting, setShooting] = useState(false);
+  /** Заказ сохранён, а часть снимков не ушла: показать «Повторить». */
+  const [stuck, setStuck] = useState<{ orderId: string; files: File[]; why: string } | null>(null);
   const [phoneHits, setPhoneHits] = useState<CustomerHit[]>([]);
   const [nameHits, setNameHits] = useState<CustomerHit[]>([]);
   /** Выбранная карточка: пока она есть, подсказки не мешаются. */
@@ -211,8 +221,65 @@ export default function OrderNew() {
     setCustomer((c) => ({ ...c, id: "" }));
   }
 
+  // Превью снимков — память браузера: освобождаем, когда форма закрыта.
+  const photoUrls = useRef<string[]>([]);
+  useEffect(() => () => photoUrls.current.forEach((u) => URL.revokeObjectURL(u)), []);
+
+  function addPhotos(files: File[]) {
+    const next = files.map((file) => {
+      const url = URL.createObjectURL(file);
+      photoUrls.current.push(url);
+      photoSeq.current += 1;
+      return { id: photoSeq.current, file, url };
+    });
+    setPhotos((p) => [...p, ...next]);
+  }
+
+  function removePhoto(id: number) {
+    setPhotos((p) => p.filter((x) => x.id !== id));
+  }
+
+  /**
+   * Загрузить снимки в только что принятый заказ. Что не ушло — остаётся
+   * на экране с кнопкой «Повторить»: заказ уже сохранён, и второй раз его
+   * создавать нельзя.
+   */
+  async function uploadPhotos(orderId: string, files: File[]): Promise<boolean> {
+    let done = 0;
+    try {
+      await ordersApi.upload(orderId, files, "INTAKE", (n, total) => {
+        done = n;
+        setBusyText(`Загружаем снимки: ${n} из ${total}…`);
+      });
+      return true;
+    } catch (err) {
+      const why = err instanceof ApiError ? err.message : "Нет связи с сервером";
+      setStuck({ orderId, files: files.slice(done), why });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return false;
+    }
+  }
+
+  async function retryPhotos() {
+    if (!stuck) return;
+    const { orderId, files } = stuck;
+    setStuck(null);
+    setBusy(true);
+    try {
+      if (await uploadPhotos(orderId, files)) navigate(`/orders/${orderId}`);
+    } finally {
+      setBusy(false);
+      setBusyText(null);
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (stuck) {
+      // Заказ уже принят — второй раз его не создаём, только догружаем снимки.
+      void retryPhotos();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -242,12 +309,14 @@ export default function OrderNew() {
         prepayment: num(form.prepayment) ?? 0,
         assignedMasterId: form.assignedMasterId || undefined,
       });
+      if (photos.length && !(await uploadPhotos(created.id, photos.map((p) => p.file)))) return;
       navigate(`/orders/${created.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setBusy(false);
+      setBusyText(null);
     }
   }
 
@@ -264,17 +333,36 @@ export default function OrderNew() {
         subtitle="Всё, что зафиксировано здесь, потом решает споры: комплектность, дефекты и слова клиента."
         actions={
           <>
-            <Button type="button" variant="secondary" onClick={() => navigate("/orders")}>
-              Отмена
+            <Button type="button" variant="secondary" onClick={() => navigate(stuck ? `/orders/${stuck.orderId}` : "/orders")}>
+              {stuck ? "К заказу" : "Отмена"}
             </Button>
             <Button type="submit" disabled={busy}>
-              {busy ? "Сохраняем…" : "Принять в ремонт"}
+              {busy ? busyText ?? "Сохраняем…" : stuck ? "Загрузить снимки ещё раз" : "Принять в ремонт"}
             </Button>
           </>
         }
       />
 
       {error && <Banner tone="error">{error.message}</Banner>}
+      {stuck && (
+        <Banner tone="error">
+          Заказ принят, но {stuck.files.length === 1 ? "один снимок не загрузился" : `не загрузились снимки: ${stuck.files.length}`}{" "}
+          — {stuck.why}.
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button type="button" className="px-4 text-[13px]" disabled={busy} onClick={() => void retryPhotos()}>
+              Повторить
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="px-4 text-[13px]"
+              onClick={() => navigate(`/orders/${stuck.orderId}`)}
+            >
+              Перейти к заказу без них
+            </Button>
+          </div>
+        </Banner>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
@@ -544,6 +632,51 @@ export default function OrderNew() {
       </div>
 
       <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SectionLabel>Фотографии</SectionLabel>
+          <Button
+            type="button"
+            variant="secondary"
+            icon={<IconCamera />}
+            className="px-4 text-[13px]"
+            disabled={!!stuck}
+            onClick={() => setShooting(true)}
+          >
+            {photos.length ? "Ещё фото" : "Сфотографировать"}
+          </Button>
+        </div>
+        {photos.length === 0 ? (
+          <p className="mt-2 text-[13px] text-ink-dim">
+            Снимите технику со всех сторон, крупно — царапины и сколы. Снимки уйдут в заказ вместе с ним.
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 text-[12.5px] text-ink-dim">
+              {plural(photos.length, "снимок", "снимка", "снимков")}, {formatSize(photos.reduce((a, p) => a + p.file.size, 0))}
+              {" "}— загрузятся после «Принять в ремонт»
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {photos.map((p) => (
+                <div key={p.id} className="relative h-[84px] w-[84px] overflow-hidden rounded-card border border-line">
+                  <img src={p.url} alt="" className="h-full w-full object-cover" />
+                  {!stuck && (
+                    <button
+                      type="button"
+                      aria-label="Убрать снимок"
+                      onClick={() => removePhoto(p.id)}
+                      className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white [&>svg]:h-3.5 [&>svg]:w-3.5"
+                    >
+                      <IconClose />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card>
         <SectionLabel>Заявка</SectionLabel>
         <div className="mt-4">
           <div className="flex items-start justify-between gap-3">
@@ -670,18 +803,14 @@ export default function OrderNew() {
         </div>
         </More>
 
-        <Banner>
-          Фотографии приложите на карточке заказа сразу после сохранения — там они привязываются
-          к номеру и видны мастеру.
-        </Banner>
       </Card>
 
       <div className="flex flex-col gap-2 sm:flex-row-reverse">
         <Button type="submit" disabled={busy} className="sm:min-w-[220px]">
-          {busy ? "Сохраняем…" : "Принять в ремонт"}
+          {busy ? busyText ?? "Сохраняем…" : stuck ? "Загрузить снимки ещё раз" : "Принять в ремонт"}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => navigate("/orders")}>
-          Отмена
+        <Button type="button" variant="secondary" onClick={() => navigate(stuck ? `/orders/${stuck.orderId}` : "/orders")}>
+          {stuck ? "К заказу без снимков" : "Отмена"}
         </Button>
       </div>
     </form>
@@ -698,6 +827,16 @@ export default function OrderNew() {
           setDevice((d) => mergeDevice(d, draft));
           if (draft.serial.trim()) setScannedSerial(true);
           setScanning(false);
+        }}
+      />
+    )}
+
+    {shooting && (
+      <PhotoShooter
+        onClose={() => setShooting(false)}
+        onCollect={(files) => {
+          addPhotos(files);
+          setShooting(false);
         }}
       />
     )}

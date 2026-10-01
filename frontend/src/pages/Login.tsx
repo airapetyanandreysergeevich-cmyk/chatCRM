@@ -5,6 +5,7 @@ import { BrandLogo, BrandRow } from "../components/Brand";
 import { Banner, Button, Field, Input, SectionLabel } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { inBox, leaveBox } from "../lib/lastBox";
 
 /**
  * Вход один на всех. Кто пришёл — сотрудник мастерской или команда платформы —
@@ -110,6 +111,13 @@ export default function Login() {
           <p className="mt-2.5 text-[12.5px] text-ink-dim">
             Забыли пароль — его меняет владелец мастерской в разделе «Сотрудники».
           </p>
+          {inBox && (
+            <p className="mt-2.5 text-[12.5px]">
+              <button type="button" onClick={leaveBox} className="font-semibold text-brand hover:text-brand-ink">
+                Войти в другую мастерскую
+              </button>
+            </p>
+          )}
 
           <AppLinks />
         </form>

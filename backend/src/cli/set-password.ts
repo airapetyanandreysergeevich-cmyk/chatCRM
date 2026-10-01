@@ -34,6 +34,7 @@ async function main() {
       where: { platformUserId: platformUser.id, revokedAt: null },
       data: { revokedAt: now },
     });
+    await prisma.session.updateMany({ where: { platformUserId: platformUser.id, expiresAt: { gt: now } }, data: { expiresAt: now } });
     console.log(`Пароль изменён: ${email} — пользователь платформы. Все сессии погашены.`);
     return;
   }
@@ -47,6 +48,7 @@ async function main() {
     tx.user.update({ where: { id: located.id }, data: { passwordHash } })
   );
   await prisma.session.updateMany({ where: { userId: located.id, revokedAt: null }, data: { revokedAt: now } });
+  await prisma.session.updateMany({ where: { userId: located.id, expiresAt: { gt: now } }, data: { expiresAt: now } });
   console.log(`Пароль изменён: ${email} — сотрудник мастерской. Все сессии погашены.`);
 }
 

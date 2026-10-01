@@ -84,12 +84,13 @@ export interface RelayReply {
   offline?: boolean;
 }
 
-const HTML = (title: string, text: string) =>
+const HTML = (title: string, text: string, extra = "") =>
   `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
   `<title>${title}</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;` +
   `background:#0f1117;color:#e7eaf2;font:16px/1.6 "Segoe UI",system-ui,sans-serif;padding:24px;text-align:center}` +
-  `div{max-width:420px}h1{font-size:20px;margin:0 0 10px}p{color:#9096a3;font-size:14px;margin:0}</style></head>` +
-  `<body><div><h1>${title}</h1><p>${text}</p></div></body></html>`;
+  `div{max-width:420px}h1{font-size:20px;margin:0 0 10px}p{color:#9096a3;font-size:14px;margin:0}` +
+  `a{color:#4aa3f0;font-weight:600;text-decoration:none}</style></head>` +
+  `<body><div><h1>${title}</h1><p>${text}</p>${extra}</div></body></html>`;
 
 export function createRelayHub(opts: RelayOptions) {
   const timeoutMs = opts.timeoutMs ?? 180_000;
@@ -255,7 +256,10 @@ export function createRelayHub(opts: RelayOptions) {
       res.end(
         HTML(
           "Мастерская сейчас не на связи",
-          "Доступ из интернета работает, пока в мастерской включён компьютер с Основой. Попробуйте позже."
+          "Доступ из интернета работает, пока в мастерской включён компьютер с Основой. Попробуйте позже.",
+          // Телефон мог запомнить эту мастерскую и уводить сюда с общего
+          // сайта (frontend/src/lib/lastBox.ts) — нужен выход из круга.
+          `<p style="margin-top:18px"><a href="/?nobox=1">Войти в другую мастерскую</a></p>`
         )
       );
       return;

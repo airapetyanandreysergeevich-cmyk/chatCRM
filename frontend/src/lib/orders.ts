@@ -1,5 +1,6 @@
 import { chunks } from "./photos";
 import { api, type Page } from "./api";
+import { fileUrl } from "./basePath";
 import type { PaymentMethod } from "./debt";
 import type { Service } from "./services";
 
@@ -275,7 +276,9 @@ export const ordersApi = {
   removeAttachment: (orderId: string, attachmentId: string) =>
     api.del(`/orders/${orderId}/attachments/${attachmentId}`),
   attachmentUrl: (orderId: string, attachmentId: string) =>
-    api.get<{ url: string }>(`/orders/${orderId}/attachments/${attachmentId}/url`),
+    api
+      .get<{ url: string }>(`/orders/${orderId}/attachments/${attachmentId}/url`)
+      .then((r) => ({ url: fileUrl(r.url) })),
   /**
    * Похожие клиенты для формы приёма. Ищем и по телефону, и по имени —
    * приёмщик начинает с того, что первым назвал человек у стойки.

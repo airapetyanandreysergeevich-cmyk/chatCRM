@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, setAccessToken, setLogoutHandler } from "./api";
+import { boxToOpen, forgetBox, rememberBox } from "./lastBox";
 
 export interface TenantMe {
   kind: "tenant";
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await api.get<Me>("/auth/me");
     setMe(data);
     setStatus("ready");
+    rememberBox();
   }, []);
 
   const reset = useCallback(() => {
@@ -60,7 +62,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Access-токен после перезагрузки страницы потерян — восстанавливаем сессию по куке.
     api
       .refresh()
-      .then((ok) => (ok ? loadMe() : setStatus("anon")))
+      .then((ok) => {
+        if (ok) return loadMe();
+        // Своего сеанса у общего сайта нет, а с этого устройства входили в
+        // Основу — уходим туда, её сеанс поднимется сам (см. lastBox.ts).
+        const box = boxToOpen();
+        if (box) window.location.replace(box);
+        else setStatus("anon");
+      })
       .catch(() => setStatus("anon"));
     return () => setLogoutHandler(null);
   }, [loadMe, reset]);
@@ -96,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.post("/auth/logout");
     } finally {
+      forgetBox();
       reset();
     }
   }, [reset]);

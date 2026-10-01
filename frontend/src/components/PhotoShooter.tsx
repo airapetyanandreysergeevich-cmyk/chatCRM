@@ -28,17 +28,25 @@ interface Shot {
   url: string;
 }
 
+/**
+ * Два режима. С orderId — снимки загружаются в заказ. С onCollect — заказа
+ * ещё нет (бланк приёма): снимки отдаются форме, а загрузит она их сама
+ * после «Принять в ремонт».
+ */
 export function PhotoShooter({
   orderId,
-  defaultKind,
+  defaultKind = "INTAKE",
   onDone,
+  onCollect,
   onClose,
 }: {
-  orderId: string;
-  defaultKind: Kind;
-  onDone: (count: number) => void;
+  orderId?: string;
+  defaultKind?: Kind;
+  onDone?: (count: number) => void;
+  onCollect?: (files: File[]) => void;
   onClose: () => void;
 }) {
+  const collect = !!onCollect;
   const video = useRef<HTMLVideoElement>(null);
   const gallery = useRef<HTMLInputElement>(null);
   const counter = useRef(0);
@@ -99,6 +107,12 @@ export function PhotoShooter({
   async function upload() {
     if (!shots.length) return;
     setError(null);
+    if (onCollect) {
+      camera.stop();
+      onCollect(shots.map((x) => x.file));
+      return;
+    }
+    if (!orderId) return;
     let done = 0;
     try {
       await ordersApi.upload(
@@ -111,7 +125,7 @@ export function PhotoShooter({
         }
       );
       camera.stop();
-      onDone(shots.length);
+      onDone?.(shots.length);
     } catch (err) {
       // Что уже ушло на сервер, из ленты убираем: повторная загрузка не
       // должна сделать дубли первых пачек.
@@ -139,7 +153,7 @@ export function PhotoShooter({
   const total = shots.reduce((s, x) => s + x.file.size, 0);
 
   return (
-    <Modal title="Фотографии заказа" onClose={close}>
+    <Modal title={collect ? "Фотографии при приёме" : "Фотографии заказа"} onClose={close}>
       <input
         ref={gallery}
         type="file"
@@ -155,7 +169,7 @@ export function PhotoShooter({
       <div className="space-y-4">
         {leaving && (
           <Banner tone="error">
-            Не загружено: {plural(shots.length, "снимок", "снимка", "снимков")}. Закрыть и выбросить их?
+            {collect ? "Не добавлено" : "Не загружено"}: {plural(shots.length, "снимок", "снимка", "снимков")}. Закрыть и выбросить их?
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" variant="danger" className="px-4 text-[13px]" onClick={() => { setShots([]); camera.stop(); onClose(); }}>
                 Выбросить и закрыть
@@ -168,7 +182,7 @@ export function PhotoShooter({
         )}
         {error && <Banner tone="error">{error}</Banner>}
 
-        <div className="flex flex-wrap gap-1.5">
+        {!collect && <div className="flex flex-wrap gap-1.5">
           {(
             [
               ["INTAKE", "При приёме"],
@@ -190,7 +204,7 @@ export function PhotoShooter({
               {label}
             </button>
           ))}
-        </div>
+        </div>}
 
         {camera.error ? (
           <Banner>{camera.error}</Banner>
@@ -280,7 +294,10 @@ export function PhotoShooter({
         )}
 
         <Button type="button" onClick={() => void upload()} disabled={!shots.length || !!busy} className="w-full">
-          {busy ?? (shots.length ? `Загрузить ${plural(shots.length, "снимок", "снимка", "снимков")}` : "Снимите или выберите фото")}
+          {busy ??
+            (shots.length
+              ? `${collect ? "Добавить" : "Загрузить"} ${plural(shots.length, "снимок", "снимка", "снимков")}`
+              : "Снимите или выберите фото")}
         </Button>
       </div>
     </Modal>
