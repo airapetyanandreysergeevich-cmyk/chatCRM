@@ -12,7 +12,7 @@ import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
 import { removeTenantForever } from "../../services/tenant-remove";
 import { boxesRouter } from "../relay/boxes.routes";
-import { dictionarySchema, loadDictionary, saveDictionary } from "../plate/plate.dictionary";
+import { dictionaryProblem, dictionarySchema, loadDictionary, saveDictionary } from "../plate/plate.dictionary";
 import { brandsByRules, BUILTIN, buildDictionary, modelKeys } from "../plate/plate.parse";
 import { platformKnowledge } from "../plate/plate.learn";
 
@@ -219,7 +219,9 @@ platformRouter.put(
   "/plate-dictionary",
   requireOwner,
   ah(async (req, res) => {
-    const saved = await saveDictionary(dictionarySchema.parse(req.body));
+    const parsed = dictionarySchema.safeParse(req.body);
+    if (!parsed.success) throw badRequest(dictionaryProblem(parsed.error, req.body));
+    const saved = await saveDictionary(parsed.data);
     await logPlatform(req, "PLATE_DICTIONARY_UPDATE", null, {
       brands: saved.brands.length,
       noise: saved.noise.length,

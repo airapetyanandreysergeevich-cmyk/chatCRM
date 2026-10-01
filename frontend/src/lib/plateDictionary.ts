@@ -25,7 +25,12 @@ export interface PlateDictionary {
 
 export interface DictionaryReply {
   dictionary: PlateDictionary;
-  builtin: { brands: string[]; noise: string[]; models?: Array<{ brand: string; patterns: string[] }> };
+  builtin: {
+    brands: string[];
+    noise: string[];
+    models?: Array<{ brand: string; patterns: string[] }>;
+    series?: Array<{ brand: string; series: string[] }>;
+  };
 }
 
 /** Модель, у которой при распознавании марка не нашлась. */

@@ -36,6 +36,9 @@ financeRouter.use(authenticate, requireTenant, enforceTenantStatus);
 const tenantOf = (req: Request) => currentTenantId(req)!;
 const has = (req: Request, code: string) => permissionsOf(req).includes(code);
 
+/** Статья выемки: деньги ушли из кассы в банк или владельцу — это не расход. */
+export const WITHDRAW = "Выемка";
+
 const num = (v: Prisma.Decimal | number | null | undefined): number =>
   v === null || v === undefined ? 0 : Number(v);
 
@@ -198,14 +201,27 @@ financeRouter.get(
       const pick = (rowsIn: typeof period, dir: "IN" | "OUT") =>
         num(rowsIn.find((r) => r.direction === dir)?._sum.amount);
 
+      // Выемка — не расход мастерской, а перемещение её же денег (в банк,
+      // владельцу). В приход и расход её не считаем, показываем отдельно.
+      // Сторно выемки — приход с той же статьёй, поэтому вычитаем обе стороны.
+      const wCat = await tx.transactionCategory.findFirst({ where: { name: WITHDRAW }, select: { id: true } });
+      const wWhere = (gte: Date) => ({ deletedAt: null, createdAt: { gte }, categoryId: wCat?.id ?? "-", ...byKind });
+      const [wPeriod, wToday] = wCat
+        ? await Promise.all([
+            tx.transaction.groupBy({ by: ["direction"], where: wWhere(from), _sum: { amount: true } }),
+            tx.transaction.groupBy({ by: ["direction"], where: wWhere(startOfToday()), _sum: { amount: true } }),
+          ])
+        : [[], []];
+
       return {
         rows,
         totals: {
           days: q.days,
-          income: pick(period, "IN"),
-          expense: pick(period, "OUT"),
-          todayIncome: pick(today, "IN"),
-          todayExpense: pick(today, "OUT"),
+          income: pick(period, "IN") - pick(wPeriod, "IN"),
+          expense: pick(period, "OUT") - pick(wPeriod, "OUT"),
+          todayIncome: pick(today, "IN") - pick(wToday, "IN"),
+          todayExpense: pick(today, "OUT") - pick(wToday, "OUT"),
+          withdrawn: pick(wPeriod, "OUT") - pick(wPeriod, "IN"),
           kind: q.kind ?? null,
         },
       };
@@ -295,6 +311,70 @@ financeRouter.post(
     });
 
     res.status(201).json({ id: created.id, amount: num(created.amount) });
+  })
+);
+
+/**
+ * Выемка: деньги забрали из кассы — сдали в банк, отдали владельцу, перевели
+ * эквайринг на счёт. Остаток кассы уменьшается, но расходом мастерской это не
+ * считается (статья «Выемка», см. итоги в GET /).
+ *
+ * Больше, чем в кассе, забрать нельзя: касса в минусе — это ошибка ввода, а не
+ * деньги.
+ */
+financeRouter.post(
+  "/withdraw",
+  requirePermission(PERMISSIONS.FINANCE_MANAGE),
+  ah(async (req, res) => {
+    const body = z
+      .object({
+        cashRegisterId: z.string().uuid("Выберите кассу"),
+        amount: z.coerce.number().gt(0, "Сумма должна быть больше нуля").max(100_000_000),
+        comment: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body);
+    const tenantId = tenantOf(req);
+    const userId = actorUserId(req);
+
+    const created = await withTenant(tenantId, async (tx) => {
+      const register = await tx.cashRegister.findFirst({ where: { id: body.cashRegisterId, isActive: true } });
+      if (!register) throw notFound("Касса не найдена");
+      const sums = await tx.transaction.groupBy({
+        by: ["direction"],
+        where: { deletedAt: null, cashRegisterId: register.id },
+        _sum: { amount: true },
+      });
+      const balance =
+        num(sums.find((x) => x.direction === "IN")?._sum.amount) - num(sums.find((x) => x.direction === "OUT")?._sum.amount);
+      const amount = Math.round(body.amount * 100) / 100;
+      if (amount > Math.round(balance * 100) / 100) {
+        throw conflict(`В кассе «${register.name}» только ${balance.toLocaleString("ru-RU")} ₽ — больше забрать нельзя`);
+      }
+      const category = await categoryByName(tx, tenantId, WITHDRAW, "OUT");
+      const row = await tx.transaction.create({
+        data: {
+          tenantId,
+          cashRegisterId: register.id,
+          categoryId: category?.id ?? null,
+          direction: "OUT",
+          amount,
+          userId,
+          comment: body.comment || null,
+        },
+      });
+      await writeAudit(tx, {
+        tenantId,
+        userId,
+        entity: "transaction",
+        entityId: row.id,
+        action: "CREATE",
+        diff: { withdraw: true, amount, register: register.name, balanceBefore: balance },
+        ip: clientIp(req),
+      });
+      return { row, left: Math.round((balance - amount) * 100) / 100 };
+    });
+
+    res.status(201).json({ id: created.row.id, left: created.left });
   })
 );
 

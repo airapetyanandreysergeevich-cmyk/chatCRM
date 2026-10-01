@@ -117,30 +117,55 @@ interface Brand {
   words: string[];
   /** Короткие имена: только целой строкой или в начале строки. */
   short?: string[];
-  /** Семейства моделей: по ним и бренд понятен, и модель находится. */
+  /**
+   * Серии: по ним понятна и марка, и где начинается модель. Ищутся в любом
+   * месте строки, с границы слова и с заглавной буквы: «SKU:Cyborg 15A13UDX»,
+   * «ASUS VivoBook 15».
+   */
   families?: string[];
+  /**
+   * Серии с общими словами (Modern, Flex, Envy, Surface): в середине строки
+   * — только если сразу за ними номер («Modern 14», «Flex 5», «Pulse GL66»),
+   * иначе «Modern» нашлось бы в любой фразе. В начале строки — как раньше.
+   */
+  weak?: string[];
 }
 
+/*
+ * Серии марок собраны по списку Андрея от 30.09.2026. Убрано то, что
+ * встречается у нескольких марок (Chromebook, G/P/X/M Series, Titan у
+ * Maibenben, Zero), и сочетания серии с цифрами (VivoBook15, ThinkPadT14):
+ * модель после серии находится сама.
+ */
 const BRANDS: Brand[] = [
-  { name: "ASUS", words: ["ASUSTEK"], short: ["ASUS"], families: ["VivoBook", "ZenBook", "ROG", "TUF", "ExpertBook", "ProArt"] },
-  { name: "Lenovo", words: ["LENOVO"], families: ["IdeaPad", "ThinkPad", "ThinkBook", "Yoga", "Legion"] },
-  { name: "Acer", words: ["ACERINC", "ACERINCORPORATED"], short: ["ACER"], families: ["Aspire", "TravelMate", "Extensa", "Nitro", "Swift", "Predator"] },
-  { name: "Samsung", words: ["SAMSUNG"], families: ["Galaxy"] },
-  { name: "HP", words: ["HEWLETT", "HPINC"], short: ["HP"], families: ["Pavilion", "ProBook", "EliteBook", "Envy", "Omen", "Victus"] },
-  { name: "Dell", words: ["DELLINC"], short: ["DELL"], families: ["Inspiron", "Latitude", "Vostro", "XPS", "Alienware"] },
-  { name: "Apple", words: ["DESIGNEDBYAPPLE", "APPLEINC"], short: ["APPLE"], families: ["MacBook", "iMac", "iPad", "iPhone"] },
-  { name: "MSI", words: ["MICRO-STAR", "MICROSTAR"], short: ["MSI"] },
+  { name: "ASUS", words: ["ASUSTEK"], short: ["ASUS"],
+    families: ["VivoBook", "ZenBook", "ExpertBook", "ProArt", "Zephyrus", "Strix", "StudioBook", "Republic of Gamers", "TUF Gaming"],
+    weak: ["ROG", "TUF", "Transformer"] },
+  { name: "Lenovo", words: ["LENOVO"], families: ["IdeaPad", "ThinkPad", "ThinkBook", "Legion"], weak: ["Yoga", "LOQ", "Flex"] },
+  { name: "Acer", words: ["ACERINC", "ACERINCORPORATED"], short: ["ACER"],
+    families: ["Aspire", "TravelMate", "Extensa", "Predator", "ConceptD", "Ferrari"], weak: ["Nitro", "Swift", "Spin", "Enduro"] },
+  { name: "Samsung", words: ["SAMSUNG"], weak: ["Galaxy"] },
+  { name: "HP", words: ["HEWLETT", "HPINC"], short: ["HP"],
+    families: ["Pavilion", "ProBook", "EliteBook", "Victus", "Spectre", "Dragonfly", "ZBook", "EliteFolio"],
+    weak: ["Envy", "Omen", "Stream", "Fortis"] },
+  { name: "Dell", words: ["DELLINC"], short: ["DELL"], families: ["Inspiron", "Latitude", "Vostro", "Alienware"], weak: ["XPS", "Precision"] },
+  { name: "Apple", words: ["DESIGNEDBYAPPLE", "APPLEINC"], short: ["APPLE"], families: ["MacBook", "PowerBook"], weak: ["iMac", "iPad", "iPhone", "iBook"] },
+  { name: "MSI", words: ["MICRO-STAR", "MICROSTAR"], short: ["MSI"],
+    families: ["Cyborg", "Raider", "Stealth", "Katana", "Crosshair", "Prestige", "Leopard", "Apache"],
+    weak: ["Titan", "Vector", "Pulse", "Sword", "Thin", "Creator", "Summit", "Modern", "Venture", "Alpha", "Bravo", "Delta"] },
   { name: "Huawei", words: ["HUAWEI"], families: ["MateBook"] },
   { name: "Honor", words: ["HONORDEVICE"], short: ["HONOR"], families: ["MagicBook"] },
-  { name: "Xiaomi", words: ["XIAOMI"], families: ["Redmi", "RedmiBook"] },
-  { name: "Toshiba", words: ["TOSHIBA"], families: ["Satellite", "Tecra"] },
-  { name: "Sony", words: [], short: ["SONY"], families: ["VAIO"] },
+  { name: "Xiaomi", words: ["XIAOMI"], families: ["RedmiBook", "Mi Notebook"], weak: ["Redmi"] },
+  { name: "Toshiba", words: ["TOSHIBA"], families: ["Satellite"], weak: ["Tecra"] },
+  { name: "Sony", words: [], short: ["SONY"], weak: ["VAIO"] },
   { name: "Fujitsu", words: ["FUJITSU"], families: ["Lifebook"] },
-  { name: "Gigabyte", words: ["GIGABYTE"], families: ["AORUS"] },
+  { name: "Gigabyte", words: ["GIGABYTE"], families: ["AORUS"], weak: ["Aero", "Sabre"] },
   { name: "Packard Bell", words: ["PACKARDBELL"] },
   { name: "eMachines", words: ["EMACHINES"] },
-  { name: "Microsoft", words: ["MICROSOFTSURFACE"], families: ["Surface"] },
-  { name: "LG", words: ["LGELECTRONICS"], families: ["Gram"] },
+  { name: "Microsoft", words: ["MICROSOFTSURFACE"], weak: ["Surface"] },
+  { name: "LG", words: ["LGELECTRONICS"], weak: ["Gram"] },
+  { name: "Maibenben", words: ["MAIBENBEN"] },
+  { name: "Thunderobot", words: ["THUNDEROBOT"] },
   { name: "DEXP", words: [], short: ["DEXP"] },
   { name: "Irbis", words: [], short: ["IRBIS"] },
   { name: "Digma", words: [], short: ["DIGMA"] },
@@ -334,7 +359,13 @@ const brandByName = (brands: Brand[], name: string) => brands.find((b) => b.name
 
 /** Встроенные марки плюс словарь платформы плюс марки мастерской. */
 export function buildDictionary(options: ParseOptions = {}): Dict {
-  const brands: Brand[] = BRANDS.map((b) => ({ ...b, words: [...b.words], short: [...(b.short ?? [])] }));
+  const brands: Brand[] = BRANDS.map((b) => ({
+    ...b,
+    words: [...b.words],
+    short: [...(b.short ?? [])],
+    families: [...(b.families ?? [])],
+    weak: [...(b.weak ?? [])],
+  }));
   const byUpper = (name: string) => brands.find((b) => b.name.toUpperCase() === name.trim().toUpperCase());
 
   const addNames = (b: Brand, names: string[]) => {
@@ -353,8 +384,18 @@ export function buildDictionary(options: ParseOptions = {}): Dict {
   for (const entry of options.dictionary?.brands ?? []) {
     const name = entry.name.replace(/\s+/g, " ").trim();
     if (name.length < 2) continue;
-    const b = byUpper(name) ?? (brands.push({ name, words: [], short: [] }), brands[brands.length - 1]);
+    const b = byUpper(name) ?? (brands.push({ name, words: [], short: [], families: [], weak: [] }), brands[brands.length - 1]);
     addNames(b, [name, ...entry.aliases]);
+    // Другое написание — это и серия: «MSI: Cyborg» даёт не только марку, но
+    // и модель из строки «Cyborg 15 A13UDX». Короткое — осторожной серией.
+    for (const raw of entry.aliases) {
+      const a = raw.replace(/\s+/g, " ").trim();
+      if (compact(a).length < 3 || !/[A-Za-z]/.test(a)) continue;
+      const known = [...(b.families ?? []), ...(b.weak ?? [])].some((f) => compact(f).toUpperCase() === compact(a).toUpperCase());
+      if (known) continue;
+      if (compact(a).length >= 6) (b.families ??= []).push(a);
+      else (b.weak ??= []).push(a);
+    }
   }
 
   // Марки из памяти бланка — только целой строкой или в начале: «Бытовая
@@ -386,9 +427,57 @@ export function buildDictionary(options: ParseOptions = {}): Dict {
 /** Что встроено в программу — панель показывает это рядом со словарём. */
 export const BUILTIN = {
   brands: BRANDS.map((b) => b.name),
+  series: BRANDS.filter((b) => b.families?.length || b.weak?.length).map((b) => ({
+    brand: b.name,
+    series: [...(b.families ?? []), ...(b.weak ?? [])],
+  })),
   noise: NOISE,
   models: MODEL_RULES.map((r) => ({ brand: r.brand, patterns: [...r.patterns] })),
 };
+
+// ----------------------------------------------------------------- серии
+
+const esc = (ch: string) => ch.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+const seriesCache = new Map<string, RegExp>();
+
+/**
+ * Где в строке начинается серия, или -1.
+ *
+ * Регистр не важен, пробелы внутри серии тоже («Mi Notebook», «MiNotebook»),
+ * но серия должна начинаться словом: слева не буква — или строчная буква
+ * перед заглавной, как в слипшемся «LenovoIdeaPad». И начинаться с той же
+ * буквы, что в названии серии, в верхнем регистре: «surface» в «do not place
+ * on soft surface» — это не Microsoft.
+ *
+ * Осторожная серия в середине строки считается, только если за ней номер:
+ * «Modern 14», «Pulse GL66», «Flex 5».
+ */
+export function seriesAt(line: string, series: string, weak: boolean): number {
+  const letters = [...compact(series)];
+  if (letters.length < 2) return -1;
+  let re = seriesCache.get(series);
+  if (!re) {
+    re = new RegExp(letters.map(esc).join("\\s*"), "gi");
+    seriesCache.set(series, re);
+  }
+  re.lastIndex = 0;
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    const at = m.index;
+    const first = line[at];
+    const prev = at > 0 ? line[at - 1] : "";
+    const next = line.slice(at + m[0].length);
+    re.lastIndex = at + 1;
+    // Серия с заглавной — и в тексте с заглавной; «iPad» — как угодно.
+    const wantLower = letters[0] !== letters[0].toUpperCase();
+    if (!wantLower && first !== first.toUpperCase()) continue;
+    const boundary = !prev || !/[A-Za-z]/.test(prev) || (/[a-z]/.test(prev) && /[A-Z]/.test(first));
+    if (!boundary) continue;
+    if (/^[a-z]/.test(next)) continue; // «Aspired», «Modernized»
+    if (weak && at > 0 && !/^\s*[A-Za-z]{0,3}\d/.test(next)) continue;
+    return at;
+  }
+  return -1;
+}
 
 function detectBrand(lines: string[], BRANDS: Brand[]): { brand: Brand | null; options: string[] } {
   const score = new Map<Brand, number>();
@@ -405,7 +494,9 @@ function detectBrand(lines: string[], BRANDS: Brand[]): { brand: Brand | null; o
         // строчная (иначе «ACERBIC» стал бы брендом).
         else if (c.startsWith(s) && /^[^a-z]/.test(compact(line).slice(s.length))) add(b, 2);
       }
-      for (const f of b.families ?? []) if (c.startsWith(f.toUpperCase())) add(b, 3);
+      const p = plain(line);
+      if ((b.families ?? []).some((f) => seriesAt(p, f, false) >= 0)) add(b, 3);
+      else if ((b.weak ?? []).some((f) => c.startsWith(compact(f).toUpperCase()) || seriesAt(p, f, true) >= 0)) add(b, 3);
       // «Manufactured for Lenovo», «Product of Acer» — производитель прямым текстом.
       if (/MANUFACTUREDFOR|PRODUCTOF|TRADEMARKSOF/.test(c) && b.words.concat(b.short ?? []).some((w) => c.includes(w))) add(b, 3);
     }
@@ -427,7 +518,7 @@ function detectBrand(lines: string[], BRANDS: Brand[]): { brand: Brand | null; o
  * Метки, на которых обрывается значение соседней метки. «S/N:WB06815442P/N:…»
  * без этого списка дал бы серийный номер «WB06815442P».
  */
-const STOP = /^(?:P\/N|PN:|MTM:?|MO:|MFD|MFG|CN:|FACTORY|FCC|IC:|SNID|S\/N|SN:|MODEL|INPUT|DATE|PRODUCT|SERIAL|WARRANTY)/i;
+const STOP = /^(?:P\/N|PN:|MTM:?|MO:|MFD|MFG|CN:|FACTORY|FCC|IC:|SNID|S\/N|SN:|MODEL|INPUT|DATE|PRODUCT|SERIAL|WARRANTY|CHK:|SKU:|SUPPORT)/i;
 
 /**
  * Значение после метки: латиница, цифры, дефис; до следующей метки.
@@ -485,6 +576,37 @@ function respace(v: string, family?: string): string {
 }
 
 const hasDigit = (s: string) => /\d/.test(s);
+
+/**
+ * Модель из строки, начинающейся с серии, — с весами.
+ *
+ *  • «Aspire 5820T series» — лучший случай, так Acer и пишет модель (11);
+ *  • хвост комплектации отрезается: «Cyborg 15A13UDX-2010XRU-TB5134…» →
+ *    «Cyborg 15 A13UDX». Хвостом считается всё после первого дефиса, если
+ *    дефисов два и больше или после дефиса больше шести знаков. Дефис внутри
+ *    модели («S145-15IWL», «G50-30») остаётся. Полная строка — запасной
+ *    вариант;
+ *  • склейку «15A13UDX» распознавателя разделяем: 15 — диагональ, A13UDX —
+ *    модель. Коротко «Cyborg 15» — тоже вариант кнопкой;
+ *  • серия, диагональ и код модели вместе точны, как метка Model (10,5);
+ *    серия с одним номером — запасной вариант (7).
+ */
+function seriesModels(raw: string, family: string, series: boolean): Array<[string, number]> {
+  const out: Array<[string, number]> = [];
+  const full = respace(raw, family);
+  const parts = full.split("-");
+  const cut = parts.length > 2 || (parts.length === 2 && parts[1].replace(/\s/g, "").length >= 6);
+  let head = cut ? parts[0].trim() : full;
+  // «Cyborg 15A13UDX» → «Cyborg 15 A13UDX»
+  head = head.replace(/^(\S+(?:\s\S+)?\s)(\d{2})([A-Z]{1,2}\d{1,3}[A-Z]{0,4})\b/, "$1$2 $3");
+  // «Cyborg 15 A13UDX»: серия (буквы), диагональ, код модели.
+  const withCode = /^(\D+\s\d{2})\s[A-Z]{1,2}\d/.exec(head);
+  if (series) out.push([head, 11]);
+  else out.push([head, withCode ? 10.5 : 7]);
+  if (withCode) out.push([withCode[1], 6.5]);
+  if (cut) out.push([full, 5]);
+  return out;
+}
 
 // ----------------------------------------------------------------- серийник
 
@@ -561,7 +683,10 @@ function cleanModel(v: string, brand: Brand | null, noise: RegExp[] = []): strin
 function modelCandidates(lines: string[], brand: Brand | null, dict: Dict): Candidate[] {
   const list: Candidate[] = [];
   const clean = (v: string) => cleanModel(v, brand, dict.noise);
-  const families = dict.brands.flatMap((b) => (b.families ?? []).map((f) => ({ f, b })));
+  const families = dict.brands.flatMap((b) => [
+    ...(b.families ?? []).map((f) => ({ f, b, weak: false })),
+    ...(b.weak ?? []).map((f) => ({ f, b, weak: true })),
+  ]);
   let official = "";
 
   for (const line of lines) {
@@ -586,15 +711,22 @@ function modelCandidates(lines: string[], brand: Brand | null, dict: Dict): Cand
       }
     }
 
-    // Семейство: «Aspire 5820T series», «Aspire5820TZG-P613G32Miks».
-    for (const { f } of families) {
-      if (!c.toUpperCase().startsWith(f.toUpperCase())) continue;
+    // Серия: «Aspire 5820T series», «Aspire5820TZG-P613G32Miks»,
+    // «SKU:Cyborg 15A13UDX-2010XRU-TB51342H16GXXDXX». Модель — от серии
+    // до конца строки или до следующей метки.
+    for (const { f, weak } of families) {
       const p = plain(line);
-      const series = /\s*series$/i.test(p);
-      const raw = p.replace(/\s*series$/i, "");
-      if (!hasDigit(raw) || raw.length > 40) continue;
-      const value = clean(respace(raw, f));
-      if (value && hasDigit(value)) push(list, value, series ? 11 : 7);
+      const at = seriesAt(p, f, weak);
+      const legacy = at < 0 && c.toUpperCase().startsWith(compact(f).toUpperCase());
+      if (at < 0 && !legacy) continue;
+      const tail = legacy ? p : p.slice(at);
+      const series = /\s*series$/i.test(tail);
+      const raw = valueAfter(tail.replace(/\s*series$/i, ""), true);
+      if (!hasDigit(raw) || raw.length > 60) continue;
+      for (const [v, w] of seriesModels(raw, f, series)) {
+        const value = clean(v);
+        if (value && hasDigit(value)) push(list, value, w);
+      }
     }
 
     // Бренд и модель одной строкой: «Lenovo G580», «LenovoS20-30Touch».

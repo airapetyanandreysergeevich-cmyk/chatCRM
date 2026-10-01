@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { copyable } from "../components/CopyMenu";
 import { Modal } from "../components/Modal";
-import { IconDownload, IconPlus, IconUpload } from "../components/icons";
+import { IconCash, IconDownload, IconPlus, IconUpload } from "../components/icons";
 import {
   Badge,
   Banner,
@@ -109,6 +109,7 @@ export default function Finance() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<"IN" | "OUT" | null>(null);
   const [reversing, setReversing] = useState<Transaction | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const canManage = can("finance.manage");
   const canPay = can("finance.payment", "finance.manage");
@@ -169,6 +170,11 @@ export default function Finance() {
                 Расход
               </Button>
             )}
+            {canManage && registers.length > 0 && (
+              <Button variant="secondary" icon={<IconCash />} onClick={() => setWithdrawing(true)}>
+                Выемка
+              </Button>
+            )}
           </div>
         }
       />
@@ -213,7 +219,11 @@ export default function Finance() {
                 {money(data.totals.expense)}
               </p>
               <p className="mt-2.5 text-[14px] font-semibold">Расход за период</p>
-              <p className="mt-0.5 text-[12.5px] text-ink-dim">закупки, зарплата, аренда{scope}</p>
+              <p className="mt-0.5 text-[12.5px] text-ink-dim">
+                {data.totals.withdrawn
+                  ? `без выемки ${money(data.totals.withdrawn)}${scope}`
+                  : `закупки, зарплата, аренда${scope}`}
+              </p>
             </Card>
           </>
         )}
@@ -300,6 +310,17 @@ export default function Finance() {
           onClose={() => setAdding(null)}
           onDone={() => {
             setAdding(null);
+            void load();
+          }}
+        />
+      )}
+
+      {withdrawing && (
+        <WithdrawModal
+          registers={registers}
+          onClose={() => setWithdrawing(false)}
+          onDone={() => {
+            setWithdrawing(false);
             void load();
           }}
         />
@@ -449,6 +470,106 @@ function ReverseModal({ tx, onClose, onDone }: { tx: Transaction; onClose: () =>
         <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
           <Button type="submit" disabled={busy} className="sm:flex-1">
             {busy ? "Гасим…" : "Погасить"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
+            Отмена
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Выемка: забрать деньги из кассы — сдать в банк, отдать владельцу, перевести
+ * эквайринг на счёт. Сумма сразу подставлена на весь остаток: обычно кассу
+ * обнуляют целиком. В расходы мастерской это не идёт.
+ */
+function WithdrawModal({
+  registers,
+  onClose,
+  onDone,
+}: {
+  registers: CashRegister[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  // Сначала наличные с деньгами: выемку чаще всего делают из ящика.
+  const first =
+    registers.find((r) => r.kind === "CASH" && r.balance > 0) ?? registers.find((r) => r.balance > 0) ?? registers[0];
+  const [registerId, setRegisterId] = useState(first?.id ?? "");
+  const register = registers.find((r) => r.id === registerId);
+  const [amount, setAmount] = useState(first ? String(Math.max(0, first.balance)) : "");
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const pickRegister = (id: string) => {
+    setRegisterId(id);
+    const r = registers.find((x) => x.id === id);
+    setAmount(r ? String(Math.max(0, r.balance)) : "");
+  };
+  const value = Number(amount.replace(/\s/g, "").replace(",", ".")) || 0;
+  const tooMuch = !!register && value > register.balance + 0.001;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!register) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await financeApi.withdraw({ cashRegisterId: register.id, amount: value, ...(comment ? { comment } : {}) });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Выемка из кассы" onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-[13.5px] text-ink-muted">
+          Деньги ушли из кассы — в банк, владельцу, с терминала на счёт. Остаток уменьшится, а в расходы мастерской это не
+          попадёт.
+        </p>
+        {error && <Banner tone="error">{error.message}</Banner>}
+
+        {registers.length > 1 && (
+          <Field label="Касса">
+            <Select value={registerId} onChange={(e) => pickRegister(e.target.value)}>
+              {registers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} — {money(r.balance)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        <Field
+          label="Сумма, ₽"
+          hint={register ? `В кассе «${register.name}» сейчас ${money(register.balance)}` : undefined}
+          error={tooMuch ? "Больше, чем в кассе" : error?.field("amount")}
+        >
+          <div className="flex gap-2">
+            <Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoFocus invalid={tooMuch} />
+            {register && (
+              <Button type="button" variant="secondary" onClick={() => setAmount(String(Math.max(0, register.balance)))}>
+                Всё
+              </Button>
+            )}
+          </div>
+        </Field>
+
+        <Field label="Комментарий">
+          <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Сдал в банк, забрал владелец" />
+        </Field>
+
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
+          <Button type="submit" disabled={busy || !register || value <= 0 || tooMuch} className="sm:flex-1">
+            {busy ? "Проводим…" : `Забрать ${value > 0 ? money(value) : ""}`}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
             Отмена

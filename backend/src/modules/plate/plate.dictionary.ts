@@ -22,7 +22,16 @@ export const dictionarySchema = z.object({
     .array(
       z.object({
         name: text(40).pipe(z.string().min(2, "Слишком короткое название марки")),
-        aliases: z.array(text(60)).max(20).default([]),
+        // Другие написания и серии: «MSI: Cyborg, Raider, Katana…».
+        aliases: z
+          .array(
+            z
+              .string()
+              .transform((s) => s.replace(/\s+/g, " ").trim())
+              .pipe(z.string().max(60, "одно из написаний длиннее 60 знаков"))
+          )
+          .max(100, "больше 100 написаний и серий — оставьте самые нужные")
+          .default([]),
       })
     )
     .max(500, "Не больше 500 марок"),
@@ -72,4 +81,25 @@ export async function saveDictionary(value: PlateDictionary): Promise<PlateDicti
   });
   cache = { value: clean, at: Date.now() };
   return clean;
+}
+
+/**
+ * Ошибка словаря человеческими словами: не «Проверьте заполнение полей», а
+ * у какой марки и что не так.
+ */
+export function dictionaryProblem(err: z.ZodError, body: unknown): string {
+  const issue = err.issues[0];
+  if (!issue) return "Словарь не сохранён";
+  const [section, index] = issue.path;
+  const raw = body as { brands?: Array<{ name?: string }>; models?: Array<{ brand?: string }> } | null;
+  if (section === "brands" && typeof index === "number") {
+    const name = raw?.brands?.[index]?.name?.trim() || `№${index + 1}`;
+    return `Марки, строка «${name}»: ${issue.message}`;
+  }
+  if (section === "models" && typeof index === "number") {
+    const name = raw?.models?.[index]?.brand?.trim() || `№${index + 1}`;
+    return `Марка по модели, строка «${name}»: ${issue.message}`;
+  }
+  if (section === "noise") return `Лишние слова: ${issue.message}`;
+  return issue.message;
 }

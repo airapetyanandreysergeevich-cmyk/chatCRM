@@ -559,7 +559,7 @@ function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () =
           <div className="grid gap-4 md:grid-cols-2">
             <Field
               label="Марки"
-              hint="По одной в строке. Другие написания — через двоеточие и запятые: «Hewlett-Packard: HP, HPE»"
+              hint="По одной в строке. Другие написания и серии — через двоеточие и запятые: «MSI: Cyborg, Raider». По серии находится и марка, и модель после неё. До 100 на марку"
             >
               <Textarea
                 value={brands}
@@ -616,6 +616,18 @@ function DictionaryModal({ canEdit, onClose }: { canEdit: boolean; onClose: () =
                 <span className="font-semibold text-ink-soft">Лишние слова: </span>
                 {reply.builtin.noise.join(", ")}
               </p>
+              {reply.builtin.series && (
+                <div className="mt-2 text-ink-dim">
+                  <span className="font-semibold text-ink-soft">Серии:</span>
+                  <ul className="mt-1 space-y-0.5 text-[12.5px]">
+                    {reply.builtin.series.map((m) => (
+                      <li key={m.brand}>
+                        <span className="font-semibold text-ink-soft">{m.brand}:</span> {m.series.join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {reply.builtin.models && (
                 <div className="mt-2 text-ink-dim">
                   <span className="font-semibold text-ink-soft">Марка по модели:</span>

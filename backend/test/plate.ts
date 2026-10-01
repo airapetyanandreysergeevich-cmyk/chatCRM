@@ -2,7 +2,7 @@
  * Проверка разбора шильдиков на настоящих снимках.
  *
  * test/fixtures/plates.json — ответы распознавателя (сервис ocr) на снимки
- * ASUS, Lenovo, Acer и Samsung. Распознаватель здесь не нужен: проверяется
+ * ASUS, Lenovo, Acer, Samsung и MSI (марки на наклейке нет — только серия). Распознаватель здесь не нужен: проверяется
  * разбор, то есть то, что меняется чаще всего и ломается тише всего.
  *
  * Серийный номер проверяется строже прочего: ошибка в нём — это чужой
@@ -13,7 +13,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUILTIN, brandsByRules, buildDictionary, modelKeys, parsePlate, patternToRegExp, type OcrResult } from "../src/modules/plate/plate.parse";
+import { BUILTIN, brandsByRules, buildDictionary, modelKeys, parsePlate, patternToRegExp, seriesAt, type OcrResult } from "../src/modules/plate/plate.parse";
 import { decide } from "../src/modules/plate/plate.vote";
 
 const fixtures: Record<string, OcrResult> = JSON.parse(
@@ -36,6 +36,7 @@ const expected: Record<
   "lenovo-s20": { brand: "Lenovo", model: "S20-30 Touch", modelAlso: ["20434", "59436224"], serial: "UB03123504" },
   "acer-5820": { brand: "Acer", model: "Aspire 5820T", modelAlso: ["Aspire 5820TZG-P613G32Miks", "ZR7C"], serial: "LXR3F01003036087732500", kind: "Ноутбук" },
   "samsung-rv520": { brand: "Samsung", model: "NP-RV520", modelAlso: ["NP-RV520-S0HRU"], serial: "HL1X93FB900378L", confirmed: false, kind: "Ноутбук" },
+  "msi-cyborg15": { brand: "MSI", model: "Cyborg 15 A13UDX", modelAlso: ["Cyborg 15"], serial: "K2505N0030384", confirmed: true },
   "samsung-r710": { brand: "Samsung", model: "NP-R710H", modelAlso: ["NP-R710-FS06RU"], serial: "EX9493BQA00011W", confirmed: true },
 };
 
@@ -196,6 +197,28 @@ const k5 = decide([pairs("t1", "X515EA-BQ1234", "ASUS"), pairs("t2", "X515EA-BQ9
 check(k5.decided.get("X515EA") === "ASUS", "разная комплектация одной модели сходится по основе");
 const k6 = decide([pairs("t1", "RB-1401", "Raybook", 1), pairs("t1", "RB-1401", "Haier", 9), pairs("t2", "RB-1401", "Haier")]);
 check(k6.decided.get("RB1401") === "Haier", "мастерская голосует одной, самой частой своей маркой");
+
+// ---------------------------------------------------------------- серии в строке
+
+const line = (text: string) => parsePlate({ lines: [{ text }], barcodes: [] });
+const raider = line("Raider GE78HX 13VH");
+check(raider.brand?.value === "MSI" && raider.model?.value === "Raider GE78HX 13VH", `серия в начале строки: MSI Raider (${raider.brand?.value} | ${raider.model?.value})`);
+const modern = line("Modern 14 B11MOU-1234RU");
+check(modern.brand?.value === "MSI" && modern.model?.value === "Modern 14 B11MOU" && !!modern.model.options.includes("Modern 14"), `хвост комплектации отрезан, «Modern 14» — вариант (${modern.model?.options.join(" | ")})`);
+check(!line("Designed for modern 14 life").brand, "«modern» со строчной — не серия");
+check(!parsePlate({ lines: [{ text: "Keep away from Modern appliances" }], barcodes: [] }).brand, "осторожная серия без номера в середине строки — не серия");
+check(!line("Do not place on soft surface 2 hours").brand, "«surface» в тексте — не Microsoft");
+const vivo = line("ASUS VivoBook 15X512DA-BQ1234T");
+check(vivo.brand?.value === "ASUS" && vivo.model?.value === "VivoBook 15 X512DA", `серия в середине строки, склейка «15X512DA» разделена (${vivo.model?.options.join(" | ")})`);
+check(line("IdeaPad S145-15IWL").model?.value === "IdeaPad S145-15IWL", "дефис внутри модели Lenovo остаётся");
+check(line("MAIBENBEN").brand?.value === "Maibenben", "новая марка Maibenben");
+const aliasSeries = parsePlate(
+  { lines: [{ text: "SKU:Rayfly 14R5-ABC1234" }], barcodes: [] },
+  { dictionary: { brands: [{ name: "Raybook", aliases: ["Rayfly"] }], noise: [] } }
+);
+check(aliasSeries.brand?.value === "Raybook" && aliasSeries.model?.value === "Rayfly 14 R5", `написание из словаря работает как серия (${aliasSeries.brand?.value} | ${aliasSeries.model?.options.join(" | ")})`);
+check(seriesAt("LenovoIdeaPad 3", "IdeaPad", false) === 6, "слипшееся «LenovoIdeaPad» — граница по заглавной");
+check(seriesAt("XPRESTIGEX 14", "Prestige", false) === -1, "внутри чужого слова — не серия");
 
 console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
 process.exitCode = fails === 0 ? 0 : 1;

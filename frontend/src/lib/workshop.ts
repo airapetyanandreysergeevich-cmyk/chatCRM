@@ -219,6 +219,8 @@ export interface CashList {
     expense: number;
     todayIncome: number;
     todayExpense: number;
+    /** Выемка за период: в приход и расход не входит. */
+    withdrawn?: number;
     /** Каким видом касс отфильтровано; null — всеми. */
     kind?: CashKind | null;
   };
@@ -292,6 +294,9 @@ export const financeApi = {
     comment?: string;
   }) => api.post<{ id: string; amount: number }>("/finance", body),
   reverse: (id: string, reason: string) => api.post(`/finance/${id}/reverse`, { reason }),
+  /** Выемка: деньги ушли из кассы в банк или владельцу. Не расход мастерской. */
+  withdraw: (body: { cashRegisterId: string; amount: number; comment?: string }) =>
+    api.post<{ id: string; left: number }>("/finance/withdraw", body),
   forOrder: (orderId: string) =>
     api.get<{ orderId: string; number: string; total: number; paid: number; due: number }>(
       `/finance/order/${orderId}`
