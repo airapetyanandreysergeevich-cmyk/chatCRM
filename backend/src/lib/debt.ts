@@ -185,3 +185,29 @@ export const debtFields = (due: number | undefined, money: boolean) => ({
   inDebt: (due ?? 0) > 0,
   ...(money ? { debt: due ?? 0 } : {}),
 });
+
+/**
+ * Все заказы мастерской с долгом: номер заказа → сколько должны и до какого
+ * числа обещали. Для фильтра «Задолженность» в заказах. Одним запросом с
+ * группировкой по кассе — тот же расчёт, что в debts(), только для всех сразу.
+ */
+export async function debtList(
+  tx: Prisma.TransactionClient,
+  tenantId: string
+): Promise<Map<string, { due: number; debtDueAt: Date | null }>> {
+  const rows = await tx.$queryRaw<Array<{ id: string; due: Prisma.Decimal | number; debtDueAt: Date | null }>>`
+    SELECT o.id, ROUND(o.total - COALESCE(t.paid, 0), 2) AS due, o."debtDueAt"
+      FROM "Order" o
+      LEFT JOIN (
+        SELECT "orderId", SUM(CASE WHEN direction = 'IN' THEN amount ELSE -amount END) AS paid
+          FROM "Transaction"
+         WHERE "tenantId" = ${tenantId} AND "deletedAt" IS NULL AND "orderId" IS NOT NULL
+         GROUP BY "orderId"
+      ) t ON t."orderId" = o.id
+     WHERE o."tenantId" = ${tenantId}
+       AND o."deletedAt" IS NULL
+       AND o."issuedAt" IS NOT NULL
+       AND ROUND(o.total - COALESCE(t.paid, 0), 2) > 0
+  `;
+  return new Map(rows.map((r) => [r.id, { due: num(r.due), debtDueAt: r.debtDueAt }]));
+}

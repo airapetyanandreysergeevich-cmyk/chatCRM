@@ -2,7 +2,7 @@ import { copyable } from "../components/CopyMenu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { IconOrders } from "../components/icons";
-import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
+import { Badge, Banner, DebtBadge, EmptyState, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
@@ -131,6 +131,8 @@ function OrderCardTile({ card }: { card: BoardCard }) {
       <div className="flex items-center gap-2">
         <span className="font-mono text-[13px] font-semibold text-ink-soft" {...copyable("order", card.number)}>{card.number}</span>
         {card.isUrgent && <Badge tone="danger">срочный</Badge>}
+        {/* Клиент ещё должен за прошлый ремонт — видно до выдачи новой техники. */}
+        {card.customerInDebt && <DebtBadge amount={card.customerDebt} short className="ml-auto px-2.5 py-0.5 text-[11.5px]" />}
       </div>
 
       <p className="mt-1.5 truncate text-[14px] font-semibold">{device}</p>
@@ -320,9 +322,7 @@ function DebtorTile({ d }: { d: Debtor }) {
         </a>
       )}
       <div className="mt-1.5 flex items-baseline justify-between gap-2">
-        <span className={"whitespace-nowrap text-[14px] font-bold " + (d.overdue ? "text-state-off" : "")}>
-          {money(d.due)}
-        </span>
+        <span className="tag tag-debt whitespace-nowrap px-2.5 py-0.5 text-[13px]">{money(d.due)}</span>
         <span
           className={
             "min-w-0 truncate text-right text-[12px] " + (d.overdue ? "font-semibold text-state-off" : "text-ink-dim")

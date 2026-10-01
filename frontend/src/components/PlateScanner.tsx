@@ -298,14 +298,14 @@ export function PlateScanner({
                       <span className="text-[13px] font-semibold text-ink-soft">{label}</span>
                       {key === "brand" && result.brandFrom === "model" && draft.brand === result.brand?.value && (
                         <span
-                          className="rounded-full bg-stage-waiting/10 px-2 py-0.5 text-[11.5px] font-semibold text-stage-waiting"
+                          className="tag tag-waiting px-2.5 py-0.5 text-[11.5px]"
                           title="На шильдике марки нет — она определена по модели. Проверьте."
                         >
                           по модели
                         </span>
                       )}
                       {key === "serial" && result.serialConfirmed && draft.serial === result.serial?.value && (
-                        <span className="rounded-full bg-stage-done/10 px-2 py-0.5 text-[11.5px] font-semibold text-stage-done">
+                        <span className="tag tag-done px-2.5 py-0.5 text-[11.5px]">
                           сверен со штрихкодом
                         </span>
                       )}

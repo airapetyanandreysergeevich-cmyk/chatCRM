@@ -27,6 +27,13 @@ export interface Palette {
   stageWaiting: string;
   stageProgress: string;
   stageDone: string;
+  /** Ярлыки итогов и пометок — «Цвета ярлыков» в «Интерфейсе». */
+  tagIssued: string;
+  tagRefused: string;
+  tagCancelled: string;
+  tagDebt: string;
+  tagUrgent: string;
+  tagWarranty: string;
 }
 
 /** Палитры хранятся раздельно: цвет, читаемый на чёрном, на белом слепнет. */
@@ -42,6 +49,24 @@ export const PALETTE_FIELDS: Array<{ key: keyof Palette; label: string; hint: st
   { key: "brand", label: "Кнопки", hint: "Основные кнопки и выделение в меню" },
 ];
 
+/**
+ * Ярлыки в одной панели «Цвета ярлыков». Цвет стадии — тот же, что у её
+ * колонки на главной: один этап не может быть в списке одного цвета, а на
+ * доске другого.
+ */
+export const TAG_FIELDS: Array<{ key: keyof Palette; label: string; hint: string; tone: string }> = [
+  { key: "stageNew", label: "Диагностика", hint: "Новые и на диагностике, колонка на главной", tone: "new" },
+  { key: "stageWaiting", label: "Согласование", hint: "Ждём ответа клиента или запчасть", tone: "waiting" },
+  { key: "stageProgress", label: "Ремонт", hint: "Мастер работает с техникой", tone: "progress" },
+  { key: "stageDone", label: "Готов к выдаче", hint: "Готово, ждёт клиента", tone: "done" },
+  { key: "tagIssued", label: "Выдан", hint: "Отремонтирован и отдан клиенту", tone: "issued" },
+  { key: "tagRefused", label: "Выдан без ремонта", hint: "Отказ или возврат без ремонта", tone: "refused" },
+  { key: "tagCancelled", label: "Отменён", hint: "Отменённые и возвращённые, ещё не выданные", tone: "cancelled" },
+  { key: "tagDebt", label: "Задолженность", hint: "Выдан, а оплачен не весь", tone: "debt" },
+  { key: "tagUrgent", label: "Срочный", hint: "Пометка срочного заказа", tone: "urgent" },
+  { key: "tagWarranty", label: "Гарантия", hint: "Гарантийный возврат", tone: "warranty" },
+];
+
 export const DEFAULT_THEME: Theme = {
   dark: {
     bg: "#1F2430",
@@ -51,6 +76,12 @@ export const DEFAULT_THEME: Theme = {
     stageWaiting: "#FC7E68",
     stageProgress: "#FE3E7D",
     stageDone: "#A5F88B",
+    tagIssued: "#45C08A",
+    tagRefused: "#E06B6B",
+    tagCancelled: "#B4687A",
+    tagDebt: "#F4D44D",
+    tagUrgent: "#F2545B",
+    tagWarranty: "#FFB020",
   },
   light: {
     bg: "#F1F4F9",
@@ -62,6 +93,12 @@ export const DEFAULT_THEME: Theme = {
     stageWaiting: "#D9542F",
     stageProgress: "#D4145A",
     stageDone: "#2C8C4A",
+    tagIssued: "#1F8A4C",
+    tagRefused: "#C4362F",
+    tagCancelled: "#9A4458",
+    tagDebt: "#F6D646",
+    tagUrgent: "#D92D3A",
+    tagWarranty: "#C77700",
   },
 };
 
@@ -73,18 +110,6 @@ export const DEFAULT_THEME: Theme = {
 const STATE: Record<Mode, Record<"new" | "waiting" | "progress" | "done" | "off", string>> = {
   dark: { new: "#4C8DFF", waiting: "#E8A94B", progress: "#46B9CE", done: "#45C08A", off: "#E06B6B" },
   light: { new: "#2563C9", waiting: "#A96A00", progress: "#1E7F93", done: "#1F8A4C", off: "#C4362F" },
-};
-
-/**
- * Сплошные ярлыки, которые должны бросаться в глаза: «Выдан» (зелёный),
- * «Выдан без ремонта» (красный) и «Задолженность» (кукурузный). Пара «фон —
- * текст» подобрана под тему: на тёмной — светлый фон и тёмный текст, на
- * светлой — насыщенный фон и белый текст (у кукурузного — тёмный всегда:
- * белый на жёлтом не читается).
- */
-const PILL: Record<Mode, Record<"issued" | "issuedInk" | "refused" | "refusedInk" | "debt" | "debtInk", string>> = {
-  dark: { issued: "#45C08A", issuedInk: "#0C2A1B", refused: "#E06B6B", refusedInk: "#2B0D0D", debt: "#F4D44D", debtInk: "#3A2E00" },
-  light: { issued: "#1F8A4C", issuedInk: "#FFFFFF", refused: "#C4362F", refusedInk: "#FFFFFF", debt: "#F6D646", debtInk: "#3A2E00" },
 };
 
 // ------------------------------------------------------------- работа с цветом
@@ -125,6 +150,13 @@ export function contrast(a: string, b: string): number {
   const lb = luminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
+
+/**
+ * Текст на ярлыке: белый, пока он читается (контраст от 3 — текст крупный и
+ * жирный), иначе тёмный. На насыщенных заливках белый смотрится чище, на
+ * светлых — жёлтой, салатовой — читается только тёмный.
+ */
+export const inkOn = (fill: string) => (contrast(fill, "#FFFFFF") >= 3 ? "#FFFFFF" : "#16181F");
 
 /** Tailwind ждёт каналы через пробел: так работает запись bg-surface/40. */
 const channels = (hex: string) => toRgb(hex).join(" ");
@@ -177,12 +209,28 @@ export function deriveTokens(palette: Palette, mode: Mode): Record<string, strin
     "--state-done": state.done,
     "--state-off": state.off,
 
-    "--pill-issued": PILL[mode].issued,
-    "--pill-issued-ink": PILL[mode].issuedInk,
-    "--pill-refused": PILL[mode].refused,
-    "--pill-refused-ink": PILL[mode].refusedInk,
-    "--pill-debt": PILL[mode].debt,
-    "--pill-debt-ink": PILL[mode].debtInk,
+    // Ярлыки: заливка и текст к ней. Текст — тёмный или белый, что читается
+    // лучше на этой заливке: любой выбранный цвет остаётся читаемым.
+    "--stage-new-ink": inkOn(p.stageNew),
+    "--stage-waiting-ink": inkOn(p.stageWaiting),
+    "--stage-progress-ink": inkOn(p.stageProgress),
+    "--stage-done-ink": inkOn(p.stageDone),
+    "--tag-issued": p.tagIssued,
+    "--tag-issued-ink": inkOn(p.tagIssued),
+    "--tag-refused": p.tagRefused,
+    "--tag-refused-ink": inkOn(p.tagRefused),
+    "--tag-cancelled": p.tagCancelled,
+    "--tag-cancelled-ink": inkOn(p.tagCancelled),
+    "--tag-debt": p.tagDebt,
+    "--tag-debt-ink": inkOn(p.tagDebt),
+    "--tag-urgent": p.tagUrgent,
+    "--tag-urgent-ink": inkOn(p.tagUrgent),
+    "--tag-warranty": p.tagWarranty,
+    "--tag-warranty-ink": inkOn(p.tagWarranty),
+    "--tag-brand-ink": inkOn(p.brand),
+    // Нейтральный ярлык («организация», тип заказа) — спокойный серый от панели.
+    "--tag-neutral": mix(p.surface, ink, dark ? 0.3 : 0.42),
+    "--tag-neutral-ink": inkOn(mix(p.surface, ink, dark ? 0.3 : 0.42)),
   };
 
   return Object.fromEntries(Object.entries(tokens).map(([k, v]) => [k, channels(v)]));
@@ -253,7 +301,7 @@ export function normalizeTheme(raw: unknown): Theme {
   for (const mode of ["dark", "light"] as Mode[]) {
     const part = (raw as Record<string, unknown>)[mode];
     if (!part || typeof part !== "object") continue;
-    for (const { key } of PALETTE_FIELDS) {
+    for (const key of Object.keys(DEFAULT_THEME[mode]) as Array<keyof Palette>) {
       const v = (part as Record<string, unknown>)[key];
       if (typeof v === "string" && isHex(v)) out[mode][key] = v.toUpperCase();
     }

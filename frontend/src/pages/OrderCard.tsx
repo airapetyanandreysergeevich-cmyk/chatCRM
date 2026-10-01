@@ -433,10 +433,10 @@ export default function OrderCard() {
             </StatusPill>
             {order.inDebt && <DebtBadge amount={order.debt} className="text-[13px]" />}
             {order.isUrgent && (
-              <span className="rounded-pill bg-state-off/10 px-2.5 py-1 text-[12px] font-bold text-state-off">срочный</span>
+              <span className="tag tag-urgent px-3 py-1 text-[12.5px]">срочный</span>
             )}
             {order.kind !== "REPAIR" && (
-              <span className="rounded-pill bg-surface-raised px-2.5 py-1 text-[12px] font-semibold text-ink-muted">
+              <span className={"tag px-3 py-1 text-[12.5px] " + (order.kind === "WARRANTY" ? "tag-warranty" : "tag-neutral")}>
                 {ORDER_KIND_LABEL[order.kind]}
               </span>
             )}

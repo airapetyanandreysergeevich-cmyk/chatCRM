@@ -10,8 +10,10 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
   contrast,
+  DEFAULT_THEME,
   isHex,
   PALETTE_FIELDS,
+  TAG_FIELDS,
   type Mode,
   type Palette,
   type Theme,
@@ -60,11 +62,14 @@ function Swatch({ color, onClick, label }: { color: string; onClick: () => void;
 function ColorModal({
   title,
   value,
+  standard,
   onPick,
   onClose,
 }: {
   title: string;
   value: string;
+  /** Стандартный цвет — кнопка «Вернуть стандартный». */
+  standard?: string;
   onPick: (color: string) => void;
   onClose: () => void;
 }) {
@@ -115,6 +120,17 @@ function ColorModal({
             />
           </Field>
         </div>
+
+        {standard && draft.toUpperCase() !== standard.toUpperCase() && (
+          <button
+            type="button"
+            onClick={() => setDraft(standard)}
+            className="flex items-center gap-2 text-[13px] font-semibold text-brand-ink hover:underline"
+          >
+            <span className="h-4 w-4 rounded-[5px] border border-line-strong" style={{ background: standard }} />
+            Вернуть стандартный
+          </button>
+        )}
 
         <div className="flex flex-col gap-2 pt-1 sm:flex-row-reverse">
           <Button
@@ -249,8 +265,15 @@ export default function Interface() {
     }
   }
 
-  const stageFields = PALETTE_FIELDS.filter((f) => f.key.startsWith("stage"));
+  // Цвета стадий живут в «Цветах ярлыков»: ярлык стадии и её колонка на
+  // главной — один цвет.
   const baseFields = PALETTE_FIELDS.filter((f) => !f.key.startsWith("stage"));
+  const tagsChanged = TAG_FIELDS.some((f) => current[f.key] !== DEFAULT_THEME[mode][f.key]);
+  const resetTags = () =>
+    setDraft((d) => ({
+      ...d,
+      [mode]: { ...d[mode], ...Object.fromEntries(TAG_FIELDS.map((f) => [f.key, DEFAULT_THEME[mode][f.key]])) },
+    }));
 
   /** Цвет, который не отличается от своей подложки, выглядит поломкой. */
   const weak = (key: keyof Palette) =>
@@ -420,13 +443,34 @@ export default function Interface() {
       ) : (
         <>
           <Card>
-            <SectionLabel>Цвета стадий</SectionLabel>
+            <SectionLabel>Цвета ярлыков</SectionLabel>
             <p className="mt-2 text-[13px] text-ink-dim">
-              Этими цветами покрашены колонки на главной, плашки статусов и значки в списках.
-              Настраиваются отдельно для {mode === "dark" ? "тёмной" : "светлой"} темы — переключите
-              её выше, чтобы задать вторую.
+              Нажмите на ярлык — откроется палитра. Цвет стадии — это и цвет её колонки на главной. Текст на
+              ярлыке становится тёмным или белым сам, чтобы читаться на любом цвете. Набор свой для{" "}
+              {mode === "dark" ? "тёмной" : "светлой"} темы — переключите её выше, чтобы задать второй.
             </p>
-            <div className="mt-2 divide-y divide-line">{stageFields.map(row)}</div>
+            <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+              {TAG_FIELDS.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setPicking(f.key)}
+                  aria-label={`${f.label}: выбрать цвет, сейчас ${current[f.key]}`}
+                  className="flex items-center justify-between gap-3 rounded-field border border-line bg-surface-input px-3.5 py-3 text-left transition-colors duration-150 hover:border-line-strong"
+                >
+                  <span className="min-w-0">
+                    <span className={`tag tag-${f.tone} px-3 py-1 text-[12.5px]`}>{f.label}</span>
+                    <span className="mt-1.5 block text-[12px] text-ink-dim">{f.hint}</span>
+                  </span>
+                  <span className="shrink-0 font-mono text-[12px] uppercase text-ink-dim">{current[f.key]}</span>
+                </button>
+              ))}
+            </div>
+            {tagsChanged && (
+              <Button variant="ghost" className="mt-3" onClick={resetTags}>
+                Вернуть стандартные цвета ярлыков
+              </Button>
+            )}
           </Card>
 
           <Card>
@@ -456,8 +500,9 @@ export default function Interface() {
 
       {picking && (
         <ColorModal
-          title={PALETTE_FIELDS.find((f) => f.key === picking)?.label ?? "Цвет"}
+          title={[...TAG_FIELDS, ...PALETTE_FIELDS].find((f) => f.key === picking)?.label ?? "Цвет"}
           value={current[picking]}
+          standard={DEFAULT_THEME[mode][picking]}
           onPick={(color) => {
             setColor(picking, color);
             setPicking(null);

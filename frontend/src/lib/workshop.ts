@@ -18,6 +18,10 @@ export interface BoardCard {
   master: { id: string; fullName: string } | null;
   /** Имени нет, если сотруднику не показываются контакты клиентов. */
   customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string };
+  /** Клиент должен за прошлый, уже выданный заказ. */
+  customerInDebt?: boolean;
+  /** Сколько — только тем, кто видит деньги клиентов. */
+  customerDebt?: number;
 }
 
 export interface StageColumn {

@@ -267,21 +267,7 @@ export function StatusChip({
   tone: "new" | "waiting" | "progress" | "done" | "cancelled";
   children: ReactNode;
 }) {
-  // Цвета рабочих стадий совпадают с колонками на главной — см. lib/stages.ts.
-  const map = {
-    new: ["bg-stage-new/10", "text-stage-new", "bg-stage-new"],
-    waiting: ["bg-stage-waiting/10", "text-stage-waiting", "bg-stage-waiting"],
-    progress: ["bg-stage-progress/10", "text-stage-progress", "bg-stage-progress"],
-    done: ["bg-stage-done/10", "text-stage-done", "bg-stage-done"],
-    cancelled: ["bg-state-off/10", "text-state-off", "bg-state-off"],
-  } as const;
-  const [bg, fg, dot] = map[tone];
-  return (
-    <span className={cx("inline-flex items-center gap-2 rounded-pill px-2.5 py-1 text-[12.5px] font-semibold", bg, fg)}>
-      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />
-      {children}
-    </span>
-  );
+  return <span className={cx("tag px-3 py-1 text-[12.5px]", `tag-${tone}`)}>{children}</span>;
 }
 
 /**
@@ -293,40 +279,21 @@ export function StatusChip({
 export type PillTone = "new" | "waiting" | "progress" | "done" | "issued" | "refused" | "cancelled";
 
 export function StatusPill({ tone, children, className }: { tone: PillTone; children: ReactNode; className?: string }) {
-  const map: Record<PillTone, string> = {
-    new: "bg-stage-new/15 text-stage-new",
-    waiting: "bg-stage-waiting/15 text-stage-waiting",
-    progress: "bg-stage-progress/15 text-stage-progress",
-    done: "bg-stage-done/15 text-stage-done",
-    issued: "bg-pill-issued text-pill-issued-ink",
-    refused: "bg-pill-refused text-pill-refused-ink",
-    cancelled: "bg-state-off/15 text-state-off",
-  };
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center whitespace-nowrap rounded-pill px-3 py-1 text-[12.5px] font-bold leading-tight",
-        map[tone],
-        className
-      )}
-    >
-      {children}
-    </span>
-  );
+  return <span className={cx("tag px-3 py-1 text-[12.5px]", `tag-${tone}`, className)}>{children}</span>;
 }
 
-/** «Задолженность» — кукурузный ярлык, заметный в любом списке. Сумма — в подсказке, если её можно видеть. */
-export function DebtBadge({ amount, className }: { amount?: number; className?: string }) {
+/**
+ * «Задолженность» — жёлтый ярлык, заметный в любом списке. Сумма — если её
+ * можно видеть. short — «Долг 6 000 ₽» для тесных мест (карточки на главной).
+ */
+export function DebtBadge({ amount, short, className }: { amount?: number; short?: boolean; className?: string }) {
   const sum = amount !== undefined && amount > 0 ? `${Math.round(amount).toLocaleString("ru-RU")} ₽` : null;
   return (
     <span
       title={sum ? `Долг ${sum}` : "Есть неоплаченный выданный заказ"}
-      className={cx(
-        "inline-flex items-center whitespace-nowrap rounded-pill bg-pill-debt px-3 py-1 text-[12.5px] font-bold leading-tight text-pill-debt-ink",
-        className
-      )}
+      className={cx("tag tag-debt px-3 py-1 text-[12.5px]", className)}
     >
-      Задолженность{sum ? ` · ${sum}` : ""}
+      {short ? `Долг${sum ? ` ${sum}` : ""}` : `Задолженность${sum ? ` · ${sum}` : ""}`}
     </span>
   );
 }
@@ -389,19 +356,14 @@ export function Badge({
   children: ReactNode;
 }) {
   const map = {
-    neutral: "bg-surface-raised text-ink-muted",
-    danger: "bg-state-off/10 text-state-off",
-    warning: "bg-state-waiting/10 text-state-waiting",
-    brand: "bg-brand-tint text-brand-ink",
-    done: "bg-state-done/10 text-state-done",
+    neutral: "tag-neutral",
+    danger: "tag-urgent",
+    warning: "tag-warranty",
+    brand: "tag-brand",
+    done: "tag-issued",
   } as const;
   return (
-    <span
-      className={cx(
-        "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[11.5px] font-bold [&>svg]:h-3 [&>svg]:w-3",
-        map[tone]
-      )}
-    >
+    <span className={cx("tag gap-1 px-2.5 py-0.5 text-[11.5px] [&>svg]:h-3 [&>svg]:w-3", map[tone])}>
       {icon}
       {children}
     </span>

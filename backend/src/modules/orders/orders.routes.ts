@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { debtFields, debtMap } from "../../lib/debt";
+import { debtFields, debtList, debtMap } from "../../lib/debt";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { originalName } from "../../lib/uploadName";
@@ -156,6 +156,8 @@ ordersRouter.get(
         mine: z.enum(["1", "0"]).optional(),
         sort: z.enum(ORDER_SORTS).catch("default").default("default"),
         color: colorFilterField,
+        /** Только с задолженностью: выданы, а оплачены не полностью. */
+        debt: z.enum(["1", "0"]).optional(),
         /** Исправлять раскладку: «yjen,er» → «ноутбук». Включается на устройстве. */
         layout: z.string().optional(),
         ...pageFields,
@@ -171,8 +173,13 @@ ordersRouter.get(
     // Условие выписано отдельно: по нему идут и выборка страницы, и подсчёт
     // общего числа. Разъехавшись, они дали бы «страница 7 из 3» — и виноватой
     // выглядела бы навигация, а не забытый фильтр.
+    // «Задолженность»: долги считаются по кассе (lib/debt.ts), поэтому сначала
+    // находим такие заказы, а дальше это обычный фильтр по номерам.
+    const owedAll = q.debt === "1" ? await withTenant(tenantOf(req), (tx) => debtList(tx, tenantOf(req))) : null;
+
     const base = {
       deletedAt: null,
+      ...(owedAll ? { id: { in: [...owedAll.keys()] } } : {}),
       ...(onlyMine && me ? { assignedMasterId: me } : {}),
       ...(q.statusId ? { statusId: q.statusId } : {}),
       ...(q.group ? { status: { group: q.group } } : {}),
@@ -195,6 +202,18 @@ ordersRouter.get(
 
     const [rows, total] = await withTenant(tenantOf(req), async (tx) => {
       const count = tx.order.count({ where });
+
+      // Должники по умолчанию: сначала просрочившие обещанный срок, потом по сумме долга.
+      if (owedAll && sort === "default") {
+        const all = await tx.order.findMany({ where, select: { id: true }, take: MAX_SCAN });
+        const now = Date.now();
+        const ids = pageIds(all, (o) => {
+          const d = owedAll.get(o.id)!;
+          return [d.debtDueAt && d.debtDueAt.getTime() <= now ? 0 : 1, desc(d.due)];
+        }, q);
+        const page = await tx.order.findMany({ where: { id: { in: ids } }, include: orderInclude });
+        return Promise.all([inOrder(ids, page), count]);
+      }
 
       const byBase: Partial<Record<OrderSort, Prisma.OrderOrderByWithRelationInput[]>> = {
         // У выданных срочность уже ничего не значит: сверху — отданные последними.
@@ -249,6 +268,12 @@ ordersRouter.get(
     // Иначе строка «заказ 0412» на запрос «шлейф» выглядит случайной: слова
     // из запроса в ней нет, оно внутри ленты сообщений.
     const found = words.length ? await matchedMessages(tenantOf(req), rows, words) : new Map();
+    // Итог над списком должников: сколько всего должны по найденному.
+    let debtTotal: number | undefined;
+    if (owedAll && money) {
+      const matched = await withTenant(tenantOf(req), (tx) => tx.order.findMany({ where, select: { id: true }, take: MAX_SCAN }));
+      debtTotal = Math.round(matched.reduce((sum, o) => sum + (owedAll.get(o.id)?.due ?? 0), 0) * 100) / 100;
+    }
     // Ярлык «Задолженность» в строке: выдан, а оплачен не весь.
     const { byOrder: owed } = await withTenant(tenantOf(req), (tx) =>
       debtMap(tx, { orderIds: rows.filter((o) => o.issuedAt).map((o) => o.id) })
@@ -266,6 +291,7 @@ ordersRouter.get(
       ),
       // Искали в другой раскладке — интерфейс скажет «Показаны результаты для …».
       searchFixed,
+      ...(debtTotal !== undefined ? { debtTotal } : {}),
     });
   })
 );

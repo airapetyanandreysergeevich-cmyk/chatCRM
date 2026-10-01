@@ -118,7 +118,7 @@ export default function PlatformFeedback() {
                 className={`border-l-[3px] p-4 ${k.edge}${item.handledAt ? " opacity-60" : ""}`}
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={"rounded-field border px-2 py-0.5 text-[12px] font-semibold " + k.chip}>
+                  <span className={"px-2.5 py-0.5 text-[12px] " + k.chip}>
                     {k.label}
                   </span>
                   <span className="text-[14px] font-bold">{item.tenant?.name ?? "мастерская удалена"}</span>

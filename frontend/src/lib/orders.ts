@@ -233,7 +233,7 @@ export const masterLabel = (m: { fullName: string }) => m.fullName;
 export const ordersApi = {
   reference: () => api.get<Reference>("/reference"),
   list: (params: Record<string, string>) =>
-    api.get<Page<Order>>(`/orders?${new URLSearchParams(params).toString()}`),
+    api.get<Page<Order> & { debtTotal?: number }>(`/orders?${new URLSearchParams(params).toString()}`),
   get: (id: string) => api.get<Order>(`/orders/${id}`),
   create: (body: unknown) => api.post<{ id: string; number: string }>("/orders", body),
   /** Правка карточки: шлём только изменённые поля. */

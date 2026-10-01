@@ -34,7 +34,7 @@ export const KINDS: { value: Kind; label: string; hint: string; dot: string; chi
     label: "Замечание",
     hint: "Что-то работает не так, как ожидалось, или мешает в работе",
     dot: "bg-state-waiting",
-    chip: "border-state-waiting/30 bg-state-waiting/10 text-state-waiting",
+    chip: "tag tag-warranty",
     edge: "border-l-state-waiting",
   },
   {
@@ -42,7 +42,7 @@ export const KINDS: { value: Kind; label: string; hint: string; dot: string; chi
     label: "Пожелание",
     hint: "Чего не хватает: новая возможность, удобство, отчёт",
     dot: "bg-state-done",
-    chip: "border-state-done/30 bg-state-done/10 text-state-done",
+    chip: "tag tag-issued",
     edge: "border-l-state-done",
   },
   {
@@ -50,7 +50,7 @@ export const KINDS: { value: Kind; label: string; hint: string; dot: string; chi
     label: "Баг",
     hint: "Ошибка: что-то сломалось, пропало или показывает неправду",
     dot: "bg-state-off",
-    chip: "border-state-off/30 bg-state-off/10 text-state-off",
+    chip: "tag tag-urgent",
     edge: "border-l-state-off",
   },
 ];
@@ -165,7 +165,7 @@ export default function Feedback() {
             return (
               <Card key={item.id} className="p-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={"rounded-field border px-2 py-0.5 text-[12px] font-semibold " + k.chip}>
+                  <span className={"px-2.5 py-0.5 text-[12px] " + k.chip}>
                     {k.label}
                   </span>
                   <span className="text-[12.5px] text-ink-dim">{when(item.createdAt)}</span>

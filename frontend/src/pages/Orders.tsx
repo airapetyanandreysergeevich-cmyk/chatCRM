@@ -52,13 +52,18 @@ type Sort = (typeof SORTS)[number]["value"];
  * попал сюда с тем же набором заказов. Разные названия для одного и того
  * же на двух экранах — верный способ запутать приёмщика.
  */
+const STAGE_TAG: Record<string, string> = { NEW: "tag-new", WAITING: "tag-waiting", IN_PROGRESS: "tag-progress", DONE: "tag-done" };
+
 const FILTERS: Array<{ value: string; label: string; pill: string | null }> = [
   { value: "", label: "Все", pill: null },
-  ...STAGES.map((s) => ({ value: s.key, label: s.label, pill: s.pill })),
+  ...STAGES.map((s) => ({ value: s.key, label: s.label, pill: `tag ${STAGE_TAG[s.key]} border-transparent` })),
   // Выданные — уже не стадия работы, поэтому на главной их нет, а здесь
   // есть: найти, что и когда отдали. Сюда же попадает выданное без ремонта —
   // техника ушла к клиенту так же. Отменённые (клиент так и не сдал) — нет.
-  { value: "CLOSED", label: "Выдан", pill: "border-line-strong bg-surface-hover text-ink" },
+  { value: "CLOSED", label: "Выдан", pill: "tag tag-issued border-transparent" },
+  // Должники: выданы, а оплачены не полностью. Не группа статуса, а свой
+  // признак — уходит на сервер как debt=1.
+  { value: "DEBT", label: "Задолженность", pill: "tag tag-debt border-transparent" },
 ];
 
 const deviceTitle = (o: Order) =>
@@ -88,6 +93,8 @@ export default function Orders() {
   const [exact, setExact] = useState(false);
   const [searchFixed, setSearchFixed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Сколько всего должны по найденному — только с фильтром «Задолженность» и тем, кто видит деньги. */
+  const [debtTotal, setDebtTotal] = useState<number | null>(null);
 
   // Деньги видит не каждый — и сортировку по ним тоже.
   const seesMoney = can("orders.cost", "orders.view.all");
@@ -123,13 +130,15 @@ export default function Orders() {
     setRows(null);
     try {
       const query: Record<string, string> = { page: String(page) };
-      if (group) query.group = group;
+      if (group === "DEBT") query.debt = "1";
+      else if (group) query.group = group;
       if (search.trim()) query.search = search.trim();
       if (sort !== "default") query.sort = sort;
       if (search.trim() && !exact && fixLayoutEnabled()) query.layout = "1";
       if (color) query.color = color;
       const data = await ordersApi.list(query);
       setRows(data.rows);
+      setDebtTotal(data.debtTotal ?? null);
       setSearchFixed(data.searchFixed ?? null);
       setPageInfo({ page: data.page, pages: data.pages, total: data.total, pageSize: data.pageSize });
     } catch (err) {
@@ -209,6 +218,14 @@ export default function Orders() {
       </Card>
 
       <SearchFixedHint fixed={searchFixed} onExact={() => setExact(true)} />
+
+      {group === "DEBT" && rows && rows.length > 0 && (
+        <p className="flex flex-wrap items-center gap-2 text-[14px] text-ink-muted">
+          {plural(pageInfo.total, "заказ", "заказа", "заказов")} с задолженностью
+          {debtTotal !== null && <DebtBadge amount={debtTotal} short />}
+          <span className="text-[13px] text-ink-dim">· сначала просроченные, потом по сумме долга</span>
+        </p>
+      )}
 
       {overdue > 0 && (
         <Banner tone="warning">

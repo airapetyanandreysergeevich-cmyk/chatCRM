@@ -44,12 +44,73 @@
   --state-done: 69 192 138;
   --state-off: 224 107 107;
 
-  --pill-issued: 69 192 138;
-  --pill-issued-ink: 12 42 27;
-  --pill-refused: 224 107 107;
-  --pill-refused-ink: 43 13 13;
-  --pill-debt: 244 212 77;
-  --pill-debt-ink: 58 46 0;
+  /* Ярлыки (lib/theme.ts → deriveTokens): заливка и текст к ней. */
+  --stage-new-ink: 22 24 31;
+  --stage-waiting-ink: 22 24 31;
+  --stage-progress-ink: 255 255 255;
+  --stage-done-ink: 22 24 31;
+  --tag-issued: 69 192 138;
+  --tag-issued-ink: 22 24 31;
+  --tag-refused: 224 107 107;
+  --tag-refused-ink: 255 255 255;
+  --tag-cancelled: 180 104 122;
+  --tag-cancelled-ink: 255 255 255;
+  --tag-debt: 244 212 77;
+  --tag-debt-ink: 22 24 31;
+  --tag-urgent: 242 84 91;
+  --tag-urgent-ink: 255 255 255;
+  --tag-warranty: 255 176 32;
+  --tag-warranty-ink: 22 24 31;
+  --tag-brand-ink: 255 255 255;
+  --tag-neutral: 99 105 120;
+  --tag-neutral-ink: 255 255 255;
+}
+
+/*
+ * Ярлык: статус заказа, «Задолженность», «срочный», «гарантия».
+ *
+ * Вариант «градиент + свечение», выбранный Андреем 02.10.2026: сплошная
+ * заливка своего цвета, сверху светлее, по верхней кромке блик, вокруг —
+ * мягкий ореол того же цвета. Градиент наложен поверх заливки белым и
+ * чёрным с прозрачностью, а не смешиванием цветов: так он работает в любом
+ * браузере и с любым цветом из настроек. Цвет задают классы tag-* ниже —
+ * переменными, которые выставляет lib/theme.ts.
+ *
+ * На светлой теме ореол слабее: на белом он быстро превращается в грязь.
+ */
+@layer components {
+  .tag {
+    --t: var(--tag-neutral);
+    --t-ink: var(--tag-neutral-ink);
+    --tag-glow: 0.5;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    border-radius: 999px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: rgb(var(--t-ink));
+    background-color: rgb(var(--t));
+    background-image: linear-gradient(180deg, rgb(255 255 255 / 0.3) 0%, rgb(255 255 255 / 0) 55%, rgb(0 0 0 / 0.14) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.35),
+      0 0 12px 0 rgb(var(--t) / var(--tag-glow));
+  }
+  [data-theme="light"] .tag {
+    --tag-glow: 0.32;
+  }
+  .tag-new { --t: var(--stage-new); --t-ink: var(--stage-new-ink); }
+  .tag-waiting { --t: var(--stage-waiting); --t-ink: var(--stage-waiting-ink); }
+  .tag-progress { --t: var(--stage-progress); --t-ink: var(--stage-progress-ink); }
+  .tag-done { --t: var(--stage-done); --t-ink: var(--stage-done-ink); }
+  .tag-issued { --t: var(--tag-issued); --t-ink: var(--tag-issued-ink); }
+  .tag-refused { --t: var(--tag-refused); --t-ink: var(--tag-refused-ink); }
+  .tag-cancelled { --t: var(--tag-cancelled); --t-ink: var(--tag-cancelled-ink); }
+  .tag-debt { --t: var(--tag-debt); --t-ink: var(--tag-debt-ink); }
+  .tag-urgent { --t: var(--tag-urgent); --t-ink: var(--tag-urgent-ink); }
+  .tag-warranty { --t: var(--tag-warranty); --t-ink: var(--tag-warranty-ink); }
+  .tag-brand { --t: var(--brand); --t-ink: var(--tag-brand-ink); }
+  .tag-neutral { --t: var(--tag-neutral); --t-ink: var(--tag-neutral-ink); }
 }
 
 /*

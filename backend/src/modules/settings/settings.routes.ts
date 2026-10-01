@@ -54,6 +54,14 @@ const palette = z.object({
   stageWaiting: hex,
   stageProgress: hex,
   stageDone: hex,
+  // Цвета ярлыков (с 0.1.31). Необязательные: палитра, сохранённая раньше,
+  // остаётся верной, а не заданное берёт стандартный цвет.
+  tagIssued: hex.optional(),
+  tagRefused: hex.optional(),
+  tagCancelled: hex.optional(),
+  tagDebt: hex.optional(),
+  tagUrgent: hex.optional(),
+  tagWarranty: hex.optional(),
 });
 
 /** Палитры раздельные: цвет, читаемый на чёрном, на белом слепнет. */
