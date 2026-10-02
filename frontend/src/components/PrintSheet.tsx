@@ -20,7 +20,11 @@ const money = (v: number | null | undefined) =>
 const deviceLine = (o: Order) =>
   [o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") || "Техника не указана";
 
-/** Пустая строка для подписи от руки. «М.П.» — место для печати, если мастерская её ставит. */
+/**
+ * Пустая строка для подписи от руки. «М.П.» — место для печати, если мастерская её ставит.
+ * Имени сотрудника под строкой нет: расписывается тот, кто стоит у стойки, а
+ * не тот, кто записан в заказе, — и чужое имя под своей подписью только путает.
+ */
 function SignLine({ label, stamp = false }: { label: string; stamp?: boolean }) {
   return (
     <div className="mt-10">
@@ -261,10 +265,6 @@ export function PrintSheet({
               <Section title="Заявленная неисправность">
                 <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
               </Section>
-              <Section title="Что оказалось не так">
-                <p className="text-[12px] leading-relaxed">{order.diagnosis || "—"}</p>
-                {order.masterComment && <p className="mt-1 text-[12px] leading-relaxed">{order.masterComment}</p>}
-              </Section>
             </>
           )
         }
@@ -275,10 +275,7 @@ export function PrintSheet({
           <Terms title="Условия" texts={texts} />
           <div className="grid grid-cols-2 gap-10">
             <SignLine label={texts.signClient} />
-            <SignLine
-              label={`${texts.signStaff}${order.acceptedBy ? `: ${order.acceptedBy.fullName}` : ""}`}
-              stamp={forms.stamp}
-            />
+            <SignLine label={texts.signStaff} stamp={forms.stamp} />
           </div>
         </>
       ) : (
@@ -358,10 +355,7 @@ export function PrintSheet({
           <Terms title="Условия гарантии" texts={texts} />
           <div className="grid grid-cols-2 gap-10">
             <SignLine label={texts.signClient} />
-            <SignLine
-              label={`${texts.signStaff}${order.assignedMaster ? `: ${order.assignedMaster.fullName}` : ""}`}
-              stamp={forms.stamp}
-            />
+            <SignLine label={texts.signStaff} stamp={forms.stamp} />
           </div>
         </>
       )}

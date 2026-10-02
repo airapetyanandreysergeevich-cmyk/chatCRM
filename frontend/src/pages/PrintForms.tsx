@@ -506,7 +506,7 @@ export default function PrintFormsPage() {
             onChange={(intake) => patch({ intake })}
             bodyLabel="Условия приёма"
             bodyHint="Под этим клиент расписывается при сдаче техники. Абзацы — через Enter."
-            staffHint="Имя приёмщика допишется само."
+            staffHint="Под строкой — только эта надпись: расписывается тот, кто принимает технику."
           />
 
           <DocCard
@@ -518,7 +518,7 @@ export default function PrintFormsPage() {
             onChange={(act) => patch({ act })}
             bodyLabel="Условия гарантии"
             bodyHint="Срок гарантии берётся из заказа — здесь только общие условия."
-            staffHint="Имя мастера допишется само."
+            staffHint="Под строкой — только эта надпись: расписывается тот, кто выдаёт технику."
           />
 
           <Card>

@@ -151,12 +151,54 @@ export function contrast(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
+/** Текст на ярлыках — всегда тёмный: так ярлыки читаются одинаково, а белый на ярких заливках резал глаз. */
+export const TAG_INK = "#16181F";
+
+function toHsl(hex: string): [number, number, number] {
+  const [r, g, b] = toRgb(hex).map((v) => v / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+
+function fromHsl(h: number, s: number, l: number): string {
+  if (s === 0) return toHex([l * 255, l * 255, l * 255]);
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const ch = (t: number) => {
+    const x = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+    if (x < 1 / 6) return p + (q - p) * 6 * x;
+    if (x < 1 / 2) return q;
+    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+    return p;
+  };
+  return toHex([ch(h + 1 / 3) * 255, ch(h) * 255, ch(h - 1 / 3) * 255]);
+}
+
 /**
- * Текст на ярлыке: белый, пока он читается (контраст от 3 — текст крупный и
- * жирный), иначе тёмный. На насыщенных заливках белый смотрится чище, на
- * светлых — жёлтой, салатовой — читается только тёмный.
+ * Заливка ярлыка под тёмный текст.
+ *
+ * На светлой теме цвета палитры тёмные — они же служат цветом текста
+ * (зелёная надпись «деньги пришли» на белом), и под тёмный текст ярлыка не
+ * годятся. Поэтому ярлык берёт тот же оттенок, но светлее: насыщенность
+ * сохраняется, и ярлык остаётся цветным, а не блёклым. На любой теме, если
+ * выбранный цвет всё равно слишком тёмный, осветляем ровно до читаемого.
  */
-export const inkOn = (fill: string) => (contrast(fill, "#FFFFFF") >= 3 ? "#FFFFFF" : "#16181F");
+export function tagFill(color: string, mode: Mode): string {
+  const [h, s, l0] = toHsl(color);
+  let l = mode === "light" ? Math.max(l0, 0.7) : l0;
+  let out = fromHsl(h, s, l);
+  while (contrast(out, TAG_INK) < 4.5 && l < 0.95) {
+    l = Math.min(0.95, l + 0.02);
+    out = fromHsl(h, s, l);
+  }
+  return out;
+}
 
 /** Tailwind ждёт каналы через пробел: так работает запись bg-surface/40. */
 const channels = (hex: string) => toRgb(hex).join(" ");
@@ -209,28 +251,21 @@ export function deriveTokens(palette: Palette, mode: Mode): Record<string, strin
     "--state-done": state.done,
     "--state-off": state.off,
 
-    // Ярлыки: заливка и текст к ней. Текст — тёмный или белый, что читается
-    // лучше на этой заливке: любой выбранный цвет остаётся читаемым.
-    "--stage-new-ink": inkOn(p.stageNew),
-    "--stage-waiting-ink": inkOn(p.stageWaiting),
-    "--stage-progress-ink": inkOn(p.stageProgress),
-    "--stage-done-ink": inkOn(p.stageDone),
-    "--tag-issued": p.tagIssued,
-    "--tag-issued-ink": inkOn(p.tagIssued),
-    "--tag-refused": p.tagRefused,
-    "--tag-refused-ink": inkOn(p.tagRefused),
-    "--tag-cancelled": p.tagCancelled,
-    "--tag-cancelled-ink": inkOn(p.tagCancelled),
-    "--tag-debt": p.tagDebt,
-    "--tag-debt-ink": inkOn(p.tagDebt),
-    "--tag-urgent": p.tagUrgent,
-    "--tag-urgent-ink": inkOn(p.tagUrgent),
-    "--tag-warranty": p.tagWarranty,
-    "--tag-warranty-ink": inkOn(p.tagWarranty),
-    "--tag-brand-ink": inkOn(p.brand),
+    // Ярлыки: свои заливки (tagFill) и единый тёмный текст.
+    "--tag-ink": TAG_INK,
+    "--tag-new": tagFill(p.stageNew, mode),
+    "--tag-waiting": tagFill(p.stageWaiting, mode),
+    "--tag-progress": tagFill(p.stageProgress, mode),
+    "--tag-done": tagFill(p.stageDone, mode),
+    "--tag-issued": tagFill(p.tagIssued, mode),
+    "--tag-refused": tagFill(p.tagRefused, mode),
+    "--tag-cancelled": tagFill(p.tagCancelled, mode),
+    "--tag-debt": tagFill(p.tagDebt, mode),
+    "--tag-urgent": tagFill(p.tagUrgent, mode),
+    "--tag-warranty": tagFill(p.tagWarranty, mode),
+    "--tag-brand": tagFill(p.brand, mode),
     // Нейтральный ярлык («организация», тип заказа) — спокойный серый от панели.
-    "--tag-neutral": mix(p.surface, ink, dark ? 0.3 : 0.42),
-    "--tag-neutral-ink": inkOn(mix(p.surface, ink, dark ? 0.3 : 0.42)),
+    "--tag-neutral": mix(p.surface, ink, dark ? 0.55 : 0.2),
   };
 
   return Object.fromEntries(Object.entries(tokens).map(([k, v]) => [k, channels(v)]));

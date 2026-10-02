@@ -16,9 +16,10 @@ import {
   StatusPill,
   DebtBadge,
 } from "../components/ui";
-import { DebtPanel } from "../components/DebtPanel";
+import { DebtPanel, PayDebtButton } from "../components/DebtPanel";
 import { ApiError, api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import type { CustomerDebt } from "../lib/debt";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { formatDateShort, plural } from "../lib/format";
 import { money, ORDER_KIND_LABEL, statusGlyphTone, statusPill, type Order } from "../lib/orders";
@@ -45,7 +46,7 @@ interface Detail {
     paid?: number;
     average?: number | null;
   };
-  debt: { total: number };
+  debt: CustomerDebt;
   devices: unknown[];
   orders: Array<{
     id: string;
@@ -116,6 +117,8 @@ export default function ClientCard() {
   const c = data.customer;
   const s = data.stats;
   const seesMoney = s.paid !== undefined;
+  const canPay = can("finance.payment", "finance.manage");
+  const owedBy = new Map(data.debt.orders.map((d) => [d.orderId, d.due]));
   const color = customerColor(c.color);
 
   return (
@@ -142,7 +145,8 @@ export default function ClientCard() {
                 )}
                 <span style={nameStyle(c.color)} {...copyable("name", c.name)}>{c.name}</span>
                 {c.type === "COMPANY" && <Badge>организация</Badge>}
-                {data.debt.total > 0 && <DebtBadge amount={seesMoney ? data.debt.total : undefined} />}
+                {/* Здесь — просто «Долг»: сумма и разбивка по заказам в панели ниже и в строках заказов. */}
+                {data.debt.total > 0 && <DebtBadge />}
                 {c.discountPercent > 0 && <Badge tone="brand">скидка {c.discountPercent}%</Badge>}
               </h1>
               <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[14px] text-ink-muted">
@@ -174,7 +178,7 @@ export default function ClientCard() {
 
       {/* Долг — первое, что нужно знать о человеке у стойки. Панель сама
           прячется, когда долга нет. */}
-      <DebtPanel customerId={c.id} onPaid={() => void load()} />
+      <DebtPanel customerId={c.id} debt={data.debt} onPaid={() => void load()} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Tile
@@ -225,7 +229,7 @@ export default function ClientCard() {
                         </Badge>
                       )}
                       {o.kind !== "REPAIR" && o.kind !== "WARRANTY" && <Badge>{ORDER_KIND_LABEL[o.kind]}</Badge>}
-                      {o.inDebt && <DebtBadge />}
+                      {o.inDebt && <DebtBadge amount={seesMoney ? owedBy.get(o.id) : undefined} />}
                     </>
                   }
                   subtitle={o.complaint || "без описания"}
@@ -239,6 +243,9 @@ export default function ClientCard() {
                         <span className="whitespace-nowrap font-semibold text-ink-soft lg:w-[88px] lg:text-right">
                           {o.total && o.total > 0 ? money(o.total) : "—"}
                         </span>
+                      )}
+                      {o.inDebt && canPay && (
+                        <PayDebtButton orderId={o.id} onPaid={() => void load()} className="min-h-[34px] px-3 text-[13px]" />
                       )}
                     </>
                   }

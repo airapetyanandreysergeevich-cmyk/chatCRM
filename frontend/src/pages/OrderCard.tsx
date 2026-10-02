@@ -22,6 +22,7 @@ import {
   Textarea,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
+import { PayDebtButton } from "../components/DebtPanel";
 import { useAuth } from "../lib/auth";
 import { formatDate, formatDateTime } from "../lib/format";
 import { customerColor, nameStyle } from "../lib/customerColor";
@@ -432,6 +433,9 @@ export default function OrderCard() {
               {statusPill(order).label}
             </StatusPill>
             {order.inDebt && <DebtBadge amount={order.debt} className="text-[13px]" />}
+            {order.inDebt && can("finance.payment", "finance.manage") && (
+              <PayDebtButton orderId={order.id} onPaid={() => void load()} className="min-h-[34px] px-3 text-[13px]" />
+            )}
             {order.isUrgent && (
               <span className="tag tag-urgent px-3 py-1 text-[12.5px]">срочный</span>
             )}

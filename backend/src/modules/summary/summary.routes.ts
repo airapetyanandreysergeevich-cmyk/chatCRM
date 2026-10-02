@@ -11,7 +11,7 @@ import {
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { seesCustomerContacts } from "../orders/orders.service";
-import { debtMap, debts } from "../../lib/debt";
+import { debts } from "../../lib/debt";
 import { badRequest } from "../../lib/errors";
 import { Prisma } from "@prisma/client";
 import {
@@ -241,18 +241,6 @@ summaryRouter.get(
             // и сервер её просто не кладёт в ответ.
             customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type },
           })),
-        });
-      }
-
-      // Клиент карточки должен за прошлый ремонт — ярлык «Долг» прямо на
-      // доске: человек принёс новую технику, а за старую ещё не заплатил.
-      // Сумма — тем, кто видит деньги клиентов; остальным — сам факт.
-      const ids = [...new Set(out.flatMap((st) => (st.items as Array<{ customer: { id: string } }>).map((i) => i.customer.id)))];
-      const { byCustomer } = await debtMap(tx, { customerIds: ids });
-      for (const st of out) {
-        st.items = (st.items as Array<{ customer: { id: string } }>).map((i) => {
-          const due = byCustomer.get(i.customer.id);
-          return due ? { ...i, customerInDebt: true, ...(contacts ? { customerDebt: due } : {}) } : i;
         });
       }
 
