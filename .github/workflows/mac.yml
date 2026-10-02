@@ -31,15 +31,15 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       PG_VERSION: "16.15"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
       - name: PostgreSQL из кэша
         id: pg-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: desktop/vendor/pgsql
           key: pgsql-${{ env.PG_VERSION }}-${{ matrix.arch }}-${{ hashFiles('desktop/scripts/build-pg-mac.sh') }}
@@ -58,7 +58,7 @@ jobs:
         working-directory: desktop
         run: npm run dist-mac -- --${{ matrix.arch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: FineCRM-mac-${{ matrix.arch }}
           path: desktop/dist/*.dmg

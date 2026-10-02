@@ -73,6 +73,26 @@ done < <(find "$OUT/lib" -type l -print0)
 is_macho() { file -b "$1" | grep -q "Mach-O"; }
 # Внешние ссылки — всё, что не системное.
 deps_of() { otool -L "$1" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/|@)' || true; }
+# Ссылки «на соседа»: ICU 78 из Homebrew ссылается на свои же части так —
+# @loader_path/libicudata.78.dylib. Сама ссылка переносимая, но соседа надо
+# привезти: без него initdb падает ещё до старта («Library not loaded»).
+near_deps_of() { otool -L "$1" | tail -n +2 | awk '{print $1}' | grep -E '^@(loader_path|rpath)/' || true; }
+
+# Где искать соседей: папки, откуда брали библиотеки.
+SRC_DIRS=("$ICU_PREFIX/lib")
+find_lib() {
+  local d
+  for d in "${SRC_DIRS[@]}"; do
+    if [ -f "$d/$1" ]; then echo "$d/$1"; return 0; fi
+  done
+  return 0
+}
+take() { # take <откуда> <имя>
+  cp -L "$1" "$OUT/lib/$2"
+  chmod u+w "$OUT/lib/$2"
+  SRC_DIRS+=("$(cd "$(dirname "$1")" && pwd -P)")
+  echo "   + $2"
+}
 
 # Копируем внешние библиотеки (ICU, libpq из папки сборки) в lib/ до тех
 # пор, пока новых не останется: ICU ссылается сама на себя.
@@ -84,8 +104,19 @@ while [ "$changed" = 1 ]; do
     for dep in $(deps_of "$f"); do
       name="$(basename "$dep")"
       if [ ! -f "$OUT/lib/$name" ]; then
-        cp -L "$dep" "$OUT/lib/$name"
-        chmod u+w "$OUT/lib/$name"
+        take "$dep" "$name"
+        changed=1
+      fi
+    done
+    for dep in $(near_deps_of "$f"); do
+      name="$(basename "$dep")"
+      if [ ! -f "$OUT/lib/$name" ] && [ ! -f "$(dirname "$f")/$name" ]; then
+        src="$(find_lib "$name")"
+        if [ -z "$src" ]; then
+          echo "Не нашлась $name — на неё ссылается $f (искали в: ${SRC_DIRS[*]})" >&2
+          exit 1
+        fi
+        take "$src" "$name"
         changed=1
       fi
     done
@@ -107,13 +138,20 @@ while IFS= read -r -d '' f; do
   for dep in $(deps_of "$f"); do
     install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$f"
   done
-  install_name_tool -add_rpath "$rpath" "$f" 2>/dev/null || true
+  # Такой путь уже прописан — не ошибка; всё остальное — ошибка.
+  if ! install_name_tool -add_rpath "$rpath" "$f" 2>"$WORK/rpath.err"; then
+    grep -q "would duplicate path" "$WORK/rpath.err" || { cat "$WORK/rpath.err" >&2; exit 1; }
+  fi
 done < <(find "$OUT/bin" "$OUT/lib" -type f -print0)
 
 # Подпись после всех правок.
 while IFS= read -r -d '' f; do
   is_macho "$f" || continue
-  codesign --force --sign - "$f" >/dev/null 2>&1
+  if ! codesign --force --sign - "$f" >"$WORK/sign.log" 2>&1; then
+    echo "Не подписался $f:" >&2
+    cat "$WORK/sign.log" >&2
+    exit 1
+  fi
 done < <(find "$OUT/bin" "$OUT/lib" -type f -print0)
 
 # ------------------------------------------------------------ проверка
@@ -129,6 +167,25 @@ if [ -n "$left" ]; then
   echo -e "Остались внешние ссылки:$left" >&2
   exit 1
 fi
+
+# И каждая ссылка на соседа находит файл: @rpath у нас всегда ведёт в lib/,
+# @loader_path — в папку самого файла.
+missing=""
+while IFS= read -r -d '' f; do
+  is_macho "$f" || continue
+  for dep in $(near_deps_of "$f"); do
+    case "$dep" in
+      @rpath/*) want="$OUT/lib/${dep#@rpath/}" ;;
+      @loader_path/*) want="$(dirname "$f")/${dep#@loader_path/}" ;;
+    esac
+    [ -f "$want" ] || missing="$missing\n$f → $dep"
+  done
+done < <(find "$OUT/bin" "$OUT/lib" -type f -print0)
+if [ -n "$missing" ]; then
+  echo -e "Ссылки ведут в пустоту:$missing" >&2
+  exit 1
+fi
+echo "== Библиотеки в lib/: $(cd "$OUT/lib" && ls *.dylib | tr '\n' ' ')"
 
 # База создаётся и запускается из ПЕРЕНЕСЁННОЙ папки — ровно как в программе.
 MOVED="$WORK/moved/pgsql"
