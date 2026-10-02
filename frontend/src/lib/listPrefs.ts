@@ -20,7 +20,7 @@ const remembered = (storageKey: string): string | null => {
   }
 };
 
-const remember = (storageKey: string, value: string) => {
+export const remember = (storageKey: string, value: string) => {
   try {
     if (value) localStorage.setItem(storageKey, value);
     else localStorage.removeItem(storageKey);

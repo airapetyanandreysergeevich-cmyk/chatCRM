@@ -33,8 +33,16 @@ import {
 import { STAGES } from "../lib/stages";
 import { fixLayoutEnabled } from "../lib/searchPrefs";
 import { SearchFixedHint } from "../components/SearchFixedHint";
-import { listPref } from "../lib/listPrefs";
-import { COLOR_FILTER_VALUES, ColorFilter, SortSelect, type ColorFilterValue } from "../components/ListControls";
+import { listPref, remember } from "../lib/listPrefs";
+import { COLOR_FILTER_VALUES, type ColorFilterValue } from "../components/ListControls";
+import {
+  ActiveFilters,
+  FilterButton,
+  OrderFiltersModal,
+  filterCount,
+  useDeviceKinds,
+  type OrderFilterState,
+} from "../components/OrderFilters";
 
 const SORTS = [
   { value: "default", label: "Срочные, потом новые" },
@@ -78,16 +86,6 @@ export default function Orders() {
   // «3 просрочено», и фильтр должен уже стоять, а не сбрасываться.
   const [params, setParams] = useSearchParams();
   const group = params.get("group") ?? "";
-  const setGroup = (next: string) => {
-    const p = new URLSearchParams(params);
-    if (next) p.set("group", next);
-    else p.delete("group");
-    // Сменили фильтр — страница снова первая. Иначе человек, стоявший на
-    // седьмой странице «Всех», нажимает «Ремонт» и видит пустоту: ремонтов
-    // столько не набралось, а выглядит это как поломка.
-    p.delete("page");
-    setParams(p, { replace: true });
-  };
   const [search, setSearch] = useState("");
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
   const [exact, setExact] = useState(false);
@@ -99,18 +97,41 @@ export default function Orders() {
   // Деньги видит не каждый — и сортировку по ним тоже.
   const seesMoney = can("orders.cost", "orders.view.all");
   const sorts = SORTS.filter((s) => !("money" in s) || seesMoney);
-  const [sort, setSort] = listPref<Sort>(params, setParams, {
+  const [sort] = listPref<Sort>(params, setParams, {
     key: "sort",
     storageKey: "finecrm.orders.sort",
     fallback: "default",
     allowed: sorts.map((s) => s.value),
   });
-  const [color, setColor] = listPref<ColorFilterValue>(params, setParams, {
+  const [color] = listPref<ColorFilterValue>(params, setParams, {
     key: "color",
     storageKey: "finecrm.orders.color",
     fallback: "",
     allowed: COLOR_FILTER_VALUES,
   });
+
+  // Типы техники — в адресе через запятую, как и остальные фильтры.
+  const kindsParam = params.get("kind") ?? "";
+  const kinds = kindsParam ? kindsParam.split(",").filter(Boolean) : [];
+  const deviceKinds = useDeviceKinds();
+  const kindLabel = (key: string) => deviceKinds?.find((k) => k.key === key)?.label ?? key.charAt(0).toUpperCase() + key.slice(1);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filters: OrderFilterState = { group, kinds, color, sort };
+
+  /** Всё выбранное в окне — одним переходом: по отдельности сеттеры затирали бы друг друга. */
+  const applyFilters = (next: OrderFilterState) => {
+    const p = new URLSearchParams(params);
+    const put = (key: string, v: string) => (v ? p.set(key, v) : p.delete(key));
+    put("group", next.group);
+    put("kind", next.kinds.join(","));
+    put("color", next.color);
+    put("sort", next.sort === "default" ? "" : next.sort);
+    p.delete("page");
+    setParams(p, { replace: true });
+    remember("finecrm.orders.sort", next.sort === "default" ? "" : next.sort);
+    remember("finecrm.orders.color", next.color);
+    setFiltersOpen(false);
+  };
 
   const canCreate = can("orders.create");
   const onlyAssigned = !can("orders.view.all") && can("orders.view.assigned");
@@ -136,6 +157,7 @@ export default function Orders() {
       if (sort !== "default") query.sort = sort;
       if (search.trim() && !exact && fixLayoutEnabled()) query.layout = "1";
       if (color) query.color = color;
+      if (kindsParam) query.kind = kindsParam;
       const data = await ordersApi.list(query);
       setRows(data.rows);
       setDebtTotal(data.debtTotal ?? null);
@@ -144,7 +166,7 @@ export default function Orders() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [group, search, page, sort, color, exact]);
+  }, [group, search, page, sort, color, exact, kindsParam]);
 
   useEffect(() => {
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
@@ -176,46 +198,38 @@ export default function Orders() {
       />
 
       <Card className="space-y-3 p-3.5">
-        <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
+        <div className="flex items-center gap-2.5">
           <SearchInput
-            placeholder="Любые слова: ноутбук xiaomi, номер, клиент, неисправность, запись в истории"
+            placeholder={
+              filterCount(filters)
+                ? "Искать среди выбранного…"
+                : "Любые слова: ноутбук xiaomi, номер, клиент, неисправность, запись в истории"
+            }
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setExact(false);
               if (page > 1) setPage(1);
             }}
-            className="lg:max-w-[380px]"
+            className="min-w-0 flex-1 lg:max-w-[520px]"
           />
-          <div className="flex flex-col gap-2.5 sm:flex-row lg:ml-auto">
-            <SortSelect value={sort} options={sorts} onChange={setSort} />
-            <ColorFilter value={color} onChange={setColor} />
+          <div className="lg:ml-auto">
+            <FilterButton count={filterCount(filters)} onClick={() => setFiltersOpen(true)} />
           </div>
         </div>
-        <div>
-          <div className="flex flex-wrap gap-1.5">
-            {FILTERS.map((f) => {
-              const active = group === f.value;
-              return (
-                <button
-                  key={f.value}
-                  onClick={() => setGroup(f.value)}
-                  className={
-                    "rounded-pill border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
-                    (active
-                      ? // Выбранный фильтр окрашен в цвет своей стадии — тот же,
-                        // что у панели на главной, откуда сюда и приходят.
-                        (f.pill ?? "border-brand bg-brand text-white")
-                      : "border-line bg-surface-raised text-ink-muted hover:text-ink")
-                  }
-                >
-                  {f.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <ActiveFilters value={filters} stages={FILTERS} sorts={sorts} kindLabel={kindLabel} onChange={applyFilters} />
       </Card>
+
+      {filtersOpen && (
+        <OrderFiltersModal
+          value={filters}
+          stages={FILTERS}
+          sorts={sorts}
+          kinds={deviceKinds}
+          onApply={applyFilters}
+          onClose={() => setFiltersOpen(false)}
+        />
+      )}
 
       <SearchFixedHint fixed={searchFixed} onExact={() => setExact(true)} />
 
@@ -239,16 +253,16 @@ export default function Orders() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<IconOrders />}
-          title={search || group || color ? "Ничего не нашлось" : "Заказов пока нет"}
+          title={search || filterCount(filters) ? "Ничего не нашлось" : "Заказов пока нет"}
           action={
-            canCreate && !search && !group && !color ? (
+            canCreate && !search && !filterCount(filters) ? (
               <Button icon={<IconPlus />} onClick={() => navigate("/orders/new")}>
                 Принять первую технику
               </Button>
             ) : undefined
           }
         >
-          {search || group || color
+          {search || filterCount(filters)
             ? "Попробуйте изменить запрос или снять фильтр."
             : "Заведите первый заказ — заполните бланк приёма, и он появится здесь."}
         </EmptyState>

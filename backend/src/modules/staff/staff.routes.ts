@@ -286,14 +286,23 @@ staffRouter.delete(
       const user = await tx.user.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!user) throw notFound("Сотрудник не найден");
       if (user.isOwner) throw forbidden("Владельца удалить нельзя");
-      // Мягкое удаление: заказы и записи в логе продолжают ссылаться на сотрудника.
-      await tx.user.update({ where: { id: user.id }, data: { deletedAt: new Date(), isActive: false } });
+      if (user.id === actorUserId(req)) throw forbidden("Себя удалить нельзя");
+      // Мягкое удаление: заказы, история ремонта и зарплата за прошлое
+      // продолжают ссылаться на сотрудника и показывают его имя. Логин
+      // освобождаем: новый Иван в мастерской должен получить ivan@…, а не
+      // «логин занят» из-за того, кто здесь давно не работает. Прежний логин
+      // остаётся в журнале.
+      await tx.user.update({
+        where: { id: user.id },
+        data: { deletedAt: new Date(), isActive: false, email: `removed-${user.id}@deleted.invalid` },
+      });
       await writeAudit(tx, {
         tenantId,
         userId: actorUserId(req),
         entity: "User",
         entityId: user.id,
         action: "DELETE",
+        diff: { fullName: user.fullName, login: user.email },
         ip: clientIp(req),
       });
     });

@@ -56,6 +56,9 @@ export default function Staff() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<StaffRow | null>(null);
   const [resetting, setResetting] = useState<StaffRow | null>(null);
+  const [removing, setRemoving] = useState<StaffRow | null>(null);
+  const { me } = useAuth();
+  const myId = me?.kind === "tenant" ? me.user.id : null;
 
   const load = useCallback(async () => {
     try {
@@ -163,6 +166,11 @@ export default function Staff() {
                     {u.isActive ? "Отключить" : "Включить"}
                   </Button>
                 )}
+                {!u.isOwner && u.id !== myId && (
+                  <Button variant="danger" className="min-h-[34px] px-3 text-[13px]" onClick={() => setRemoving(u)}>
+                    Удалить
+                  </Button>
+                )}
               </div>
             }
           />
@@ -188,6 +196,17 @@ export default function Staff() {
           onDone={() => {
             setCreating(false);
             setEditing(null);
+            void load();
+          }}
+        />
+      )}
+
+      {removing && (
+        <RemoveModal
+          user={removing}
+          onClose={() => setRemoving(null)}
+          onDone={() => {
+            setRemoving(null);
             void load();
           }}
         />
@@ -463,6 +482,58 @@ function PasswordModal({ user, onClose, onDone }: { user: StaffRow; onClose: () 
           </Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * Удаление сотрудника — с вопросом. Удалённый больше не входит и пропадает из
+ * списка, но заказы, история ремонта и зарплата за прошлое остаются с его
+ * именем. Логин освобождается. Если человек, возможно, вернётся, хватит
+ * «Отключить» — об этом и напоминаем.
+ */
+function RemoveModal({ user, onClose, onDone }: { user: StaffRow; onClose: () => void; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(`/staff/${user.id}`);
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось удалить");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Удалить сотрудника?" onClose={onClose}>
+      <div className="space-y-4">
+        {error && <Banner tone="error">{error}</Banner>}
+        <p className="text-[15px]">
+          <span className="font-semibold">{user.fullName}</span>{" "}
+          <span className="font-mono text-[13px] text-ink-muted">{user.email}</span>
+        </p>
+        <ul className="list-disc space-y-1 pl-5 text-[14px] text-ink-soft">
+          <li>войти больше не сможет — сразу выйдет на всех устройствах;</li>
+          <li>пропадёт из списка сотрудников и из выбора мастера;</li>
+          <li>заказы, история ремонта и зарплата за прошлое останутся с его именем;</li>
+          <li>логин освободится — его можно будет дать новому сотруднику.</li>
+        </ul>
+        <p className="text-[13px] text-ink-dim">
+          Если человек может вернуться, лучше «Отключить»: доступ закроется, а включить обратно можно одной кнопкой.
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row-reverse">
+          <Button variant="danger" disabled={busy} onClick={() => void remove()} className="sm:flex-1">
+            {busy ? "Удаляем…" : "Удалить"}
+          </Button>
+          <Button variant="secondary" onClick={onClose} className="sm:flex-1">
+            Отмена
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

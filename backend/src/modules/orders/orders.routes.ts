@@ -158,6 +158,8 @@ ordersRouter.get(
         color: colorFilterField,
         /** Только с задолженностью: выданы, а оплачены не полностью. */
         debt: z.enum(["1", "0"]).optional(),
+        /** Типы техники через запятую, как их отдаёт /summary/kinds (без регистра). */
+        kind: z.string().max(600).optional(),
         /** Исправлять раскладку: «yjen,er» → «ноутбук». Включается на устройстве. */
         layout: z.string().optional(),
         ...pageFields,
@@ -175,6 +177,7 @@ ordersRouter.get(
     // выглядела бы навигация, а не забытый фильтр.
     // «Задолженность»: долги считаются по кассе (lib/debt.ts), поэтому сначала
     // находим такие заказы, а дальше это обычный фильтр по номерам.
+    const kinds = [...new Set((q.kind ?? "").split(",").map((k) => k.trim().replace(/\s+/g, " ")).filter(Boolean))].slice(0, 20);
     const owedAll = q.debt === "1" ? await withTenant(tenantOf(req), (tx) => debtList(tx, tenantOf(req))) : null;
 
     const base = {
@@ -184,6 +187,11 @@ ordersRouter.get(
       ...(q.statusId ? { statusId: q.statusId } : {}),
       ...(q.group ? { status: { group: q.group } } : {}),
       ...(q.color ? { customer: { is: customerColorWhere(q.color) } } : {}),
+      // Тип техники — свободный текст, набранный при приёме: сравниваем без
+      // регистра, несколько типов — любой из них.
+      ...(kinds.length
+        ? { OR: kinds.map((k) => ({ device: { is: { kind: { equals: k, mode: "insensitive" as const } } } })) }
+        : {}),
     } satisfies Prisma.OrderWhereInput;
 
     // Каждое слово запроса — отдельным условием (lib/search.ts).
