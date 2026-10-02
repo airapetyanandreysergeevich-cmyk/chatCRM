@@ -1,3 +1,4 @@
+import { matchableSerial, realSerial } from "../../lib/serial";
 import type { Prisma } from "@prisma/client";
 import { createWithNumber } from "../../lib/customerNumber";
 import { flagsOf, toLabels } from "../../lib/dictionaries";
@@ -254,7 +255,7 @@ async function applyDevices(
 
   for (const part of parts.slice(0, 20)) {
     const serialMatch = part.match(/\(([^)]+)\)\s*$/);
-    const serial = serialMatch ? serialMatch[1].trim() : null;
+    const serial = serialMatch ? realSerial(serialMatch[1]) : null;
     const words = part.replace(/\([^)]*\)\s*$/, "").trim().split(/\s+/);
     const kind = words.shift() || "техника";
     const brand = words.shift() ?? null;
@@ -686,6 +687,14 @@ async function findOrCreateCustomer(
   return made;
 }
 
+/**
+ * Устройство заказа из строки файла.
+ *
+ * Уже заведённое узнаём по серийному номеру — но только у этого же клиента и
+ * только если марка и модель не спорят. Раньше искали по номеру во всей
+ * мастерской: заглушка «N/N» в пятистах заказах сделала их одним телефоном
+ * чужого клиента. Заглушки номером не считаем вовсе (lib/serial.ts).
+ */
 async function findOrCreateDevice(
   tx: Prisma.TransactionClient,
   tenantId: string,
@@ -693,12 +702,18 @@ async function findOrCreateDevice(
   v: Record<string, string>
 ): Promise<{ id: string } | null> {
   const kind = val(v["Техника"]);
-  const serial = val(v["Серийный номер"]);
-  if (!kind && !serial) return null;
+  const serial = realSerial(val(v["Серийный номер"]));
+  const brand = val(v["Бренд"]);
+  const model = val(v["Модель"]);
+  if (!kind && !serial && !brand && !model) return null;
 
-  if (serial) {
-    const found = await tx.device.findFirst({ where: { serial }, select: { id: true } });
-    if (found) return found;
+  if (matchableSerial(serial)) {
+    const found = await tx.device.findFirst({
+      where: { customerId, serial: { equals: serial, mode: "insensitive" } },
+      select: { id: true, brand: true, model: true },
+    });
+    const same = (a?: string | null, b?: string | null) => !a || !b || a.toLowerCase() === b.toLowerCase();
+    if (found && same(found.brand, brand) && same(found.model, model)) return { id: found.id };
   }
 
   return tx.device.create({
@@ -706,9 +721,9 @@ async function findOrCreateDevice(
       tenantId,
       customerId,
       kind: kind ?? "техника",
-      brand: val(v["Бренд"]),
-      model: val(v["Модель"]),
-      serial: serial ?? null,
+      brand,
+      model,
+      serial,
     },
     select: { id: true },
   });

@@ -1,3 +1,4 @@
+import { realSerial } from "../../../lib/serial";
 import type { TableRow } from "../../data/tableFile";
 import type { SqlTable } from "../sqlite";
 import type { Converted, MigrationHistory, MigrationPayment, MigrationSource, MigrationStaff } from "./types";
@@ -503,11 +504,8 @@ function convert(tables: Record<string, SqlTable>): Converted {
   };
 }
 
-/** «Б/Н», «NN», «нет» — это «серийника нет», а не серийный номер. */
-function serialOf(v: unknown): string {
-  const s = asIs(v);
-  return /^(б\s*[\\/]?\s*н|nn|n\/a|нет|-+|0+)$/i.test(s) ? "" : s;
-}
+/** «Б/Н», «NN», «N/N», «N.N», «нет» — это «серийника нет», а не серийный номер (lib/serial.ts). */
+const serialOf = (v: unknown): string => realSerial(asIs(v)) ?? "";
 
 export const SOURCE: MigrationSource = {
   id: "catalog-clientsmap",

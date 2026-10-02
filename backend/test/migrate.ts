@@ -14,6 +14,7 @@ import path from "node:path";
 import { detectSource } from "../src/modules/migrate/sources";
 import { caps, cleanComment, latin, phones, warrantyDays } from "../src/modules/migrate/sources/catalog";
 import { BadFile, readTables } from "../src/modules/migrate/sqlite";
+import { matchableSerial, realSerial } from "../src/lib/serial";
 
 let fails = 0;
 const check = (ok: boolean, msg: string, extra?: unknown) => {
@@ -39,6 +40,14 @@ c = cleanComment("Пароль:\n-\nтекст");
 check(c.passcode === "" && c.text === "текст", "«-» вместо пароля — пароля нет", c);
 c = cleanComment("мост\r\n+=====+\r\n20-02-2018 23:07\r\n Установлена галочка\r\n______\r\n");
 check(c.text === "мост", "журнал галочек старой программы выброшен", c);
+
+// ---- серийные номера-заглушки: «N/N» в пятистах заказах однажды сделал их одним iPhone 5S
+for (const p of ["NN", "N/N", "N.N", "N\\N", "n/a", "Б/Н", "Б\\Н", "нет", "-", "000000", "xxxx", " ", "без номера"]) {
+  check(realSerial(p) === null, `«${p}» — заглушка, не номер`, realSerial(p));
+}
+check(realSerial(" CBG4516282 ") === "CBG4516282", "настоящий номер — как есть, без пробелов по краям");
+check(realSerial("NXMRWER009512097746600") !== null && realSerial("C02N1234") !== null, "номера с буквами N — не заглушки");
+check(matchableSerial("CBG4516282") && !matchableSerial("A1") && !matchableSerial(null), "сличаем только номера от 5 знаков");
 
 // ---- чтение файла
 let bad = "";
