@@ -125,11 +125,23 @@ function placeDir(placePath) {
   return path.basename(path.resolve(placePath)) === PLACE_DIR ? path.resolve(placePath) : path.join(placePath, PLACE_DIR);
 }
 
-/** Один диск или нет — по корню пути (C:\, D:\, \\сервер\папка). */
+/**
+ * Диск, на котором лежит путь. В Windows — корень (C:\, D:\, \\сервер\папка).
+ * На Mac и Linux корень у всех один — «/», а флешки и вторые диски
+ * подключаются папками: /Volumes/Флешка (Mac), /media/<user>/<диск>, /mnt/<диск>.
+ */
+function volumeOf(p) {
+  const full = path.resolve(p);
+  const mac = /^\/Volumes\/[^/]+/.exec(full);
+  if (mac) return mac[0];
+  const media = /^\/(?:media|run\/media)\/[^/]+\/[^/]+/.exec(full) || /^\/mnt\/[^/]+/.exec(full);
+  if (media) return media[0];
+  return path.parse(full).root.toLowerCase();
+}
+
+/** Один диск или нет. */
 function sameRoot(a, b) {
-  const ra = path.parse(path.resolve(a)).root.toLowerCase();
-  const rb = path.parse(path.resolve(b)).root.toLowerCase();
-  return ra === rb;
+  return volumeOf(a) === volumeOf(b);
 }
 
 const README = `Резервные копии FineCRM.
@@ -618,4 +630,4 @@ async function restoreDump({ binDir, port, db, superPassword, file }) {
   );
 }
 
-module.exports = { Backups, mirror, findBackups, tooNew, restoreDump, placeDir, countFiles, PLACE_DIR };
+module.exports = { Backups, mirror, findBackups, tooNew, restoreDump, placeDir, countFiles, PLACE_DIR, sameRoot };

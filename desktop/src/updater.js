@@ -88,10 +88,17 @@ class Updater {
    *        копия базы и остановка сервера; ok:false — не ставить
    * @param {string} o.currentVersion
    */
-  constructor({ autoUpdater, ui, beforeInstall, currentVersion, log = () => {} }) {
+  /**
+   * openDownload — для Mac. Программа там без платной подписи Apple, а
+   * установить обновление сама без неё macOS не даёт. Поэтому вместо
+   * загрузки и установки — «Скачать»: открываем .dmg в браузере, и человек
+   * заменяет программу в «Программах» сам.
+   */
+  constructor({ autoUpdater, ui, beforeInstall, currentVersion, openDownload = null, log = () => {} }) {
     this.au = autoUpdater;
     this.ui = ui;
     this.beforeInstall = beforeInstall;
+    this.openDownload = openDownload;
     this.currentVersion = currentVersion;
     this.log = log;
     /** idle | checking | downloading | ready */
@@ -166,13 +173,29 @@ class Updater {
       `Доступна новая версия ${info.version}`,
       `Сейчас установлена ${this.currentVersion}.` +
         (notes ? `\n\nЧто нового:\n${notes}` : "") +
-        "\n\nБаза заказов и настройки останутся на месте. Загрузка идёт в фоне — можно работать дальше.",
-      ["Загрузить обновление", "Позже"]
+        (this.openDownload
+          ? "\n\nОткроется загрузка новой версии. Закройте FineCRM, откройте скачанный файл и перетащите " +
+            "FineCRM в «Программы» с заменой. База заказов и настройки останутся на месте."
+          : "\n\nБаза заказов и настройки останутся на месте. Загрузка идёт в фоне — можно работать дальше."),
+      [this.openDownload ? "Скачать" : "Загрузить обновление", "Позже"]
     );
     if (!yes) {
       this.declined = info.version;
       this.state = "idle";
       return { result: "declined" };
+    }
+
+    if (this.openDownload) {
+      this.state = "idle";
+      // Напоминать об этой версии больше не нужно — человек уже скачивает.
+      this.declined = info.version;
+      try {
+        await this.openDownload(info);
+      } catch (err) {
+        this.log(`открыть загрузку: ${err && err.message}`);
+        await this.ui.error("Не удалось открыть загрузку", "Скачайте новую версию на сайте finecrm.ru." + reason(err));
+      }
+      return { result: "opened" };
     }
 
     this.state = "downloading";
@@ -250,4 +273,35 @@ function isNewer(candidate, current) {
   return false;
 }
 
-module.exports = { Updater, isNewer, notesText, isOffline };
+/**
+ * Проверка обновлений для Mac — без electron-updater.
+ *
+ * Его установщик на Mac требует платной подписи Apple, а проверять версию
+ * можно и проще: publish-mac кладёт рядом с .dmg файл mac.json —
+ *   { "version": "0.1.32", "notes": "…", "files": { "arm64": "…dmg", "x64": "…dmg" } }
+ * Объект ведёт себя как autoUpdater ровно настолько, насколько его
+ * использует Updater: checkForUpdates() и on().
+ */
+function macFeed({ baseUrl, arch, fetchJson }) {
+  return {
+    autoDownload: false,
+    autoInstallOnAppQuit: false,
+    allowDowngrade: false,
+    disableWebInstaller: true,
+    on() {},
+    async checkForUpdates() {
+      const feed = await fetchJson(`${baseUrl}mac.json`);
+      if (!feed || typeof feed.version !== "string") return null;
+      const file = feed.files && (feed.files[arch] || feed.files.arm64);
+      return {
+        updateInfo: {
+          version: feed.version,
+          releaseNotes: typeof feed.notes === "string" ? feed.notes : null,
+          downloadUrl: file ? new URL(file, baseUrl).toString() : null,
+        },
+      };
+    },
+  };
+}
+
+module.exports = { Updater, isNewer, notesText, isOffline, macFeed };

@@ -89,3 +89,6 @@ deploy/package-lock.json
 # Движки распознавателя: копируются из frontend/node_modules перед сборкой
 desktop/ocr-models/*.wasm
 desktop/ocr-models/*.mjs
+
+# Программа для Mac, скачанная со сборки GitHub перед publish-mac.
+desktop/dist-mac/

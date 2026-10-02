@@ -11,7 +11,7 @@
  */
 
 const { EventEmitter } = require("events");
-const { Updater, isNewer, notesText, isOffline } = require("../src/updater");
+const { Updater, isNewer, notesText, isOffline, macFeed } = require("../src/updater");
 
 let fails = 0;
 const check = (ok, msg) => {
@@ -146,6 +146,43 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
     const r = await up.check({ manual: false });
     check(r.result === "download-failed" && up.state === "idle", "оборванная загрузка не ломает следующую попытку");
     check(log.some((l) => l.startsWith("error:Обновление не загрузилось")), "и сообщает об этом");
+  }
+
+  // Mac: вместо загрузки и установки — «Скачать» (программа без подписи Apple).
+  {
+    const opened = [];
+    const feed = macFeed({
+      baseUrl: "https://www.finecrm.ru/download/desktop/",
+      arch: "x64",
+      fetchJson: async (u) => (opened.push(`get:${u}`), {
+        version: "0.2.0",
+        notes: "Программа для Mac",
+        files: { arm64: "FineCRM-0.2.0-mac-arm64.dmg", x64: "FineCRM-0.2.0-mac-x64.dmg" },
+      }),
+    });
+    const log = [];
+    const ui = {
+      ask: async (title, detail, buttons) => (log.push(`ask:${title}:${buttons[0]}:${detail.includes("«Программы»")}`), true),
+      info: async (t) => (log.push(`info:${t}`), true),
+      error: async (t) => (log.push(`error:${t}`), true),
+      progress: () => log.push("progress"),
+    };
+    const up = new Updater({
+      autoUpdater: feed,
+      ui,
+      currentVersion: "0.1.0",
+      beforeInstall: async () => (log.push("prepare"), { ok: true }),
+      openDownload: async (info) => opened.push(`open:${info.downloadUrl}`),
+    });
+    const r = await up.check({ manual: false });
+    check(opened[0] === "get:https://www.finecrm.ru/download/desktop/mac.json", "Mac: версия — из mac.json рядом с .dmg");
+    check(r.result === "opened" && opened.includes("open:https://www.finecrm.ru/download/desktop/FineCRM-0.2.0-mac-x64.dmg"), "Mac: «Скачать» открывает .dmg своего процессора");
+    check(log.some((l) => l === "ask:Доступна новая версия 0.2.0:Скачать:true"), "Mac: кнопка «Скачать» и как заменить программу");
+    check(!log.includes("prepare") && !log.includes("progress") && up.state === "idle", "Mac: ничего не качается и не останавливается само");
+    const again = await up.check({ manual: false });
+    check(again.result === "declined-before", "Mac: о той же версии второй раз не напоминаем");
+    const none = await macFeed({ baseUrl: "https://x/", arch: "arm64", fetchJson: async () => null }).checkForUpdates();
+    check(none === null, "Mac: нет mac.json — обновлений нет, без ошибки");
   }
 
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);

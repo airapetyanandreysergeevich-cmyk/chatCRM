@@ -3,6 +3,8 @@
 # с часовой задержкой. Установщики и карты блоков неизменны — их можно.
 map $uri $finecrm_download_cache {
     ~\.yml$  "no-cache";
+    # mac.json — то же для программы на Mac (desktop/scripts/publish-mac.js).
+    ~\.json$ "no-cache";
     default  "public, max-age=3600";
 }
 

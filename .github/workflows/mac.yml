@@ -1,0 +1,66 @@
+# Программа FineCRM для Mac.
+#
+# Собрать её можно только на Mac, поэтому собирает GitHub: на вкладке
+# Actions → «Программа для Mac» → Run workflow. Минут через 15–20 внизу
+# страницы сборки появятся два архива: FineCRM-mac-arm64 (Mac на Apple
+# Silicon — M1, M2, M3, M4) и FineCRM-mac-x64 (Mac на Intel). Дальше —
+# desktop/README.md, раздел «Программа для Mac».
+#
+# PostgreSQL для Mac собирается из исходников (desktop/scripts/build-pg-mac.sh)
+# и кладётся в кэш: при следующих сборках это место проходит за секунды.
+name: Программа для Mac
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Mac ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      # Платной подписи Apple нет — не искать её в связке ключей.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      PG_VERSION: "16.15"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: PostgreSQL из кэша
+        id: pg-cache
+        uses: actions/cache@v4
+        with:
+          path: desktop/vendor/pgsql
+          key: pgsql-${{ env.PG_VERSION }}-${{ matrix.arch }}-${{ hashFiles('desktop/scripts/build-pg-mac.sh') }}
+
+      - name: Сборка PostgreSQL
+        if: steps.pg-cache.outputs.cache-hit != 'true'
+        run: bash desktop/scripts/build-pg-mac.sh "$PG_VERSION" desktop/vendor/pgsql
+
+      - name: Зависимости
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+          npm ci --prefix desktop
+
+      - name: Сборка программы
+        working-directory: desktop
+        run: npm run dist-mac -- --${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FineCRM-mac-${{ matrix.arch }}
+          path: desktop/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14

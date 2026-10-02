@@ -134,13 +134,13 @@ check(
     fs.mkdirSync(дом, { recursive: true });
 
     // Корень доступен — предлагаем короткий путь на нём.
-    const наДиске = location.suggestDataDir({ home: дом, documents: path.join(дом, "Документы") });
+    const наДиске = location.suggestDataDir({ home: дом, documents: path.join(дом, "Документы"), platform: "win32" });
     check(наДиске === path.join(path.parse(дом).root, "FineCRMdata"), `по умолчанию — корень диска (${наДиске})`);
 
     // В корень не дают писать, «Документы» обычные — идём в них.
     const никуда = () => false;
     const вДокументы = location.suggestDataDir(
-      { home: дом, documents: path.join(дом, "Документы") },
+      { home: дом, documents: path.join(дом, "Документы"), platform: "win32" },
       никуда
     );
     check(вДокументы === path.join(дом, "Документы", "FineCRM"), `запасной — «Документы» (${вДокументы})`);
@@ -149,9 +149,17 @@ check(
     // Уводить человека в облако нельзя ни при каких запасных вариантах: база
     // там не создастся вовсе.
     const вОблаке = path.join(дом, "OneDrive", "Документы");
-    const запасной = location.suggestDataDir({ home: дом, documents: вОблаке }, никуда);
+    const запасной = location.suggestDataDir({ home: дом, documents: вОблаке, platform: "win32" }, никуда);
     check(запасной === path.join(дом, "FineCRM"), `из облака уходим в профиль (${запасной})`);
     check(!location.cloudSync(запасной), "ни один запасной вариант не облачный");
+  }
+
+  // Mac: в корень писать нельзя, «Документы» часто в iCloud — сразу профиль.
+  {
+    const mac = location.suggestDataDir({ home: "/Users/ivan", documents: "/Users/ivan/Documents", platform: "darwin" });
+    check(mac === path.join("/Users/ivan", "FineCRM"), `Mac — папка в профиле (${mac})`);
+    check(location.cloudSync("/Users/ivan/Library/Mobile Documents/com~apple~CloudDocs/FineCRM") === "iCloud", "Mac: iCloud Drive распознан");
+    check(!!location.cloudSync("/Users/ivan/Library/CloudStorage/Dropbox/FineCRM"), "Mac: облачные диски распознаны");
   }
 
   // А обычная папка, в имени которой случайно встретилось слово, — принимается.

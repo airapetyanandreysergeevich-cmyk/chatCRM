@@ -87,6 +87,9 @@ function cloudSync(dir) {
     [/[\\/]Google ?Drive/i, "Google Drive"],
     [/[\\/](\u042f\u043d\u0434\u0435\u043a\u0441\.?\u0414\u0438\u0441\u043a|YandexDisk)/i, "\u042f\u043d\u0434\u0435\u043a\u0441.\u0414\u0438\u0441\u043a"],
     [/[\\/]iCloudDrive/i, "iCloud"],
+    // Mac: iCloud Drive и облачные диски через «Файлы» (Dropbox, Google, OneDrive).
+    [/\/Library\/Mobile Documents\//, "iCloud"],
+    [/\/Library\/CloudStorage\//, "облачным диском"],
   ];
   for (const [rule, name] of known) if (rule.test(full)) return name;
   return null;
@@ -166,7 +169,12 @@ function canCreate(dir) {
  * отдельным доводом: иначе запасные варианты нельзя было бы проверить вовсе,
  * а именно они и понадобятся на чужой машине.
  */
-function suggestDataDir({ home, documents }, mayCreate = canCreate) {
+function suggestDataDir({ home, documents, platform = process.platform }, mayCreate = canCreate) {
+  // Mac: в корень диска обычному пользователю писать нельзя, а «Документы»
+  // там часто тихо синхронизируются с iCloud (и это из пути не видно).
+  // Папка в профиле — та самая, что открывается в Finder значком домика.
+  if (platform === "darwin") return path.join(home, "FineCRM");
+
   const root = path.parse(path.resolve(home)).root;
   if (root && mayCreate(root)) return path.join(root, "FineCRMdata");
 

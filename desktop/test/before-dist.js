@@ -17,19 +17,40 @@ const path = require("path");
 const here = path.join(__dirname, "..");
 const repo = path.join(here, "..");
 
+// Сборка для Mac идёт на сборочной машине GitHub (.github/workflows/mac.yml):
+// там свой PostgreSQL, собранный scripts/build-pg-mac.sh, и нет библиотек
+// Visual C++.
+const mac = process.platform === "darwin";
+
 const needed = [
-  {
-    file: path.join(here, "vendor", "pgsql", "bin", "initdb.exe"),
-    what: "Бинарники PostgreSQL для Windows",
-    fix: "Распакуйте архив с сайта EnterpriseDB так, чтобы получилось desktop\\vendor\\pgsql\\bin",
-  },
-  {
-    file: path.join(here, "build", "vc_redist.x64.exe"),
-    what: "Библиотеки Visual C++",
-    fix:
-      "Скачайте https://aka.ms/vs/17/release/vc_redist.x64.exe в desktop\\build\\. " +
-      "Без них initdb.exe не запускается на чистом компьютере вовсе — Windows отвечает кодом 3221225781.",
-  },
+  mac
+    ? {
+        file: path.join(here, "vendor", "pgsql", "bin", "initdb"),
+        what: "PostgreSQL для Mac",
+        fix: "bash scripts/build-pg-mac.sh 16.15 vendor/pgsql",
+      }
+    : {
+        file: path.join(here, "vendor", "pgsql", "bin", "initdb.exe"),
+        what: "Бинарники PostgreSQL для Windows",
+        fix: "Распакуйте архив с сайта EnterpriseDB так, чтобы получилось desktop\\vendor\\pgsql\\bin",
+      },
+  ...(mac
+    ? [
+        {
+          file: path.join(repo, "frontend", "public", "icon-512.png"),
+          what: "Иконка программы для Mac (512×512)",
+          fix: "Файл должен лежать в репозитории: frontend/public/icon-512.png",
+        },
+      ]
+    : [
+        {
+          file: path.join(here, "build", "vc_redist.x64.exe"),
+          what: "Библиотеки Visual C++",
+          fix:
+            "Скачайте https://aka.ms/vs/17/release/vc_redist.x64.exe в desktop\\build\\. " +
+            "Без них initdb.exe не запускается на чистом компьютере вовсе — Windows отвечает кодом 3221225781.",
+        },
+      ]),
   {
     file: path.join(here, "build", "icon.png"),
     what: "Иконка программы",

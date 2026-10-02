@@ -1,6 +1,7 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, ipcMain, nativeImage, net: electronNet, shell } = require("electron");
+const { spawnSync } = require("child_process");
 const { attachEditMenu } = require("./editMenu");
 const fs = require("fs");
 const net = require("net");
@@ -16,7 +17,7 @@ const { freePort } = require("./postgres");
 const { Backups, findBackups, tooNew } = require("./backup");
 const network = require("./network");
 const discovery = require("./discovery");
-const { Updater } = require("./updater");
+const { Updater, macFeed } = require("./updater");
 const printing = require("./printing");
 
 /**
@@ -393,7 +394,9 @@ function createTray() {
   const icon = path.join(__dirname, "..", "build", "icon.png");
   if (!fs.existsSync(icon)) return null;
 
-  tray = new Tray(icon);
+  // В строке меню Mac значок рисуется в натуральную величину — 256 точек
+  // заняли бы полэкрана. Там нужен значок высотой со строку меню.
+  tray = new Tray(process.platform === "darwin" ? nativeImage.createFromPath(icon).resize({ height: 18 }) : icon);
   tray.on("double-click", () => win.show());
   refreshTray();
   return tray;
@@ -839,7 +842,60 @@ function hideInstalling() {
   installWin = null;
 }
 
+/**
+ * Mac: программа без платной подписи Apple (см. README).
+ *
+ * 1. Запущенная прямо из .dmg или из «Загрузок» она работает из временной
+ *    папки только для чтения (так macOS запускает непроверенные программы),
+ *    и база там не создастся. Предлагаем переложить её в «Программы» —
+ *    Electron умеет это сам и перезапускает программу уже оттуда.
+ * 2. Всё, что скачано из интернета, macOS помечает карантином и не даёт
+ *    запускать без спроса — в том числе PostgreSQL внутри программы, который
+ *    человек не видит и подтвердить не может. Раз саму программу он уже
+ *    разрешил запустить, снимаем пометку со всего её содержимого.
+ */
+async function macFirstAid() {
+  if (process.platform !== "darwin" || !app.isPackaged) return true;
+  if (!app.isInApplicationsFolder()) {
+    const answer = await dialog.showMessageBox({
+      type: "question",
+      title: "FineCRM",
+      message: "Переместить FineCRM в «Программы»?",
+      detail: "Отсюда программа работать не сможет: macOS запускает её во временной папке, куда нельзя записать базу.",
+      buttons: ["Переместить", "Выйти"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (answer.response !== 0) {
+      app.exit(0);
+      return false;
+    }
+    try {
+      // Перезапускает программу уже из «Программ», эта копия закрывается.
+      app.moveToApplicationsFolder();
+    } catch (err) {
+      await dialog.showMessageBox({
+        type: "error",
+        title: "FineCRM",
+        message: "Не получилось переместить программу",
+        detail: `Перетащите FineCRM в «Программы» вручную и запустите оттуда.\n\n${err.message}`,
+      });
+      app.exit(0);
+    }
+    return false;
+  }
+  const bundle = path.resolve(process.execPath, "..", "..", "..");
+  spawnSync("xattr", ["-dr", "com.apple.quarantine", bundle], { stdio: "ignore" });
+  return true;
+}
+
+// Mac: щелчок по значку в Dock при закрытом окне — показать окно.
+app.on("activate", () => {
+  if (win && !win.isDestroyed()) win.show();
+});
+
 app.whenReady().then(async () => {
+  if (!(await macFirstAid())) return;
   createWindow();
   noticeIfUpdated();
   createTray();
@@ -857,10 +913,24 @@ app.whenReady().then(async () => {
 function startUpdater() {
   if (!app.isPackaged && !process.env.FINECRM_UPDATE_DEV) return;
   let autoUpdater;
-  try {
-    ({ autoUpdater } = require("electron-updater"));
-  } catch {
-    return; // сборка без модуля обновлений — работаем как раньше
+  let openDownload = null;
+  if (process.platform === "darwin") {
+    // Mac: только проверка версии и «Скачать» — см. macFeed в updater.js.
+    autoUpdater = macFeed({
+      baseUrl: `${config.CLOUD_URL}/download/desktop/`,
+      arch: process.arch === "arm64" ? "arm64" : "x64",
+      fetchJson: async (u) => {
+        const res = await electronNet.fetch(u, { cache: "no-store" });
+        return res.ok ? res.json() : null;
+      },
+    });
+    openDownload = (info) => shell.openExternal(info.downloadUrl || `${config.CLOUD_URL}/`);
+  } else {
+    try {
+      ({ autoUpdater } = require("electron-updater"));
+    } catch {
+      return; // сборка без модуля обновлений — работаем как раньше
+    }
   }
 
   const box = (type) => (title, detail, buttons) =>
@@ -879,6 +949,7 @@ function startUpdater() {
 
   updater = new Updater({
     autoUpdater,
+    openDownload,
     currentVersion: app.getVersion(),
     ui: {
       ask: box("question"),
