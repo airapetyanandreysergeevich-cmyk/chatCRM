@@ -121,6 +121,8 @@ model Tenant {
   salaryMonths        SalaryMonth[]
   printStations       PrintStation[]
   printJobs           PrintJob[]
+  integrations        Integration[]
+  smsMessages         SmsMessage[]
   sessions            Session[]
   application         TenantApplication[]
 }
@@ -1244,3 +1246,57 @@ model PrintJob {
 
   @@index([stationId, status])
 }
+
+/// Подключённые внешние сервисы мастерской. Секрет (ключ API) живёт здесь, а
+/// не в Tenant.settings: настройки уходят в интерфейс целиком, ключ — никогда.
+model Integration {
+  id        String   @id @default(uuid())
+  tenantId  String
+  /// semysms — SMS через телефон-шлюз SemySMS.
+  kind      String
+  enabled   Boolean  @default(false)
+  secret    String?
+  config    Json     @default("{}")
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, kind])
+}
+
+enum SmsStatus {
+  /// Шлюз SemySMS принял, ждёт, пока телефон заберёт.
+  QUEUED
+  /// Телефон отправил.
+  SENT
+  /// Оператор подтвердил доставку.
+  DELIVERED
+  /// Не ушла: ошибка шлюза, телефона или отмена.
+  FAILED
+}
+
+/// SMS клиенту. orderId без связи — как у заданий печати: стирание заказов
+/// не должно спотыкаться о старые сообщения.
+model SmsMessage {
+  id          String    @id @default(uuid())
+  tenantId    String
+  orderId     String?
+  customerId  String?
+  phone       String
+  text        String
+  /// ready — «Готов к выдаче», free — своим текстом, test — проверка из настроек.
+  kind        String
+  status      SmsStatus @default(QUEUED)
+  providerId  String?
+  error       String?
+  createdById String?
+  checkedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, orderId])
+}
+

@@ -32,6 +32,9 @@ const ORDER: readonly string[] = [
   "notification",
   "auditLog",
   "feedback",
+  // SMS и подключения: ни на что, кроме мастерской, не ссылаются
+  "smsMessage",
+  "integration",
   // печать: задания ссылаются на компьютер
   "printJob",
   "printStation",

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe } from "../components/icons";
+import { IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ordersApi } from "../lib/orders";
@@ -49,6 +49,13 @@ const SECTIONS: Section[] = [
     title: "Периферия",
     text: "Принтеры для квитанций и актов: печать с телефона и любого компьютера через FineCRM.",
     icon: <IconDevices />,
+  },
+  {
+    to: "/settings/integrations",
+    title: "Интеграции",
+    text: "SMS клиентам через SemySMS: «ваш заказ готов» с SIM-карты телефона мастерской.",
+    icon: <IconSms />,
+    need: "settings.manage",
   },
   {
     to: "/settings/services",

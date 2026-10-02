@@ -67,6 +67,8 @@ export const env = {
   // движок раздаёт контейнер интерфейса по /ocr-models/ (frontend/Dockerfile),
   // сервер только разбирает присланные строки. Сервер снимков не видит.
   plateOcrBrowser: ["1", "true", "yes"].includes((process.env.PLATE_OCR_BROWSER ?? "").toLowerCase()),
+  /** Адрес API SemySMS (SMS клиентам). Меняется только в проверках — на подставной шлюз. */
+  semysmsUrl: (process.env.SEMYSMS_URL ?? "https://semysms.net/api/3/").replace(/\/?$/, "/"),
 
   /**
    * Доступ к Основе из интернета (см. modules/relay).

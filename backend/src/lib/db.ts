@@ -12,6 +12,7 @@ const TENANT_DELEGATES = new Set([
   "auditLog", "notification", "pushSubscription", "feedback",
   "salaryEntry", "salaryPayout", "salaryMonth",
   "printStation", "printJob",
+  "integration", "smsMessage",
 ]);
 
 const WHERE_OPS = new Set([

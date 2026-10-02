@@ -27,6 +27,7 @@ import OrderNew from "./pages/OrderNew";
 import OrderPrint from "./pages/OrderPrint";
 import PrintTest from "./pages/PrintTest";
 import PeripheralsPage from "./pages/Peripherals";
+import IntegrationsPage from "./pages/Integrations";
 import Orders from "./pages/Orders";
 import Purchases from "./pages/Purchases";
 import ServicesPage from "./pages/Services";
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="/settings/interface" element={<InterfacePage />} />
           <Route path="/settings/print" element={<PrintFormsPage />} />
           <Route path="/settings/peripherals" element={<PeripheralsPage />} />
+          <Route path="/settings/integrations" element={<IntegrationsPage />} />
           <Route path="/settings/feedback" element={<FeedbackPage />} />
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}

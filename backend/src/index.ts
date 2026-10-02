@@ -36,6 +36,7 @@ import { settingsRouter } from "./modules/settings/settings.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
 import { statsRouter } from "./modules/stats/stats.routes";
 import { printingRouter } from "./modules/printing/printing.routes";
+import { smsRouter } from "./modules/sms/sms.routes";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
@@ -147,6 +148,7 @@ app.use("/api/migrate", migrateRouter);
 app.use("/api/salary", salaryRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/printing", printingRouter);
+app.use("/api/sms", smsRouter);
 app.use("/api", staffRouter);
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "Метод не найден" }));

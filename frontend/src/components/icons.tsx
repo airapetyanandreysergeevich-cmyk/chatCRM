@@ -480,3 +480,11 @@ export const IconFilter = (p: IconProps) => (
     <circle cx="18" cy="18" r="2" />
   </Icon>
 );
+
+/** SMS: облачко сообщения с двумя строками. */
+export const IconSms = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V17.5H4A1.5 1.5 0 0 1 2.5 16V7A1.5 1.5 0 0 1 4 5.5Z" />
+    <path d="M7 10h10M7 13.5h6" />
+  </Icon>
+);

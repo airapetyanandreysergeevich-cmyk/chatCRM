@@ -30,7 +30,8 @@ DECLARE
     'CashRegister','TransactionCategory','Transaction',
     'AuditLog','Notification','PushSubscription','Feedback',
     'SalaryEntry','SalaryPayout','SalaryMonth',
-    'PrintStation','PrintJob'
+    'PrintStation','PrintJob',
+    'Integration','SmsMessage'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

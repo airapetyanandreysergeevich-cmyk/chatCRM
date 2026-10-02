@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { copyable } from "../components/CopyMenu";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PrintDialog } from "../components/PrintDialog";
+import { OrderSms, SmsModal } from "../components/OrderSms";
+import type { ReadyHint } from "../lib/sms";
 import { printingApi } from "../lib/printing";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
@@ -390,12 +392,24 @@ export default function OrderCard() {
       .catch(() => setPrinting({ doc: "intake", afterIntake: true }));
   }, [justAccepted]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // SMS клиенту: окно-предложение после «Готов к выдаче» и номер версии
+  // карточки «SMS клиенту», чтобы она перечитала список после отправки.
+  const [smsOffer, setSmsOffer] = useState(false);
+  const [smsVersion, setSmsVersion] = useState(0);
+
   async function run(action: () => Promise<unknown>, message: string) {
     setSaving(true);
     setError(null);
     try {
-      await action();
+      const result = await action();
       await load();
+      // Заказ стал «Готов к выдаче»: сервер подсказывает, что делать с SMS клиенту.
+      const sms = (result as { sms?: ReadyHint } | undefined)?.sms;
+      if (sms && "offer" in sms) setSmsOffer(true);
+      if (sms && "auto" in sms) {
+        message += " · SMS клиенту отправляется";
+        setTimeout(() => setSmsVersion((v) => v + 1), 2500);
+      }
       setNotice(message);
       setTimeout(() => setNotice(null), 4000);
     } catch (err) {
@@ -771,6 +785,8 @@ export default function OrderCard() {
             </Card>
           )}
 
+          <OrderSms orderId={order.id} version={smsVersion} onSent={() => setSmsVersion((v) => v + 1)} />
+
           {seesMoney && (
             <Card>
               <SectionLabel>Деньги</SectionLabel>
@@ -1017,6 +1033,20 @@ export default function OrderCard() {
           onDone={(count) => {
             setShooting(false);
             void run(async () => undefined, count === 1 ? "Снимок загружен" : `Загружено снимков: ${count}`);
+          }}
+        />
+      )}
+
+      {smsOffer && (
+        <SmsModal
+          orderId={order.id}
+          kind="ready"
+          onClose={() => setSmsOffer(false)}
+          onSent={() => {
+            setSmsOffer(false);
+            setSmsVersion((v) => v + 1);
+            setNotice("SMS клиенту отправлена");
+            setTimeout(() => setNotice(null), 4000);
           }}
         />
       )}

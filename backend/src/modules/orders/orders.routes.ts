@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { debtFields, debtList, debtMap } from "../../lib/debt";
+import { readyHint } from "../sms/sms.routes";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { originalName } from "../../lib/uploadName";
@@ -734,7 +735,7 @@ ordersRouter.post(
     const tenantId = tenantOf(req);
     const me = req.auth?.kind === "tenant" ? req.auth.userId : null;
 
-    await withTenant(tenantId, async (tx) => {
+    const becameReady = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
 
@@ -744,7 +745,8 @@ ordersRouter.post(
 
       const status = await tx.orderStatus.findFirst({ where: { id: statusId } });
       if (!status) throw badRequest("Статус не найден");
-      if (status.id === order.statusId) return;
+      if (status.id === order.statusId) return false;
+      const was = await tx.orderStatus.findFirst({ where: { id: order.statusId }, select: { group: true } });
 
       await tx.order.update({
         where: { id: order.id },
@@ -772,9 +774,12 @@ ordersRouter.post(
         diff: { to: status.name },
         ip: clientIp(req),
       });
+      return status.group === "DONE" && was?.group !== "DONE";
     });
 
-    res.json({ ok: true });
+    // Стал «Готов к выдаче» — предложить SMS клиенту (или отправить, если так настроено).
+    const sms = becameReady ? await readyHint(req, req.params.id).catch(() => null) : null;
+    res.json({ ok: true, ...(sms ? { sms } : {}) });
   })
 );
 
@@ -972,9 +977,11 @@ ordersRouter.post(
         where: { id: order.deviceId ?? "" },
         select: { kind: true, brand: true, model: true },
       });
+      const was = await tx.orderStatus.findFirst({ where: { id: order.statusId }, select: { group: true } });
       return {
         number: order.number,
         device: [device?.kind, device?.brand, device?.model].filter(Boolean).join(" "),
+        becameReady: !!done && was?.group !== "DONE",
       };
     });
 
@@ -987,7 +994,8 @@ ordersRouter.post(
       payload: { orderId: req.params.id },
     });
 
-    res.json({ ok: true });
+    const sms = completed.becameReady ? await readyHint(req, req.params.id).catch(() => null) : null;
+    res.json({ ok: true, ...(sms ? { sms } : {}) });
   })
 );
 
