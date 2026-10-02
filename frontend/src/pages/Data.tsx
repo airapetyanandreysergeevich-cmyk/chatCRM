@@ -1,3 +1,4 @@
+import { Panel } from "../components/Panel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackupsCard } from "../components/BackupsCard";
 import { copyText } from "../components/CopyMenu";
@@ -6,7 +7,7 @@ import { MigrateCard } from "../components/MigrateCard";
 import { Modal } from "../components/Modal";
 import { OrderNumberCard } from "../components/OrderNumberCard";
 import { IconDelete, IconDownload, IconUpload } from "../components/icons";
-import { Banner, Button, Card, Checkbox, Field, Input, PageHeader, SectionLabel, Select, Spinner } from "../components/ui";
+import { Banner, Button, Checkbox, Field, Input, PageHeader, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import {
@@ -220,8 +221,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
   }
 
   return (
-    <Card>
-      <SectionLabel>Выгрузить</SectionLabel>
+    <Panel id="data:Выгрузить" title="Выгрузить">
       <p className="mt-2 text-[13.5px] text-ink-muted">
         Файл скачается на это устройство. Данные ваши, забрать их можно в любой момент.
       </p>
@@ -307,7 +307,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
           }}
         />
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -573,8 +573,7 @@ function ImportCard({ reference }: { reference: DataReference }) {
   }
 
   return (
-    <Card>
-      <SectionLabel>Загрузить</SectionLabel>
+    <Panel id="data:Загрузить" title="Загрузить">
       <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
         Сначала система разберёт файл и покажет, что произойдёт. Записи только добавляются и
         обновляются — ничего не удаляется, пустая ячейка не затирает то, что уже есть.
@@ -678,7 +677,7 @@ function ImportCard({ reference }: { reference: DataReference }) {
           )}
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -717,8 +716,7 @@ function DemoCard() {
   }
 
   return (
-    <Card>
-      <SectionLabel>Тестовые данные</SectionLabel>
+    <Panel id="data:Тестовые данные" title="Тестовые данные">
       {state.active ? (
         <>
           <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
@@ -748,7 +746,7 @@ function DemoCard() {
           </div>
         </>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -757,8 +755,7 @@ function ColumnsCard({ reference }: { reference: DataReference }) {
   const [open, setOpen] = useState<DatasetKey | null>(null);
 
   return (
-    <Card>
-      <SectionLabel>Какие колонки понимает система</SectionLabel>
+    <Panel id="data:Какие колонки понимает система" title="Какие колонки понимает система">
       <p className="mt-2 text-[13.5px] text-ink-muted">
         Порядок колонок неважен, лишние пропускаются. Проще всего выгрузить раздел в Excel и
         заполнить по образцу.
@@ -806,7 +803,7 @@ function ColumnsCard({ reference }: { reference: DataReference }) {
           </div>
         ))}
       </div>
-    </Card>
+    </Panel>
   );
 }
 

@@ -1,9 +1,10 @@
+import { Panel } from "./Panel";
 import { useEffect, useState } from "react";
 import { ApiError } from "../lib/api";
 import { columnsFor, isShown, panelLabel } from "../lib/dashboard";
 import { OVERDUE_KEY, summaryApi, type ColumnKey, type DashboardPrefs } from "../lib/workshop";
 import { IconChevronDown } from "./icons";
-import { Banner, Card, SectionLabel } from "./ui";
+import { Banner } from "./ui";
 
 /**
  * «Главный экран» в разделе «Интерфейс»: какие панели показывать и в каком
@@ -109,8 +110,7 @@ export function HomeScreenCard() {
   const tuned = Object.keys(prefs.panels).length > 0;
 
   return (
-    <Card>
-      <SectionLabel>Главный экран</SectionLabel>
+    <Panel id="interface:Главный экран" title="Главный экран">
       <p className="mt-2 text-[13px] text-ink-dim">
         Какие панели показывать и в каком порядке. Сортировка, сколько карточек показывать и какую технику
         прятать — в шестерёнке на самой панели. Настройки ваши личные: у каждого сотрудника свои, на всех
@@ -190,6 +190,6 @@ export function HomeScreenCard() {
           Сбросить сортировку и фильтры всех панелей
         </button>
       )}
-    </Card>
+    </Panel>
   );
 }

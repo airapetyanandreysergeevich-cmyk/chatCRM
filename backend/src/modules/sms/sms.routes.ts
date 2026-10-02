@@ -8,11 +8,18 @@ import * as gateway from "../../lib/semysms";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { assertOrderAccess, seesCustomerContacts } from "../orders/orders.service";
+import { createPairCode, listPhones, revokePhone } from "./sms.phone";
+import { networkInterfaces } from "node:os";
+import { env } from "../../lib/env";
+import { relayAgentState } from "../relay/relay.instance";
+import { defaultRelayUrl, readRemoteAccess } from "../relay/remoteAccess";
+import { publicAddress } from "../relay/invite";
 import {
   DEFAULT_TEMPLATES,
   KIND,
   ON_READY,
   PLACEHOLDERS,
+  PROVIDERS,
   loadSettings,
   maskPhone,
   orderFacts,
@@ -59,6 +66,7 @@ const TEXT_MAX = 1000;
 function settingsView(s: SmsSettings) {
   return {
     enabled: s.enabled,
+    provider: s.provider,
     hasToken: !!s.token,
     tokenHint: tokenHint(s.token),
     device: s.device,
@@ -83,6 +91,7 @@ smsRouter.get(
 
 const settingsSchema = z.object({
   enabled: z.boolean(),
+  provider: z.enum(PROVIDERS).default("phone"),
   /** Новый ключ. Не прислан — остаётся прежний. */
   token: z.string().trim().max(200).optional(),
   device: z.string().trim().min(1).max(100).default("active"),
@@ -100,9 +109,12 @@ smsRouter.put(
     const saved = await withTenant(tenantId, async (tx) => {
       const before = await tx.integration.findFirst({ where: { kind: KIND } });
       const secret = body.token ? body.token : (before?.secret ?? null);
-      if (body.enabled && !secret) throw badRequest("Укажите токен API из личного кабинета SemySMS");
+      if (body.enabled && body.provider === "semysms" && !secret) {
+        throw badRequest("Укажите токен API из личного кабинета SemySMS");
+      }
       const ready = body.templates.ready?.trim();
       const config = {
+        provider: body.provider,
         device: body.device,
         deviceName: body.device === "active" ? null : (body.deviceName ?? null),
         onReady: body.onReady,
@@ -118,7 +130,7 @@ smsRouter.put(
         entityId: row.id,
         action: "UPDATE",
         // Ключ в журнал не пишем — только факт замены.
-        diff: { kind: KIND, enabled: body.enabled, tokenChanged: !!body.token, device: body.device, onReady: body.onReady },
+        diff: { kind: KIND, enabled: body.enabled, provider: body.provider, tokenChanged: !!body.token, device: body.device, onReady: body.onReady },
         ip: clientIp(req),
       });
       return loadSettings(tx);
@@ -155,11 +167,61 @@ smsRouter.post(
     const to = gateway.gatewayPhone(phone);
     if (!to) throw badRequest("Номер не похож на телефон — например, +7 921 123-45-67");
     const s = await withTenant(tenantId, (tx) => loadSettings(tx));
-    if (!s.token) throw badRequest("Сначала сохраните токен API");
+    if (s.provider === "semysms" && !s.token) throw badRequest("Сначала сохраните токен API");
     const tenant = await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }));
     const text = `Проверка SMS из FineCRM: всё работает. ${tenant?.name ?? ""}`.trim();
-    const row = await sendSms(tenantId, { ...s, token: s.token }, { phone: to, text, kind: "test", userId: actorUserId(req) });
+    const row = await sendSms(tenantId, s, { phone: to, text, kind: "test", userId: actorUserId(req) });
     res.json({ id: row.id, status: row.status, error: row.error });
+  })
+);
+
+// ------------------------------------------------------------------ свой телефон
+
+/**
+ * Куда телефону стучаться — подсказки для Основы. В облаке телефон ходит туда
+ * же, где открыт сайт, и подсказки не нужны. У Основы два пути: через
+ * интернет (узел связи /b/<код>/ — работает и по сотовой сети) и по сети
+ * мастерской (http://<адрес компьютера>:<порт>/ — только в том же Wi-Fi).
+ */
+async function phoneAddresses(): Promise<{ remote?: string; lan?: string }> {
+  if (env.storageDriver !== "local") return {};
+  const out: { remote?: string; lan?: string } = {};
+  const saved = await readRemoteAccess().catch(() => null);
+  if (saved?.enabled && saved.code && relayAgentState().state === "online") {
+    out.remote = publicAddress(saved.url || defaultRelayUrl(), saved.code);
+  }
+  const ip = Object.values(networkInterfaces())
+    .flat()
+    .find((a) => a && a.family === "IPv4" && !a.internal && !a.address.startsWith("169.254."));
+  // Основа слушает только себя, пока раздача по сети не включена, — тогда адрес в сети бесполезен.
+  if (ip && env.bindHost !== "127.0.0.1" && env.bindHost !== "localhost") out.lan = `http://${ip.address}:${env.port}/`;
+  return out;
+}
+
+smsRouter.get(
+  "/phones",
+  ah(async (req, res) => {
+    manage(req);
+    res.json({ phones: await listPhones(tenantOf(req)) });
+  })
+);
+
+/** Одноразовый код подключения телефона — 10 минут. */
+smsRouter.post(
+  "/phones/pair",
+  ah(async (req, res) => {
+    manage(req);
+    const { code, expiresAt } = await createPairCode(tenantOf(req));
+    res.json({ code, expiresAt, ...(await phoneAddresses()) });
+  })
+);
+
+smsRouter.delete(
+  "/phones/:id",
+  ah(async (req, res) => {
+    manage(req);
+    await revokePhone(tenantOf(req), req.params.id);
+    res.json({ ok: true });
   })
 );
 

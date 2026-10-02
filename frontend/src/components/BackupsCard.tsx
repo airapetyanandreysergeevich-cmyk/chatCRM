@@ -1,8 +1,9 @@
+import { Panel } from "./Panel";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../lib/api";
 import { backupsApi, type BackupPlace, type BackupStatus } from "../lib/backupsApi";
 import { formatDateTime, plural } from "../lib/format";
-import { Banner, Button, Card, SectionLabel } from "./ui";
+import { Banner, Button } from "./ui";
 
 /**
  * «Резервные копии» в «Настройки → Базы».
@@ -122,9 +123,8 @@ export function BackupsCard() {
   const last = status.last;
 
   return (
-    <Card>
+    <Panel id="data:Резервные копии" title="Резервные копии" defaultOpen={window.location.hash === "#backups"}>
       <div id="backups" className="scroll-mt-4" />
-      <SectionLabel>Резервные копии</SectionLabel>
       <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
         Копия базы и всех фотографий делается раз в сутки, перед обновлением программы
         {status.onExit ? " и при её закрытии" : ""}. В каждом месте хранится{" "}
@@ -219,6 +219,6 @@ export function BackupsCard() {
           или в меню значка возле часов.
         </p>
       )}
-    </Card>
+    </Panel>
   );
 }

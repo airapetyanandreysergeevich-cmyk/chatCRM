@@ -1,7 +1,8 @@
+import { Panel } from "../components/Panel";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconBell, IconShare } from "../components/icons";
-import { Banner, Button, Card, PageHeader, SectionLabel, Spinner } from "../components/ui";
+import { Banner, Button, Card, PageHeader, Spinner } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { InstallAppCard } from "../components/InstallApp";
 import { useAuth } from "../lib/auth";
@@ -88,8 +89,7 @@ function DeviceCard() {
   const canToggle = state === "on" || state === "off";
 
   return (
-    <Card>
-      <SectionLabel>Это устройство</SectionLabel>
+    <Panel id="notifications:Это устройство" title="Это устройство">
       <div className="mt-3 flex items-start gap-3">
         <span
           className={
@@ -166,7 +166,7 @@ function DeviceCard() {
           )}
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -212,8 +212,7 @@ function Feed() {
   if (!items) return null;
 
   return (
-    <Card>
-      <SectionLabel>Что происходило</SectionLabel>
+    <Panel id="notifications:Что происходило" title="Что происходило">
       {items.length === 0 ? (
         <p className="mt-3 text-[13.5px] text-ink-dim">Пока ничего не приходило.</p>
       ) : (
@@ -241,7 +240,7 @@ function Feed() {
           ))}
         </ul>
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -320,8 +319,7 @@ export default function Notifications() {
           {!data ? (
             <Spinner label="Загружаем настройки" />
           ) : (
-            <Card>
-              <SectionLabel>Кому какие события</SectionLabel>
+            <Panel id="notifications:Кому какие события" title="Кому какие события">
               <p className="mt-2 text-[13.5px] text-ink-muted">
                 Отмеченные роли получают оповещение и в системе, и на телефон.
                 Тот, кто сам совершил действие, себе оповещение не получает.
@@ -369,7 +367,7 @@ export default function Notifications() {
                   {saving ? "Сохраняем…" : "Сохранить"}
                 </Button>
               </div>
-            </Card>
+            </Panel>
           )}
         </>
       )}

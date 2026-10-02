@@ -1,3 +1,4 @@
+import { Panel } from "./Panel";
 import { useEffect, useState } from "react";
 import {
   androidAppState,
@@ -5,7 +6,7 @@ import {
   reportAndroidApp,
   type AndroidAppState,
 } from "../lib/androidApp";
-import { Card, SectionLabel } from "./ui";
+
 import { IconBell } from "./icons";
 
 /** Отложенный баннер не показываем неделю: напоминание раз в день — это раздражение. */
@@ -101,8 +102,7 @@ export function InstallAppCard() {
 
   if (state === "in-app" || state === "installed") {
     return (
-      <Card>
-        <SectionLabel>Приложение для Android</SectionLabel>
+      <Panel id="notifications:Приложение для Android" title="Приложение для Android">
         <div className="mt-3 flex items-start gap-3">
           <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-field bg-brand-tint text-brand">
             <IconBell className="h-[18px] w-[18px]" />
@@ -113,13 +113,12 @@ export function InstallAppCard() {
               : "Приложение установлено. Открывайте FineCRM с домашнего экрана: так оповещения приходят надёжнее."}
           </p>
         </div>
-      </Card>
+      </Panel>
     );
   }
 
   return (
-    <Card>
-      <SectionLabel>Приложение для Android</SectionLabel>
+    <Panel id="notifications:Приложение для Android" title="Приложение для Android">
       <p className="mt-3 text-[14px] leading-relaxed text-ink-muted">
         В приложении FineCRM открывается на весь экран, без адресной строки, и
         оповещения о заказах приходят как у обычной программы.
@@ -140,6 +139,6 @@ export function InstallAppCard() {
         спросит разрешение ставить из этого источника. Это нормально: файл
         подписан нашим ключом и обновляется только нами.
       </p>
-    </Card>
+    </Panel>
   );
 }

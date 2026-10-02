@@ -6,10 +6,13 @@ import { api } from "./api";
  */
 
 export type OnReady = "ask" | "auto" | "off";
+/** Чем отправлять: свой телефон с приложением FineCRM SMS или SemySMS. */
+export type Provider = "phone" | "semysms";
 export type SmsStatus = "QUEUED" | "SENT" | "DELIVERED" | "FAILED";
 
 export interface SmsSettings {
   enabled: boolean;
+  provider: Provider;
   hasToken: boolean;
   tokenHint: string | null;
   device: string;
@@ -27,6 +30,31 @@ export interface GatewayDevice {
   battery: number | null;
   lastActive: string | null;
 }
+
+/** Подключённый телефон с приложением FineCRM SMS. */
+export interface SmsPhone {
+  id: string;
+  name: string;
+  online: boolean;
+  lastSeenAt: string | null;
+  battery: number | null;
+  charging: boolean | null;
+  appVersion: string | null;
+  sentToday: number;
+  problems: string[];
+}
+
+export interface PairCode {
+  code: string;
+  expiresAt: string;
+  /** Основа: адрес через интернет (если доступ включён и на связи). */
+  remote?: string;
+  /** Основа: адрес в сети мастерской. */
+  lan?: string;
+}
+
+/** Приложение «FineCRM SMS» лежит в облаке — и для облачных мастерских, и для Основ. */
+export const SMS_APP_URL = "https://www.finecrm.ru/app/finecrm-sms.apk";
 
 export interface SmsMessage {
   id: string;
@@ -55,6 +83,7 @@ export const smsApi = {
   settings: () => api.get<SmsSettings>("/sms/settings"),
   save: (body: {
     enabled: boolean;
+    provider: Provider;
     token?: string;
     device: string;
     deviceName?: string | null;
@@ -64,6 +93,9 @@ export const smsApi = {
   devices: (token?: string) => api.post<{ devices: GatewayDevice[] }>("/sms/devices", token ? { token } : {}),
   test: (phone: string) => api.post<{ id: string; status: SmsStatus; error: string | null }>("/sms/test", { phone }),
   status: () => api.get<{ enabled: boolean; onReady: OnReady; canSend: boolean }>("/sms/status"),
+  phones: () => api.get<{ phones: SmsPhone[] }>("/sms/phones"),
+  pair: () => api.post<PairCode>("/sms/phones/pair", {}),
+  unpair: (id: string) => api.del<{ ok: true }>(`/sms/phones/${id}`),
   order: (orderId: string) =>
     api.get<{ enabled: boolean; canSend: boolean; hasPhone: boolean; messages: SmsMessage[] }>(`/sms/order/${orderId}`),
   preview: (orderId: string, kind: "ready" | "free") => api.get<SmsPreview>(`/sms/order/${orderId}/preview?kind=${kind}`),

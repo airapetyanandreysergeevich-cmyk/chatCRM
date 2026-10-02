@@ -1,14 +1,6 @@
+import { Panel } from "../components/Panel";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import {
-  Banner,
-  Button,
-  Card,
-  Checkbox,
-  PageHeader,
-  SectionLabel,
-  Spinner,
-  Textarea,
-} from "../components/ui";
+import { Banner, Button, Checkbox, PageHeader, Spinner, Textarea } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { WorkshopName } from "../components/WorkshopName";
 
@@ -108,8 +100,7 @@ export default function RemoteAccess() {
       {error && <Banner tone="error">{error}</Banner>}
       {notice && <Banner>{notice}</Banner>}
 
-      <Card>
-        <SectionLabel>Состояние</SectionLabel>
+      <Panel id="remote:Состояние" title="Состояние" defaultOpen>
         <p className={"mt-2 text-[17px] font-bold " + status.tone}>{status.text}</p>
         {data.detail && data.state === "error" && <p className="mt-1 text-[13px] text-ink-muted">{data.detail}</p>}
 
@@ -148,10 +139,9 @@ export default function RemoteAccess() {
         <p className="mt-3 text-[13px] leading-relaxed text-ink-dim">
           Компьютер с Основой для этого должен быть включён: когда он спит, адрес не отвечает.
         </p>
-      </Card>
+      </Panel>
 
-      <Card>
-        <SectionLabel>{data.connected ? "Новая фраза подключения" : "Фраза подключения"}</SectionLabel>
+      <Panel id="remote:2" title={data.connected ? "Новая фраза подключения" : "Фраза подключения"}>
         <form
           className="mt-3 space-y-3"
           onSubmit={(e: FormEvent) => {
@@ -180,10 +170,9 @@ export default function RemoteAccess() {
             </Button>
           </div>
         </form>
-      </Card>
+      </Panel>
 
-      <Card>
-        <SectionLabel>Что важно знать</SectionLabel>
+      <Panel id="remote:Что важно знать" title="Что важно знать">
         <ul className="mt-3 space-y-2 text-[13.5px] leading-relaxed text-ink-muted">
           <li>
             Заказы, фотографии и пароли остаются на вашем компьютере. Сервер поставщика только
@@ -205,7 +194,7 @@ export default function RemoteAccess() {
             «Сотрудники»: вход снаружи перестанет работать вместе с обычным.
           </li>
         </ul>
-      </Card>
+      </Panel>
     </div>
   );
 }

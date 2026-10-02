@@ -37,6 +37,7 @@ import { staffRouter } from "./modules/staff/staff.routes";
 import { statsRouter } from "./modules/stats/stats.routes";
 import { printingRouter } from "./modules/printing/printing.routes";
 import { smsRouter } from "./modules/sms/sms.routes";
+import { smsPhoneRouter } from "./modules/sms/sms.phone";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
@@ -148,6 +149,8 @@ app.use("/api/migrate", migrateRouter);
 app.use("/api/salary", salaryRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/printing", printingRouter);
+// Телефон-шлюз «FineCRM SMS» — до smsRouter: у телефона свой ключ, а не вход сотрудника.
+app.use("/api/sms/phone", smsPhoneRouter);
 app.use("/api/sms", smsRouter);
 app.use("/api", staffRouter);
 

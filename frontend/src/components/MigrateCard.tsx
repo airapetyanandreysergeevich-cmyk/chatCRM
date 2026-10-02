@@ -1,10 +1,11 @@
+import { Panel } from "./Panel";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { migrateApi, type MigrateResult, type MigrateSummary } from "../lib/migrateApi";
 import { IconUpload } from "./icons";
-import { Banner, Button, Card, Checkbox, SectionLabel } from "./ui";
+import { Banner, Button, Checkbox } from "./ui";
 
 const n = (v: number) => v.toLocaleString("ru-RU");
 
@@ -73,9 +74,7 @@ export function MigrateCard() {
   const titleOf = { customers: "Клиенты", stock: "Склад", orders: "Заказы" } as const;
 
   return (
-    <Card>
-      <SectionLabel>Перенос из другой программы</SectionLabel>
-
+    <Panel id="data:Перенос из другой программы" title="Перенос из другой программы">
       {result ? (
         <div className="mt-3 space-y-3">
           <Banner>
@@ -224,6 +223,6 @@ export function MigrateCard() {
           </div>
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }

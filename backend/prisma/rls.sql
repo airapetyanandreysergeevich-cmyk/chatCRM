@@ -31,7 +31,7 @@ DECLARE
     'AuditLog','Notification','PushSubscription','Feedback',
     'SalaryEntry','SalaryPayout','SalaryMonth',
     'PrintStation','PrintJob',
-    'Integration','SmsMessage'
+    'Integration','SmsMessage','SmsPhone'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

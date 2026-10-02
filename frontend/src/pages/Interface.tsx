@@ -1,9 +1,10 @@
+import { Panel } from "../components/Panel";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { HomeScreenCard } from "../components/HomeScreenCard";
 import { Modal } from "../components/Modal";
 import { IconMoon, IconSun } from "../components/icons";
-import { Banner, Button, Card, Checkbox, Field, Input, SectionLabel, PageHeader } from "../components/ui";
+import { Banner, Button, Checkbox, Field, Input, PageHeader } from "../components/ui";
 import { fixLayoutEnabled, setFixLayoutEnabled } from "../lib/searchPrefs";
 import { appearanceApi, LOGO_TYPES, prepareLogo, type Branding } from "../lib/branding";
 import { ApiError } from "../lib/api";
@@ -310,9 +311,7 @@ export default function Interface() {
       {error && <Banner tone="error">{error}</Banner>}
 
       {mayEdit && (
-        <Card>
-          <SectionLabel>Мастерская</SectionLabel>
-
+        <Panel id="interface:Мастерская" title="Мастерская">
           <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <Field
               label="Название компании"
@@ -401,11 +400,10 @@ export default function Interface() {
             </Link>
             .
           </p>
-        </Card>
+        </Panel>
       )}
 
-      <Card>
-        <SectionLabel>Тема</SectionLabel>
+      <Panel id="interface:Тема" title="Тема">
         <div className="mt-3 inline-flex rounded-field border border-line bg-surface-input p-1">
           {(
             [
@@ -430,7 +428,7 @@ export default function Interface() {
         <p className="mt-3 text-[12.5px] text-ink-dim">
           Выбор действует только на этом устройстве. У каждого сотрудника он свой.
         </p>
-      </Card>
+      </Panel>
 
       <HomeScreenCard />
 
@@ -442,8 +440,7 @@ export default function Interface() {
         </Banner>
       ) : (
         <>
-          <Card>
-            <SectionLabel>Цвета ярлыков</SectionLabel>
+          <Panel id="interface:Цвета ярлыков" title="Цвета ярлыков">
             <p className="mt-2 text-[13px] text-ink-dim">
               Нажмите на ярлык — откроется палитра. Цвет стадии — это и цвет её колонки на главной. Текст на
               ярлыках всегда тёмный; слишком тёмный цвет ярлык сам немного осветлит, чтобы текст читался
@@ -472,16 +469,15 @@ export default function Interface() {
                 Вернуть стандартные цвета ярлыков
               </Button>
             )}
-          </Card>
+          </Panel>
 
-          <Card>
-            <SectionLabel>Основные цвета</SectionLabel>
+          <Panel id="interface:Основные цвета" title="Основные цвета">
             <p className="mt-2 text-[13px] text-ink-dim">
               Остальное — линии, оттенки текста, подложки плашек — система считает от них сама,
               чтобы интерфейс оставался читаемым при любом выборе.
             </p>
             <div className="mt-2 divide-y divide-line">{baseFields.map(row)}</div>
-          </Card>
+          </Panel>
 
           <div className="flex flex-col gap-2 sm:flex-row-reverse">
             <Button disabled={busy || !dirty} onClick={() => void onSave()} className="sm:min-w-[200px]">
@@ -522,8 +518,7 @@ export default function Interface() {
 function SearchLayoutCard() {
   const [on, setOn] = useState(fixLayoutEnabled);
   return (
-    <Card>
-      <SectionLabel>Поиск</SectionLabel>
+    <Panel id="interface:Поиск" title="Поиск">
       <div className="mt-3 sm:max-w-[520px]">
         <Checkbox
           checked={on}
@@ -538,6 +533,6 @@ function SearchLayoutCard() {
         Набрали «yjen,er» вместо «ноутбук» — поиск поймёт и покажет результаты для «ноутбук». Слова, которые находятся
         как набраны, не трогаются: серийные номера и модели латиницей останутся латиницей. Действует на этом устройстве.
       </p>
-    </Card>
+    </Panel>
   );
 }

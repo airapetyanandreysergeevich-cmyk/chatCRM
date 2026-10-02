@@ -1,7 +1,8 @@
+import { Panel } from "../components/Panel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PrintSheet, type Doc } from "../components/PrintSheet";
-import { Banner, Button, Card, Checkbox, Input, PageHeader, SectionLabel, Spinner, Textarea } from "../components/ui";
+import { Banner, Button, Checkbox, Input, PageHeader, Spinner, Textarea } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LOGO_TYPES, prepareLogo } from "../lib/branding";
@@ -245,8 +246,7 @@ function DocCard({
   const reset = (k: keyof DocTexts) => (texts[k] !== d[k] ? () => onChange({ ...texts, [k]: d[k] }) : undefined);
 
   return (
-    <Card>
-      <SectionLabel>{title}</SectionLabel>
+    <Panel id={`print:${title}`} title={title}>
       <div className="mt-4 space-y-4" onFocusCapture={onFocus}>
         <div>
           <FieldHead label="Заголовок" onReset={reset("title")} />
@@ -319,7 +319,7 @@ function DocCard({
           </div>
         </div>
       </div>
-    </Card>
+    </Panel>
   );
 }
 
@@ -425,8 +425,7 @@ export default function PrintFormsPage() {
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ------------------------------------------------------ поля */}
         <div className="space-y-5">
-          <Card>
-            <SectionLabel>Шапка</SectionLabel>
+          <Panel id="print:Шапка" title="Шапка">
             <div className="mt-4 space-y-4">
               <div>
                 <FieldHead label="Логотип на бланке" />
@@ -495,7 +494,7 @@ export default function PrintFormsPage() {
                 <Hint>Печатается под названием, как набрано — с переносами строк.</Hint>
               </div>
             </div>
-          </Card>
+          </Panel>
 
           <DocCard
             title="Квитанция о приёме"
@@ -521,8 +520,7 @@ export default function PrintFormsPage() {
             staffHint="Под строкой — только эта надпись: расписывается тот, кто выдаёт технику."
           />
 
-          <Card>
-            <SectionLabel>Низ листа</SectionLabel>
+          <Panel id="print:Низ листа" title="Низ листа">
             <div className="mt-4 space-y-4">
               <div>
                 <FieldHead label="Строка внизу" count={(draft.footer ?? "").length} max={200} />
@@ -544,7 +542,7 @@ export default function PrintFormsPage() {
                 />
               </div>
             </div>
-          </Card>
+          </Panel>
 
           {mayEdit && (
             // Прилипает к низу экрана, только когда есть что сохранить: пустая

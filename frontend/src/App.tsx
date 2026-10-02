@@ -28,6 +28,7 @@ import OrderPrint from "./pages/OrderPrint";
 import PrintTest from "./pages/PrintTest";
 import PeripheralsPage from "./pages/Peripherals";
 import IntegrationsPage from "./pages/Integrations";
+import SmsPhoneLink from "./pages/SmsPhoneLink";
 import Orders from "./pages/Orders";
 import Purchases from "./pages/Purchases";
 import ServicesPage from "./pages/Services";
@@ -62,6 +63,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={status === "ready" ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/register" element={status === "ready" ? <Navigate to="/" replace /> : <Register />} />
+      {/* Из QR-кода «Подключить телефон» — без входа: открывается на телефоне-шлюзе. */}
+      <Route path="/sms-phone" element={<SmsPhoneLink />} />
 
       <Route element={<ProtectedRoute />}>
         {/* Бланк печатается на бумагу, поэтому идёт мимо Layout: боковое меню

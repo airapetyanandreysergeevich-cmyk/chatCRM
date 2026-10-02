@@ -1,5 +1,6 @@
+import { Panel } from "./Panel";
 import { useEffect, useState } from "react";
-import { Banner, Button, Card, Checkbox, Field, Input, SectionLabel } from "./ui";
+import { Banner, Button, Checkbox, Field, Input } from "./ui";
 import { ApiError, api } from "../lib/api";
 
 /**
@@ -94,9 +95,7 @@ export function OrderNumberCard() {
   const custom = template.trim() !== "";
 
   return (
-    <Card>
-      <SectionLabel>Нумерация заказов</SectionLabel>
-
+    <Panel id="data:Нумерация заказов" title="Нумерация заказов">
       {state.locked ? (
         <div className="mt-3 space-y-2">
           <p className="text-[14px] text-ink-muted">
@@ -157,6 +156,6 @@ export function OrderNumberCard() {
           </Button>
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }

@@ -3,16 +3,20 @@ import { withTenant } from "../../lib/db";
 import * as gateway from "../../lib/semysms";
 
 /**
- * SMS клиентам через SemySMS: настройки мастерской, шаблоны, отправка и
- * статусы. Маршруты — в sms.routes.ts, предложение «отправить SMS» после
- * «Готов к выдаче» — readyHint() из orders.routes.ts.
+ * SMS клиентам: настройки мастерской, шаблоны, отправка и статусы. Отправляет
+ * либо свой телефон с приложением «FineCRM SMS» (provider "phone",
+ * sms.phone.ts), либо SemySMS. Маршруты — в sms.routes.ts, предложение
+ * «отправить SMS» после «Готов к выдаче» — readyHint() из orders.routes.ts.
  *
  * Сеть — всегда вне транзакции (claude/grabli.md, «Сеть внутри транзакции»):
  * сначала запись «в очереди», потом запрос к SemySMS, потом итог отдельной
  * короткой транзакцией.
  */
 
+/** Строка подключения в "Integration". Имя историческое: в ней все настройки SMS, не только SemySMS. */
 export const KIND = "semysms";
+export const PROVIDERS = ["phone", "semysms"] as const;
+export type Provider = (typeof PROVIDERS)[number];
 export const ON_READY = ["ask", "auto", "off"] as const;
 export type OnReady = (typeof ON_READY)[number];
 
@@ -25,6 +29,8 @@ export type TemplateKey = keyof typeof DEFAULT_TEMPLATES;
 export const PLACEHOLDERS = ["{клиент}", "{номер}", "{техника}", "{сумма}", "{мастерская}"] as const;
 
 export interface SmsConfig {
+  /** Чем отправлять: свой телефон с приложением FineCRM SMS или SemySMS. */
+  provider: Provider;
   /** Код телефона в SemySMS или "active" — любой включённый. */
   device: string;
   deviceName: string | null;
@@ -41,6 +47,7 @@ function readConfig(raw: unknown): SmsConfig {
   const c = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const t = (c.templates && typeof c.templates === "object" ? c.templates : {}) as Record<string, unknown>;
   return {
+    provider: PROVIDERS.includes(c.provider as Provider) ? (c.provider as Provider) : "phone",
     device: typeof c.device === "string" && c.device.trim() ? c.device.trim() : "active",
     deviceName: typeof c.deviceName === "string" && c.deviceName.trim() ? c.deviceName.trim() : null,
     onReady: ON_READY.includes(c.onReady as OnReady) ? (c.onReady as OnReady) : "ask",
@@ -50,11 +57,15 @@ function readConfig(raw: unknown): SmsConfig {
 
 export async function loadSettings(tx: Prisma.TransactionClient): Promise<SmsSettings> {
   const row = await tx.integration.findFirst({ where: { kind: KIND } });
-  return { enabled: !!row?.enabled, token: row?.secret ?? null, ...readConfig(row?.config) };
+  const config = readConfig(row?.config);
+  // Подключали SemySMS до того, как появился выбор, — так и остаётся.
+  const raw = (row?.config ?? {}) as Record<string, unknown>;
+  if (!raw.provider && row?.secret) config.provider = "semysms";
+  return { enabled: !!row?.enabled, token: row?.secret ?? null, ...config };
 }
 
-/** Готово ли к отправке: включено, есть ключ. */
-export const ready = (s: SmsSettings): s is SmsSettings & { token: string } => s.enabled && !!s.token;
+/** Готово ли к отправке: включено и, для SemySMS, есть ключ. Свой телефон проверяется при отправке. */
+export const ready = (s: SmsSettings) => s.enabled && (s.provider === "phone" || !!s.token);
 
 /** Ключ в интерфейсе — только последние четыре знака. */
 export const tokenHint = (token: string | null) => (token ? `•••• ${token.slice(-4)}` : null);
@@ -131,7 +142,7 @@ export interface SmsView {
  */
 export async function sendSms(
   tenantId: string,
-  settings: SmsSettings & { token: string },
+  settings: SmsSettings,
   msg: { orderId?: string | null; customerId?: string | null; phone: string; text: string; kind: string; userId?: string | null }
 ) {
   const row = await withTenant(tenantId, (tx) =>
@@ -147,15 +158,49 @@ export async function sendSms(
       },
     })
   );
+  const fail = (error: string) =>
+    withTenant(tenantId, (tx) => tx.smsMessage.update({ where: { id: row.id }, data: { status: "FAILED", error } }));
+
+  // Свой телефон: сообщение ждёт в очереди, телефон заберёт его сам (sms.phone.ts).
+  // Если ни один телефон давно не выходил на связь — говорим сразу, а не через полчаса.
+  if (settings.provider === "phone") {
+    const alive = await withTenant(tenantId, (tx) =>
+      tx.smsPhone.count({
+        where: { revokedAt: null, tokenHash: { not: null }, lastSeenAt: { gte: new Date(Date.now() - PHONE_GRACE_MS) } },
+      })
+    );
+    return alive ? row : fail("Телефон-шлюз не на связи — проверьте, что он включён и приложение FineCRM SMS запущено");
+  }
+
+  if (!settings.token) return fail("Не указан токен SemySMS");
   try {
     const providerId = await gateway.send(settings.token, settings.device, msg.phone, msg.text);
     return await withTenant(tenantId, (tx) => tx.smsMessage.update({ where: { id: row.id }, data: { providerId } }));
   } catch (err) {
-    const error = err instanceof gateway.SmsGatewayError ? err.message : "Не удалось отправить SMS";
-    return await withTenant(tenantId, (tx) =>
-      tx.smsMessage.update({ where: { id: row.id }, data: { status: "FAILED", error } })
-    );
+    return fail(err instanceof gateway.SmsGatewayError ? err.message : "Не удалось отправить SMS");
   }
+}
+
+/** Телефон «есть», если выходил на связь за это время: короткий обрыв сети — не повод отказывать. */
+export const PHONE_GRACE_MS = 10 * 60 * 1000;
+/** Телефон на связи прямо сейчас: опрос — каждые 25 секунд. */
+export const PHONE_ONLINE_MS = 75_000;
+/** Никто не забрал за это время — SMS уже неактуальна, лучше сказать честно. */
+const PHONE_PICK_TTL_MS = 30 * 60 * 1000;
+/** Забрал, но так и не сказал, ушла ли. */
+const PHONE_RESULT_TTL_MS = 15 * 60 * 1000;
+
+/** Свой телефон: просроченные сообщения — в «не отправлена» с понятной причиной. */
+export async function expirePhoneQueue(tx: Prisma.TransactionClient, where: Prisma.SmsMessageWhereInput = {}) {
+  const now = Date.now();
+  await tx.smsMessage.updateMany({
+    where: { ...where, status: "QUEUED", providerId: null, pickedAt: null, createdAt: { lt: new Date(now - PHONE_PICK_TTL_MS) } },
+    data: { status: "FAILED", error: "Телефон-шлюз не забрал SMS за 30 минут — он был выключен или без интернета" },
+  });
+  await tx.smsMessage.updateMany({
+    where: { ...where, status: "QUEUED", providerId: null, pickedAt: { lt: new Date(now - PHONE_RESULT_TTL_MS) } },
+    data: { status: "FAILED", error: "Телефон-шлюз забрал SMS, но не сообщил, ушла ли она" },
+  });
 }
 
 /** Как часто спрашивать SemySMS о статусах одного и того же сообщения. */
@@ -165,6 +210,7 @@ const CHECK_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** Освежить статусы неокончательных сообщений. Ошибка шлюза статусы не трогает. */
 export async function refreshStatuses(tenantId: string, settings: SmsSettings, where: Prisma.SmsMessageWhereInput) {
+  await withTenant(tenantId, (tx) => expirePhoneQueue(tx, where));
   if (!settings.token) return;
   const now = Date.now();
   const pending = await withTenant(tenantId, (tx) =>

@@ -123,6 +123,7 @@ model Tenant {
   printJobs           PrintJob[]
   integrations        Integration[]
   smsMessages         SmsMessage[]
+  smsPhones           SmsPhone[]
   sessions            Session[]
   application         TenantApplication[]
 }
@@ -1292,11 +1293,34 @@ model SmsMessage {
   error       String?
   createdById String?
   checkedAt   DateTime?
+  /// Отправка своим телефоном: какой телефон забрал и когда.
+  phoneId     String?
+  pickedAt    DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, orderId])
+  @@index([tenantId, status])
+}
+
+/// Свой телефон-шлюз: приложение «FineCRM SMS» на Android. Подключается по
+/// одноразовому коду (pairCode живёт 10 минут), дальше ходит с ключом:
+/// «<id>.<секрет>», в базе — только отпечаток секрета.
+model SmsPhone {
+  id            String    @id @default(uuid())
+  tenantId      String
+  name          String    @default("Телефон")
+  pairCode      String?   @unique
+  pairExpiresAt DateTime?
+  tokenHash     String?
+  /// Батарея, зарядка, SIM-карты, версия приложения — что телефон сообщил о себе.
+  info          Json      @default("{}")
+  lastSeenAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 }
 

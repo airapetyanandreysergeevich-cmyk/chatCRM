@@ -1,7 +1,8 @@
+import { Panel } from "../components/Panel";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PrinterPicker } from "../components/PrinterPicker";
-import { Banner, Button, Card, PageHeader, SectionLabel, Spinner } from "../components/ui";
+import { Banner, Button, PageHeader, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import {
@@ -142,8 +143,7 @@ export default function PeripheralsPage() {
         </Banner>
       )}
 
-      <Card>
-        <SectionLabel>Принтеры</SectionLabel>
+      <Panel id="peripherals:Принтеры" title="Принтеры">
         <div className="mt-4">
           <Row
             title="Принтер для документов"
@@ -199,11 +199,10 @@ export default function PeripheralsPage() {
             <span className="text-[14px] text-ink-dim">Появится позже</span>
           </Row>
         </div>
-      </Card>
+      </Panel>
 
       {data.personal && (
-        <Card>
-          <SectionLabel>После приёма техники</SectionLabel>
+        <Panel id="peripherals:После приёма техники" title="После приёма техники">
           <p className="mt-2 text-[13px] text-ink-dim">Ваша настройка: что делать с квитанцией, когда заказ принят.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             {INTAKE.map((m) => (
@@ -224,12 +223,11 @@ export default function PeripheralsPage() {
               </button>
             ))}
           </div>
-        </Card>
+        </Panel>
       )}
 
       {data.stations.length > 0 && (
-        <Card>
-          <SectionLabel>Компьютеры с принтерами</SectionLabel>
+        <Panel id="peripherals:Компьютеры с принтерами" title="Компьютеры с принтерами">
           <div className="mt-3">
             {data.stations.map((s) => (
               <div key={s.id} className="flex flex-wrap items-center gap-3 border-t border-line py-3 first:border-t-0">
@@ -256,7 +254,7 @@ export default function PeripheralsPage() {
               </div>
             ))}
           </div>
-        </Card>
+        </Panel>
       )}
 
       {picking && (
