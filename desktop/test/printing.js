@@ -29,6 +29,11 @@ ok("чужой адрес — нельзя", !allowed(`https://evil.example/orde
 ok("другая страница CRM — нельзя", !allowed(`http://127.0.0.1:4102/settings?station=1`));
 ok("без режима станции — нельзя", !allowed(`http://127.0.0.1:4102/orders/${ID}/print?doc=intake`));
 ok("кривой адрес — нельзя", !allowed("не адрес"));
+ok("наклейки заказа", allowed(`http://127.0.0.1:4102/orders/${ID}/label?items=device&station=1`));
+ok("пробная наклейка", allowed(`http://127.0.0.1:4102/label-test?station=1`));
+ok("наклейки без режима станции — нельзя", !allowed(`http://127.0.0.1:4102/orders/${ID}/label?items=device`));
+ok("размер наклейки 58×40 мм → микроны", JSON.stringify(printing.pageSizeOf({ width: 58, height: 40 })) === JSON.stringify({ width: 58000, height: 40000 }));
+ok("странный размер — не наклейка", printing.pageSizeOf({ width: 5, height: 40 }) === null && printing.pageSizeOf(null) === null);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "print-"));
 const first = printing.deviceId(dir);
@@ -108,6 +113,11 @@ const url = `http://127.0.0.1:4102/orders/${ID}/print?doc=intake&station=1`;
 
   r = await handlers["desktop:print"](fromOther, { url, printer: "HP LaserJet" });
   ok("из чужого окна — отказ", !r.ok, r);
+
+  r = await handlers["desktop:print"](fromMain, { url: `http://127.0.0.1:4102/orders/${ID}/label?items=device&station=1`, printer: "HP LaserJet", copies: 1, page: { width: 58, height: 40 } });
+  const lo = printed.at(-1);
+  ok("наклейка: лист в размер этикетки, без полей", r.ok && lo.pageSize.width === 58000 && lo.pageSize.height === 40000 && lo.margins.marginType === "none", lo);
+  ok("наклейка: окно размером с этикетку", FakeWindow.last.opts.width === 219 && FakeWindow.last.opts.height === 151, FakeWindow.last.opts);
 
   FakeWindow.title = printing.FAILED + "Заказ не найден";
   r = await handlers["desktop:print"](fromMain, { url, printer: "HP LaserJet" });

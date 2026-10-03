@@ -1231,8 +1231,11 @@ model PrintJob {
   tenantId    String
   stationId   String
   printerName String
-  /// intake — квитанция, act — акт работ, test — тестовая страница.
+  /// intake — квитанция, act — акт работ, test — тестовая страница,
+  /// label — наклейки на технику, label-test — пробная наклейка.
   doc         String
+  /// Наклейки: { items: ["device", "Блок питания"] } — на что печатать.
+  options     Json?
   /// Без связи с заказом: стирание заказов не должно спотыкаться о старые задания.
   orderId     String?
   copies      Int            @default(1)

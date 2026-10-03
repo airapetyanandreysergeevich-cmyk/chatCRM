@@ -1,5 +1,6 @@
 import { api, ApiError } from "./api";
 import { BASE } from "./basePath";
+import type { LabelSettings } from "./labels";
 
 /**
  * Печать через CRM.
@@ -12,7 +13,7 @@ import { BASE } from "./basePath";
  * сообщает серверу принтеры этого компьютера и печатает задания.
  */
 
-export type PrintDoc = "intake" | "act" | "test";
+export type PrintDoc = "intake" | "act" | "test" | "label" | "label-test";
 export type IntakeMode = "ask" | "auto" | "off";
 
 export interface PrinterInfo {
@@ -49,6 +50,14 @@ export interface PrintingOverview {
   mine: TargetView | null;
   effective: (TargetView & { source: "mine" | "workshop" }) | null;
   intake: IntakeMode;
+  /** Принтер этикеток: общий, свой и какой сработает; что делать после приёма; настройка наклейки. */
+  labels: {
+    workshop: TargetView | null;
+    mine: TargetView | null;
+    effective: (TargetView & { source: "mine" | "workshop" }) | null;
+    intake: IntakeMode;
+    settings: LabelSettings;
+  };
   canManage: boolean;
   personal: boolean;
 }
@@ -64,10 +73,11 @@ export interface PrintJob {
 
 export const printingApi = {
   overview: () => api.get<PrintingOverview>("/printing"),
-  setWorkshop: (documents: Target | null) => api.put<{ ok: true }>("/printing/workshop", { documents }),
-  setMine: (body: { documents?: Target | null; intake?: IntakeMode }) => api.put<{ ok: true }>("/printing/mine", body),
+  setWorkshop: (body: { documents?: Target | null; labels?: Target | null }) => api.put<{ ok: true }>("/printing/workshop", body),
+  setMine: (body: { documents?: Target | null; intake?: IntakeMode; labels?: Target | null; labelsIntake?: IntakeMode }) =>
+    api.put<{ ok: true }>("/printing/mine", body),
   removeStation: (id: string) => api.del(`/printing/stations/${id}`),
-  send: (body: { doc: PrintDoc; orderId?: string; stationId?: string; printer?: string; copies?: number }) =>
+  send: (body: { doc: PrintDoc; orderId?: string; stationId?: string; printer?: string; copies?: number; items?: string[] }) =>
     api.post<PrintJob>("/printing/jobs", body),
   job: (id: string) => api.get<PrintJob>(`/printing/jobs/${id}`),
 };
@@ -111,7 +121,11 @@ export const targetLabel = (t: TargetView) => `${t.printerLabel}${t.stationName 
 export interface PrintBridge {
   info: () => Promise<{ ok: boolean; deviceId?: string; name?: string }>;
   printers: () => Promise<{ ok: boolean; printers?: PrinterInfo[] }>;
-  print: (job: { url: string; printer: string; copies: number }) => Promise<{ ok: boolean; error?: string }>;
+  /** page — размер наклейки, мм; без него лист A4. */
+  print: (job: { url: string; printer: string; copies: number; page?: { width: number; height: number } | null }) => Promise<{
+    ok: boolean;
+    error?: string;
+  }>;
 }
 
 export const printBridge = (): PrintBridge | null =>
@@ -123,13 +137,30 @@ export const STATION_FAILED = "FINECRM-PRINT-ERROR:";
 export const isStationPage = () => new URLSearchParams(window.location.search).get("station") === "1";
 
 /** Адрес бланка для станции — на этом же сервере, с приставкой /b/<код>/, если она есть. */
-export function stationUrl(job: { doc: string; orderId: string | null; printer: string }, stationName: string): string {
+export function stationUrl(
+  job: { doc: string; orderId: string | null; printer: string; items?: string[] | null },
+  stationName: string
+): string {
   const path =
-    job.doc === "test" || !job.orderId
-      ? `print-test?station=1&printer=${encodeURIComponent(job.printer)}&pc=${encodeURIComponent(stationName)}`
-      : `orders/${job.orderId}/print?doc=${job.doc === "act" ? "act" : "intake"}&station=1`;
+    job.doc === "label-test"
+      ? "label-test?station=1"
+      : job.doc === "label" && job.orderId
+        ? `orders/${job.orderId}/label?${(job.items ?? []).map((i) => `i=${encodeURIComponent(i)}`).join("&")}&station=1`
+        : job.doc === "test" || !job.orderId
+          ? `print-test?station=1&printer=${encodeURIComponent(job.printer)}&pc=${encodeURIComponent(stationName)}`
+          : `orders/${job.orderId}/print?doc=${job.doc === "act" ? "act" : "intake"}&station=1`;
   return new URL(BASE + path, window.location.origin).toString();
 }
+
+type StationJob = {
+  id: string;
+  doc: string;
+  orderId: string | null;
+  printer: string;
+  copies: number;
+  items?: string[] | null;
+  page?: { width: number; height: number } | null;
+};
 
 /**
  * Запустить станцию в окне программы. Возвращает «остановить».
@@ -165,14 +196,17 @@ export function startPrintStation(bridge: PrintBridge): () => void {
       if (stopped) break;
       try {
         if (!stationId || Date.now() - lastBeat > 60_000) await beat();
-        const r = await api.get<{ job: { id: string; doc: string; orderId: string | null; printer: string; copies: number } | null }>(
-          `/printing/stations/${stationId}/next?wait=25`
-        );
+        const r = await api.get<{ job: StationJob | null }>(`/printing/stations/${stationId}/next?wait=25`);
         pause = 0;
         if (!r.job || stopped) continue;
+        const job = r.job;
         const done = await bridge
-          .print({ url: stationUrl(r.job, stationName), printer: r.job.printer, copies: r.job.copies })
+          .print({ url: stationUrl(job, stationName), printer: job.printer, copies: job.copies, page: job.page ?? null })
           .catch((err: unknown) => ({ ok: false, error: String((err as Error)?.message ?? err) }));
+        // Программа до 0.1.38 не знает наклеек и отвечает «адрес печатать нельзя».
+        if (!done.ok && job.doc.startsWith("label") && /печатать нельзя/.test(done.error ?? "")) {
+          done.error = `Программа FineCRM на компьютере «${stationName}» старая и не умеет печатать наклейки — обновите её`;
+        }
         await api
           .post(`/printing/jobs/${r.job.id}/result`, done.ok ? { ok: true } : { ok: false, error: (done.error ?? "").slice(0, 500) })
           .catch(() => undefined);

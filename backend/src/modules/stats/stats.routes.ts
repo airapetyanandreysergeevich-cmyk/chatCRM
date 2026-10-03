@@ -6,6 +6,7 @@ import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import * as S from "./stats.sql";
+import { WITHDRAW } from "../finance/finance.routes";
 import { autoGran, bucketKeys, shiftYear, type Gran } from "./dates";
 
 /**
@@ -355,6 +356,108 @@ statsRouter.get(
           works: withMoney ? series(keys, worksMap, (v) => round(v)) : null,
         },
         kinds,
+      };
+    });
+    res.json(data);
+  })
+);
+
+// ---------------------------------------------------------------- деньги
+
+const PAY_KINDS = ["CASH", "ACQUIRING", "BANK"] as const;
+
+statsRouter.get(
+  "/money",
+  ah(async (req, res) => {
+    if (!money(req)) throw forbidden("Деньги в статистике видны тем, у кого есть доступ к кассе");
+    const { r, gran } = parseRange(req);
+    const prev = shiftYear(r);
+    const keys = bucketKeys(r, gran);
+    const data = await run(req, async (c) => {
+      const [flow, flowAll, flowPrev, pay, cats, kinds, wp, iss, issPrev, first] = await Promise.all([
+        S.cashFlow(c, r, gran, WITHDRAW),
+        S.cashFlow(c, r, "all", WITHDRAW),
+        S.cashFlow(c, prev, "all", WITHDRAW),
+        S.payKinds(c, r, gran, WITHDRAW),
+        S.expenseByCategory(c, r, WITHDRAW, 10),
+        S.checkByKind(c, r, 8),
+        S.worksParts(c, r),
+        S.issued(c, r, "all"),
+        S.issued(c, prev, "all"),
+        S.firstDay(c),
+      ]);
+      const hasPrev = !!first && first <= prev.from;
+      const tot = flowAll.get("all") ?? { inc: 0, out: 0, withdrawn: 0 };
+      const was = flowPrev.get("all") ?? { inc: 0, out: 0, withdrawn: 0 };
+      const payOf = (kind: string) => keys.map((k) => round(pay.filter((p) => p.b === k && p.kind === kind).reduce((a, p) => a + p.v, 0)));
+      const payTotal = (kind: string) => round(pay.filter((p) => p.kind === kind).reduce((a, p) => a + p.v, 0));
+      return {
+        range: r, gran, keys,
+        prev: hasPrev ? prev : null,
+        tiles: {
+          cur: { income: round(tot.inc), expense: round(tot.out), left: round(tot.inc - tot.out), check: round(iss.get("all")?.check ?? 0) },
+          prev: hasPrev
+            ? { income: round(was.inc), expense: round(was.out), left: round(was.inc - was.out), check: round(issPrev.get("all")?.check ?? 0) }
+            : null,
+          withdrawn: round(tot.withdrawn),
+        },
+        series: {
+          income: series(keys, flow, (v) => round(v.inc)),
+          expense: series(keys, flow, (v) => round(v.out)),
+        },
+        pay: {
+          kinds: PAY_KINDS.map((k) => ({ kind: k, total: payTotal(k), values: payOf(k) })),
+        },
+        expenses: cats.map((x) => ({ label: x.label, v: round(x.v) })),
+        checkByKind: kinds.map((x) => ({ label: x.label, n: x.n, avg: round(x.avg) })),
+        worksParts: {
+          works: round(wp.works),
+          parts: round(wp.parts),
+          margin: wp.partsSale > 0 ? { sale: round(wp.partsSale), cost: round(wp.partsCost) } : null,
+        },
+      };
+    });
+    res.json(data);
+  })
+);
+
+// ---------------------------------------------------------------- клиенты
+
+statsRouter.get(
+  "/clients",
+  ah(async (req, res) => {
+    if (!full(req)) throw forbidden("Статистика мастерской доступна по праву «Статистика»");
+    const { r, gran } = parseRange(req);
+    const withMoney = money(req);
+    const prev = shiftYear(r);
+    const keys = bucketKeys(r, gran);
+    const data = await run(req, async (c) => {
+      const [byB, all, allPrev, top, types, src, first] = await Promise.all([
+        S.newVsReturning(c, r, gran),
+        S.newVsReturning(c, r, "all"),
+        S.newVsReturning(c, prev, "all"),
+        S.topClients(c, r, withMoney, 10),
+        S.customerTypes(c, r),
+        S.sources(c, r, 8),
+        S.firstDay(c),
+      ]);
+      const hasPrev = !!first && first <= prev.from;
+      const tilesOf = (v: { fresh: number; back: number; people: number; newPeople: number } | undefined) => {
+        const x = v ?? { fresh: 0, back: 0, people: 0, newPeople: 0 };
+        return { people: x.people, newPeople: x.newPeople, returningShare: ratio(x.back, x.fresh + x.back) };
+      };
+      return {
+        range: r, gran, keys, money: withMoney,
+        prev: hasPrev ? prev : null,
+        tiles: { cur: tilesOf(all.get("all")), prev: hasPrev ? tilesOf(allPrev.get("all")) : null },
+        series: {
+          fresh: series(keys, byB, (v) => v.fresh),
+          back: series(keys, byB, (v) => v.back),
+        },
+        top,
+        types,
+        // Источник заполняют не все: если у всех пусто, показывать нечего.
+        sources: src.some((x) => x.label !== "Не указано") ? src : [],
       };
     });
     res.json(data);

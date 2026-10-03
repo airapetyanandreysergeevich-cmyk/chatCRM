@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { onUnreadChanged } from "../lib/unread";
 import { printBridge, startPrintStation } from "../lib/printing";
+import { labelsApi } from "../lib/labels";
+import { useBarcodeScanner } from "../lib/scanner";
 import { BrandMark, BrandRow } from "./Brand";
 import { DemoBanner } from "./DemoBanner";
 import { InstallAppBanner } from "./InstallApp";
@@ -52,6 +54,18 @@ export default function Layout() {
   const [feedback, setFeedback] = useState(0);
   const [unread, setUnread] = useState(0);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Скан наклейки откуда угодно в программе — сразу карточка заказа.
+  useBarcodeScanner((code) => {
+    if (me?.kind !== "tenant") return;
+    labelsApi
+      .byCode(code)
+      .then((r) =>
+        r.orders.length === 1 ? navigate(`/orders/${r.orders[0].id}`) : navigate(`/orders?search=${encodeURIComponent(code)}`)
+      )
+      .catch(() => navigate(`/orders?search=${encodeURIComponent(code)}`));
+  });
 
   /**
    * Свёрнутое меню — это выбор рабочего места, а не настройка учётной записи:

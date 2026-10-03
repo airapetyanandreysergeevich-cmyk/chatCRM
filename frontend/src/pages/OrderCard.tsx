@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { copyable } from "../components/CopyMenu";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PrintDialog } from "../components/PrintDialog";
+import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
 import type { ReadyHint } from "../lib/sms";
 import { printingApi } from "../lib/printing";
@@ -374,6 +375,9 @@ export default function OrderCard() {
 
   // Печать бланка: окно «на принтер / открыть для печати».
   const [printing, setPrinting] = useState<{ doc: "intake" | "act"; afterIntake?: boolean; auto?: boolean } | null>(null);
+  // Наклейки: окно сейчас и окно «после квитанции» — после приёма они идут друг за другом.
+  const [labelling, setLabelling] = useState<{ afterIntake?: boolean; auto?: boolean } | null>(null);
+  const labelsNext = useRef<{ afterIntake: boolean; auto: boolean } | null>(null);
 
   // Только что приняли — предложить квитанцию (или сразу напечатать, как
   // настроил сотрудник в «Периферии»). Метка в истории браузера снимается,
@@ -386,7 +390,12 @@ export default function OrderCard() {
     printingApi
       .overview()
       .then((p) => {
-        if (p.intake === "off") return;
+        const labels = p.labels?.intake && p.labels.intake !== "off" ? { afterIntake: true, auto: p.labels.intake === "auto" } : null;
+        if (p.intake === "off") {
+          if (labels) setLabelling(labels);
+          return;
+        }
+        labelsNext.current = labels;
         setPrinting({ doc: "intake", afterIntake: true, auto: p.intake === "auto" });
       })
       .catch(() => setPrinting({ doc: "intake", afterIntake: true }));
@@ -493,6 +502,9 @@ export default function OrderCard() {
               после приёма, акт — при выдаче, оба раза отсюда. */}
           <Button variant="secondary" onClick={() => setPrinting({ doc: "intake" })}>
             Квитанция
+          </Button>
+          <Button variant="secondary" onClick={() => setLabelling({})}>
+            Наклейки
           </Button>
           {order.completedAt && (
             <Button variant="secondary" onClick={() => setPrinting({ doc: "act" })}>
@@ -1058,8 +1070,17 @@ export default function OrderCard() {
           doc={printing.doc}
           afterIntake={printing.afterIntake}
           auto={printing.auto}
-          onClose={() => setPrinting(null)}
+          onClose={() => {
+            setPrinting(null);
+            const next = labelsNext.current;
+            labelsNext.current = null;
+            if (next) setLabelling(next);
+          }}
         />
+      )}
+
+      {labelling && (
+        <LabelDialog order={order} afterIntake={labelling.afterIntake} auto={labelling.auto} onClose={() => setLabelling(null)} />
       )}
 
       {viewing !== null && photos.length > 0 && (

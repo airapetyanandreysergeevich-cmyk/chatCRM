@@ -134,6 +134,45 @@ export interface DrillItem {
   total: number | null;
 }
 
+export interface MoneyTiles {
+  income: number;
+  expense: number;
+  left: number;
+  check: number;
+}
+
+export interface MoneyStats {
+  range: Range;
+  gran: Gran;
+  keys: string[];
+  prev: Range | null;
+  tiles: { cur: MoneyTiles; prev: MoneyTiles | null; withdrawn: number };
+  series: { income: number[]; expense: number[] };
+  pay: { kinds: Array<{ kind: "CASH" | "ACQUIRING" | "BANK"; total: number; values: number[] }> };
+  expenses: Array<{ label: string; v: number }>;
+  checkByKind: Array<{ label: string; n: number; avg: number }>;
+  worksParts: { works: number; parts: number; margin: { sale: number; cost: number } | null };
+}
+
+export interface ClientTiles {
+  people: number;
+  newPeople: number;
+  returningShare: number | null;
+}
+
+export interface ClientsStats {
+  range: Range;
+  gran: Gran;
+  keys: string[];
+  money: boolean;
+  prev: Range | null;
+  tiles: { cur: ClientTiles; prev: ClientTiles | null };
+  series: { fresh: number[]; back: number[] };
+  top: Array<{ id: string; name: string; company: boolean; number: number; orders: number; sum: number | null }>;
+  types: { people: { person: number; company: number }; orders: { person: number; company: number } };
+  sources: Labeled[];
+}
+
 const qs = (r: Range, extra: Record<string, string | undefined> = {}) => {
   const p = new URLSearchParams({ from: r.from, to: r.to });
   for (const [k, v] of Object.entries(extra)) if (v) p.set(k, v);
@@ -146,6 +185,8 @@ export const statsApi = {
   orders: (r: Range, gran?: Gran) => api.get<OrdersStats>(`/stats/orders${qs(r, { gran })}`),
   masters: (r: Range) => api.get<MastersStats>(`/stats/masters${qs(r)}`),
   master: (id: string, r: Range) => api.get<MasterCard>(`/stats/masters/${id}${qs(r)}`),
+  money: (r: Range, gran?: Gran) => api.get<MoneyStats>(`/stats/money${qs(r, { gran })}`),
+  clients: (r: Range, gran?: Gran) => api.get<ClientsStats>(`/stats/clients${qs(r, { gran })}`),
   drill: (r: Range, master?: string) => api.get<{ total: number; items: DrillItem[] }>(`/stats/drill${qs(r, { master })}`),
 };
 

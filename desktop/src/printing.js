@@ -56,7 +56,18 @@ function allowedPrintUrl(raw, pageUrl) {
   }
   if (url.origin !== page.origin) return false;
   if (url.searchParams.get("station") !== "1") return false;
-  return /^(\/b\/[A-Za-z0-9_-]{4,64})?\/(orders\/[0-9a-f-]{36}\/print|print-test)$/.test(url.pathname);
+  return /^(\/b\/[A-Za-z0-9_-]{4,64})?\/(orders\/[0-9a-f-]{36}\/(print|label)|print-test|label-test)$/.test(url.pathname);
+}
+
+/**
+ * Размер листа наклейки, мм → то, что ждёт Chromium (микроны). Лист A4 — когда
+ * размера нет: квитанции и акты. Границы — с запасом вокруг любых этикеток.
+ */
+function pageSizeOf(page) {
+  const w = Number(page && page.width);
+  const h = Number(page && page.height);
+  if (!(w >= 15 && w <= 150 && h >= 15 && h <= 150)) return null;
+  return { width: Math.round(w * 1000), height: Math.round(h * 1000) };
 }
 
 /** Причина отказа Chromium — человеческими словами. */
@@ -91,7 +102,8 @@ function register({ ipcMain, BrowserWindow, getWindow, userDataDir }) {
 
   ipcMain.handle("desktop:print", async (e, job) => {
     if (!fromMain(e)) return { ok: false, error: "Печать — только из окна программы" };
-    const { url, printer, copies } = job || {};
+    const { url, printer, copies, page } = job || {};
+    const label = pageSizeOf(page);
     if (!allowedPrintUrl(url, e.senderFrame.url)) return { ok: false, error: "Этот адрес печатать нельзя" };
     if (typeof printer !== "string" || !printer) return { ok: false, error: "Не указан принтер" };
 
@@ -102,10 +114,11 @@ function register({ ipcMain, BrowserWindow, getWindow, userDataDir }) {
 
     // Невидимое окно в той же сессии: бланк загружает заказ с тем же входом,
     // что и окно программы.
+    // Окно — размером с лист: наклейка 58×40 мм рисуется в своём масштабе.
     const sheet = new BrowserWindow({
       show: false,
-      width: 900,
-      height: 1270,
+      width: label ? Math.max(200, Math.round((label.width / 25400) * 96)) : 900,
+      height: label ? Math.max(150, Math.round((label.height / 25400) * 96)) : 1270,
       webPreferences: {
         session: getWindow().webContents.session,
         contextIsolation: true,
@@ -143,7 +156,9 @@ function register({ ipcMain, BrowserWindow, getWindow, userDataDir }) {
             deviceName: printer,
             copies: Math.min(2, Math.max(1, Number(copies) || 1)),
             printBackground: true,
-            pageSize: "A4",
+            // Наклейка: лист ровно в размер этикетки и без полей — поля
+            // принтера этикеток съели бы половину наклейки.
+            ...(label ? { pageSize: label, margins: { marginType: "none" } } : { pageSize: "A4" }),
           },
           (success, reason) => resolve(success ? { ok: true } : { ok: false, error: failureText(reason) })
         );
@@ -156,4 +171,4 @@ function register({ ipcMain, BrowserWindow, getWindow, userDataDir }) {
   });
 }
 
-module.exports = { register, allowedPrintUrl, deviceId, failureText, READY, FAILED };
+module.exports = { register, allowedPrintUrl, deviceId, failureText, pageSizeOf, READY, FAILED };

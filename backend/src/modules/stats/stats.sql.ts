@@ -351,3 +351,148 @@ export async function firstDay(c: Ctx) {
     WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL`);
   return x?.d ?? null;
 }
+
+// ---------------------------------------------------------------- деньги
+
+/**
+ * Приход и расход кассы — как в разделе «Касса»: все движения, кроме
+ * «Выемки». Выемка — не расход мастерской, а её же деньги, унесённые в банк
+ * или владельцу; её сторно — приход с той же статьёй, поэтому выемка
+ * считается как расход минус приход по этой статье.
+ */
+export async function cashFlow(c: Ctx, r: Range, gran: Gran | "all", withdraw: string) {
+  const rows = await q<{ b: string; inc: string | null; out: string | null; w: string | null }>(c, Prisma.sql`
+    SELECT ${bucket(c, 't."createdAt"', gran)} AS b,
+           sum(t.amount) FILTER (WHERE t.direction = 'IN' AND k.name IS DISTINCT FROM ${withdraw}) AS inc,
+           sum(t.amount) FILTER (WHERE t.direction = 'OUT' AND k.name IS DISTINCT FROM ${withdraw}) AS out,
+           sum(CASE WHEN t.direction = 'OUT' THEN t.amount ELSE -t.amount END) FILTER (WHERE k.name = ${withdraw}) AS w
+    FROM "Transaction" t LEFT JOIN "TransactionCategory" k ON k.id = t."categoryId"
+    WHERE t."tenantId" = ${c.tenantId} AND t."deletedAt" IS NULL AND ${within(c, 't."createdAt"', r)}
+    GROUP BY 1`);
+  return new Map(rows.map((x) => [x.b, { inc: n(x.inc), out: n(x.out), withdrawn: n(x.w) }]));
+}
+
+/** Как платят: приход по видам касс — наличные, эквайринг, банк. Без выемки. */
+export async function payKinds(c: Ctx, r: Range, gran: Gran | "all", withdraw: string) {
+  const rows = await q<{ b: string; kind: string; v: string | null }>(c, Prisma.sql`
+    SELECT ${bucket(c, 't."createdAt"', gran)} AS b, coalesce(cr.kind, 'CASH') AS kind, sum(t.amount) AS v
+    FROM "Transaction" t
+    JOIN "CashRegister" cr ON cr.id = t."cashRegisterId"
+    LEFT JOIN "TransactionCategory" k ON k.id = t."categoryId"
+    WHERE t."tenantId" = ${c.tenantId} AND t."deletedAt" IS NULL AND t.direction = 'IN'
+      AND k.name IS DISTINCT FROM ${withdraw} AND ${within(c, 't."createdAt"', r)}
+    GROUP BY 1, 2`);
+  return rows.map((x) => ({ b: x.b, kind: x.kind, v: n(x.v) }));
+}
+
+/** На что уходят деньги: расход по статьям, без выемки. */
+export async function expenseByCategory(c: Ctx, r: Range, withdraw: string, limit: number) {
+  const rows = await q<{ label: string | null; v: string | null }>(c, Prisma.sql`
+    SELECT k.name AS label, sum(t.amount) AS v
+    FROM "Transaction" t LEFT JOIN "TransactionCategory" k ON k.id = t."categoryId"
+    WHERE t."tenantId" = ${c.tenantId} AND t."deletedAt" IS NULL AND t.direction = 'OUT'
+      AND k.name IS DISTINCT FROM ${withdraw} AND ${within(c, 't."createdAt"', r)}
+    GROUP BY 1 ORDER BY 2 DESC LIMIT ${limit}`);
+  return rows.map((x) => ({ label: x.label || "Без статьи", v: n(x.v) }));
+}
+
+/** Средний чек по типу техники — выданные за период заказы с суммой. */
+export async function checkByKind(c: Ctx, r: Range, limit: number) {
+  const rows = await q<{ label: string | null; n: bigint; avg: string | null }>(c, Prisma.sql`
+    SELECT mode() WITHIN GROUP (ORDER BY btrim(d.kind)) AS label, count(*) AS n, avg(o.total) AS avg
+    FROM "Order" o LEFT JOIN "Device" d ON d.id = o."deviceId"
+    WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL AND o."issuedAt" IS NOT NULL AND o.total > 0
+      AND ${within(c, 'o."issuedAt"', r)}
+    GROUP BY lower(regexp_replace(btrim(coalesce(d.kind, '')), '\\s+', ' ', 'g'))
+    ORDER BY 2 DESC LIMIT ${limit}`);
+  return rows.map((x) => ({ label: x.label && x.label.trim() ? x.label : "Без типа", n: n(x.n), avg: n(x.avg) }));
+}
+
+/**
+ * Из чего сложились выданные за период заказы: работы и запчасти. Скидки
+ * (процент клиента и разовая) снимаются с работ — запчасти мастерская
+ * не уценивает (см. orders/totals.ts). Наценка — только по запчастям, где
+ * указана закупочная цена.
+ */
+export async function worksParts(c: Ctx, r: Range) {
+  const [x] = await q<{ works: string | null; parts: string | null; sale: string | null; cost: string | null }>(c, Prisma.sql`
+    WITH o AS (
+      SELECT o.id, o.total, o."totalParts" FROM "Order" o
+      WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL AND o."issuedAt" IS NOT NULL AND ${within(c, 'o."issuedAt"', r)}
+    ), p AS (
+      SELECT sum(p.qty * p.price) AS sale, sum(p.qty * p.cost) AS cost
+      FROM "OrderPart" p JOIN o ON o.id = p."orderId"
+      WHERE p."tenantId" = ${c.tenantId} AND p.cost IS NOT NULL AND p.source <> 'CUSTOMER'
+    )
+    SELECT sum(greatest(o.total - o."totalParts", 0)) AS works, sum(least(o."totalParts", o.total)) AS parts,
+           (SELECT sale FROM p) AS sale, (SELECT cost FROM p) AS cost
+    FROM o`);
+  return { works: n(x?.works), parts: n(x?.parts), partsSale: n(x?.sale), partsCost: n(x?.cost) };
+}
+
+// ---------------------------------------------------------------- клиенты
+
+/** Первый заказ клиента — окном по всей истории (как в flags). */
+const FIRSTS = (c: Ctx) => Prisma.sql`
+  SELECT o.id, o."customerId", o."acceptedAt", o."issuedAt", o.total,
+         min(o."acceptedAt") OVER (PARTITION BY o."customerId") AS first
+  FROM "Order" o WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL`;
+
+/** Заказы по корзинам: от новых клиентов (первый заказ) и от постоянных. */
+export async function newVsReturning(c: Ctx, r: Range, gran: Gran | "all") {
+  const rows = await q<{ b: string; fresh: bigint; back: bigint; people: bigint; newPeople: bigint }>(c, Prisma.sql`
+    WITH f AS (${FIRSTS(c)})
+    SELECT ${bucket(c, 'f."acceptedAt"', gran)} AS b,
+           count(*) FILTER (WHERE f."acceptedAt" = f.first) AS fresh,
+           count(*) FILTER (WHERE f."acceptedAt" > f.first) AS back,
+           count(DISTINCT f."customerId") AS people,
+           count(DISTINCT f."customerId") FILTER (WHERE f."acceptedAt" = f.first) AS "newPeople"
+    FROM f WHERE ${within(c, 'f."acceptedAt"', r)}
+    GROUP BY 1`);
+  return new Map(rows.map((x) => [x.b, { fresh: n(x.fresh), back: n(x.back), people: n(x.people), newPeople: n(x.newPeople) }]));
+}
+
+/**
+ * Лучшие клиенты: по сумме выданных за период заказов, а без права на
+ * деньги — по числу принятых.
+ */
+export async function topClients(c: Ctx, r: Range, byMoney: boolean, limit: number) {
+  const rows = await q<{ id: string; name: string; type: string; number: number; orders: bigint; sum: string | null }>(c, byMoney
+    ? Prisma.sql`
+      SELECT cu.id, cu.name, cu.type::text AS type, cu.number, count(*) AS orders, sum(o.total) AS sum
+      FROM "Order" o JOIN "Customer" cu ON cu.id = o."customerId"
+      WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL AND o."issuedAt" IS NOT NULL AND ${within(c, 'o."issuedAt"', r)}
+      GROUP BY cu.id HAVING sum(o.total) > 0 ORDER BY sum(o.total) DESC, count(*) DESC LIMIT ${limit}`
+    : Prisma.sql`
+      SELECT cu.id, cu.name, cu.type::text AS type, cu.number, count(*) AS orders, NULL AS sum
+      FROM "Order" o JOIN "Customer" cu ON cu.id = o."customerId"
+      WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL AND ${within(c, 'o."acceptedAt"', r)}
+      GROUP BY cu.id HAVING count(*) > 1 ORDER BY count(*) DESC, max(o."acceptedAt") DESC LIMIT ${limit}`);
+  return rows.map((x) => ({ id: x.id, name: x.name, company: x.type === "COMPANY", number: x.number, orders: n(x.orders), sum: byMoney ? n(x.sum) : null }));
+}
+
+/** Частные лица и организации среди тех, кто сдавал технику за период. */
+export async function customerTypes(c: Ctx, r: Range) {
+  const rows = await q<{ type: string; people: bigint; orders: bigint }>(c, Prisma.sql`
+    SELECT cu.type::text AS type, count(DISTINCT cu.id) AS people, count(*) AS orders
+    FROM "Order" o JOIN "Customer" cu ON cu.id = o."customerId"
+    WHERE o."tenantId" = ${c.tenantId} AND o."deletedAt" IS NULL AND ${within(c, 'o."acceptedAt"', r)}
+    GROUP BY 1`);
+  const of = (t: string) => rows.find((x) => x.type === t);
+  return {
+    people: { person: n(of("INDIVIDUAL")?.people), company: n(of("COMPANY")?.people) },
+    orders: { person: n(of("INDIVIDUAL")?.orders), company: n(of("COMPANY")?.orders) },
+  };
+}
+
+/** Откуда пришли новые клиенты — поле «Источник» карточки, у тех, чей первый заказ в периоде. */
+export async function sources(c: Ctx, r: Range, limit: number) {
+  const rows = await q<{ label: string | null; n: bigint }>(c, Prisma.sql`
+    WITH f AS (${FIRSTS(c)})
+    SELECT mode() WITHIN GROUP (ORDER BY btrim(cu.source)) AS label, count(DISTINCT cu.id) AS n
+    FROM f JOIN "Customer" cu ON cu.id = f."customerId"
+    WHERE f."acceptedAt" = f.first AND ${within(c, 'f."acceptedAt"', r)}
+    GROUP BY lower(regexp_replace(btrim(coalesce(cu.source, '')), '\\s+', ' ', 'g'))
+    ORDER BY 2 DESC LIMIT ${limit}`);
+  return rows.map((x) => ({ label: x.label && x.label.trim() ? x.label : "Не указано", n: n(x.n) }));
+}

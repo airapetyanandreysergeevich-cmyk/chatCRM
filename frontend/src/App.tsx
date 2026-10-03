@@ -25,6 +25,7 @@ import RemoteAccess from "./pages/RemoteAccess";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import OrderPrint from "./pages/OrderPrint";
+import OrderLabel from "./pages/OrderLabel";
 import PrintTest from "./pages/PrintTest";
 import PeripheralsPage from "./pages/Peripherals";
 import IntegrationsPage from "./pages/Integrations";
@@ -71,6 +72,8 @@ export default function App() {
             и шапка на квитанции клиенту не нужны. */}
         <Route path="/orders/:id/print" element={<OrderPrint />} />
         <Route path="/print-test" element={<PrintTest />} />
+        <Route path="/orders/:id/label" element={<OrderLabel />} />
+        <Route path="/label-test" element={<OrderLabel test />} />
 
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { debtFields, debtList, debtMap } from "../../lib/debt";
 import { readyHint } from "../sms/sms.routes";
 import { Router, type Request } from "express";
@@ -197,8 +197,14 @@ ordersRouter.get(
 
     // Каждое слово запроса — отдельным условием (lib/search.ts).
     const contactsVisible = seesCustomerContacts(req);
-    const wordWhere = (w: string): Prisma.OrderWhereInput => ({ OR: searchWhere(w, contactsVisible) });
     let words = searchWords(q.search);
+    // Штрихкод с наклейки: сканер «печатает» цифры номера без букв и дефисов
+    // (Р-2026-00123 → 202600123) — такие слова ищем и по цифрам номера.
+    const scanned = words.filter((w) => BARCODE.test(w));
+    const byCode = scanned.length ? await withTenant(tenantOf(req), (tx) => idsByCode(tx, scanned)) : new Map<string, string[]>();
+    const wordWhere = (w: string): Prisma.OrderWhereInput => ({
+      OR: [...searchWhere(w, contactsVisible), ...(byCode.get(w)?.length ? [{ id: { in: byCode.get(w)! } }] : [])],
+    });
     let searchFixed: string | null = null;
     if (words.length && truthy(q.layout)) {
       const fixed = await withTenant(tenantOf(req), (tx) =>
@@ -553,6 +559,52 @@ ordersRouter.post(
 );
 
 // ---------------------------------------------------------------- карточка
+
+/** Цифры номера заказа со штрихкода наклейки. Меньше шести — это не скан, а обычный поиск. */
+const BARCODE = /^\d{6,20}$/;
+
+/** Заказы по цифрам номера: Р-2026-00123 ↔ 202600123. */
+async function idsByCode(tx: Prisma.TransactionClient, codes: string[]) {
+  const rows = await tx.$queryRaw<Array<{ id: string; code: string }>>(Prisma.sql`
+    SELECT id, regexp_replace(number, '\\D', '', 'g') AS code FROM "Order"
+    WHERE "deletedAt" IS NULL AND regexp_replace(number, '\\D', '', 'g') IN (${Prisma.join(codes)})`);
+  const out = new Map<string, string[]>();
+  for (const r of rows) out.set(r.code, [...(out.get(r.code) ?? []), r.id]);
+  return out;
+}
+
+/**
+ * Скан наклейки: цифры номера → заказ. Один — интерфейс сразу открывает его,
+ * несколько (номера, различающиеся только буквами) — показывает список.
+ */
+ordersRouter.get(
+  "/by-code/:code",
+  requirePermission(
+    PERMISSIONS.ORDERS_VIEW_ALL,
+    PERMISSIONS.ORDERS_VIEW_ASSIGNED,
+    PERMISSIONS.ORDERS_VIEW_DELIVERY
+  ),
+  ah(async (req, res) => {
+    const code = z.string().regex(BARCODE, "Штрихкод — цифры номера заказа").parse(req.params.code);
+    const found = await withTenant(tenantOf(req), async (tx) => {
+      const ids = (await idsByCode(tx, [code])).get(code) ?? [];
+      if (!ids.length) return [];
+      const orders = await tx.order.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+        select: { id: true, number: true, assignedMasterId: true },
+      });
+      return orders.filter((o) => {
+        try {
+          assertOrderAccess(req, o);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    });
+    res.json({ orders: found.map((o) => ({ id: o.id, number: o.number })) });
+  })
+);
 
 ordersRouter.get(
   "/:id",

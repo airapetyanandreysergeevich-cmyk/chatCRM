@@ -86,7 +86,12 @@ export default function Orders() {
   // «3 просрочено», и фильтр должен уже стоять, а не сбрасываться.
   const [params, setParams] = useSearchParams();
   const group = params.get("group") ?? "";
-  const [search, setSearch] = useState("");
+  // ?search= — со сканера наклейки (Layout): несколько заказов с такими цифрами или ни одного.
+  const [search, setSearch] = useState(() => params.get("search") ?? "");
+  const urlSearch = params.get("search");
+  useEffect(() => {
+    if (urlSearch !== null) setSearch(urlSearch);
+  }, [urlSearch]);
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
   const [exact, setExact] = useState(false);
   const [searchFixed, setSearchFixed] = useState<string | null>(null);
@@ -206,6 +211,7 @@ export default function Orders() {
                 : "Любые слова: ноутбук xiaomi, номер, клиент, неисправность, запись в истории"
             }
             value={search}
+            data-scan="1"
             onChange={(e) => {
               setSearch(e.target.value);
               setExact(false);

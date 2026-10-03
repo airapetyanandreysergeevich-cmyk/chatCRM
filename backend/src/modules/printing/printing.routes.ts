@@ -7,6 +7,7 @@ import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { assertOrderAccess } from "../orders/orders.service";
+import { labelPage, labelSettingsSchema, readLabels } from "./labels";
 
 /**
  * Печать через CRM.
@@ -55,7 +56,15 @@ type IntakeMode = (typeof INTAKE_MODES)[number];
 interface PrintPrefs {
   documents?: Target | null;
   intake?: IntakeMode;
+  /** Свой принтер этикеток. */
+  labels?: Target | null;
+  /** Наклейки после приёма: спрашивать, печатать сразу или не предлагать. */
+  labelsIntake?: IntakeMode;
 }
+
+/** Бланки A4 и наклейки печатаются на разные принтеры. */
+type Kind = "documents" | "labels";
+const kindOf = (doc: string): Kind => (doc === "label" || doc === "label-test" ? "labels" : "documents");
 
 const readTarget = (v: unknown): Target | null => {
   const r = target.safeParse(v);
@@ -63,15 +72,18 @@ const readTarget = (v: unknown): Target | null => {
 };
 const readPrefs = (v: unknown): PrintPrefs => {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const mode = (v: unknown): IntakeMode => (INTAKE_MODES.includes(v as IntakeMode) ? (v as IntakeMode) : "ask");
   return {
     documents: readTarget(o.documents),
-    intake: INTAKE_MODES.includes(o.intake as IntakeMode) ? (o.intake as IntakeMode) : "ask",
+    intake: mode(o.intake),
+    labels: readTarget(o.labels),
+    labelsIntake: mode(o.labelsIntake),
   };
 };
-const workshopTarget = (settings: unknown): Target | null => {
+const workshopTarget = (settings: unknown, kind: Kind = "documents"): Target | null => {
   const s = (settings && typeof settings === "object" ? settings : {}) as Record<string, unknown>;
   const p = (s.printing && typeof s.printing === "object" ? s.printing : {}) as Record<string, unknown>;
-  return readTarget(p.documents);
+  return readTarget(p[kind]);
 };
 
 interface PrinterInfo {
@@ -140,6 +152,8 @@ printingRouter.get(
       const prefs = readPrefs(user?.printPrefs);
       const workshop = view(workshopTarget(tenant?.settings), stations);
       const mine = view(prefs.documents ?? null, stations);
+      const labelsWorkshop = view(workshopTarget(tenant?.settings, "labels"), stations);
+      const labelsMine = view(prefs.labels ?? null, stations);
       const now = Date.now();
       return {
         stations: list.map((s) => ({
@@ -153,6 +167,17 @@ printingRouter.get(
         mine,
         effective: mine ? { ...mine, source: "mine" as const } : workshop ? { ...workshop, source: "workshop" as const } : null,
         intake: prefs.intake ?? "ask",
+        labels: {
+          workshop: labelsWorkshop,
+          mine: labelsMine,
+          effective: labelsMine
+            ? { ...labelsMine, source: "mine" as const }
+            : labelsWorkshop
+              ? { ...labelsWorkshop, source: "workshop" as const }
+              : null,
+          intake: prefs.labelsIntake ?? "ask",
+          settings: readLabels(tenant?.settings),
+        },
         canManage: has(req, PERMISSIONS.SETTINGS_MANAGE),
         personal: !!me,
       };
@@ -172,16 +197,20 @@ printingRouter.put(
   "/workshop",
   ah(async (req, res) => {
     if (!has(req, PERMISSIONS.SETTINGS_MANAGE)) throw forbidden("Общий принтер назначает администратор мастерской");
-    const body = z.object({ documents: target.nullable() }).parse(req.body);
+    const body = z.object({ documents: target.nullable().optional(), labels: target.nullable().optional() }).parse(req.body);
     const tenantId = tenantOf(req);
     await withTenant(tenantId, async (tx) => {
-      await assertStation(tx, body.documents);
+      if (body.documents) await assertStation(tx, body.documents);
+      if (body.labels) await assertStation(tx, body.labels);
       const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
       const settings = (tenant?.settings && typeof tenant.settings === "object" ? tenant.settings : {}) as Record<string, unknown>;
       const printing = (settings.printing && typeof settings.printing === "object" ? settings.printing : {}) as Record<string, unknown>;
+      const next = { ...printing };
+      if (body.documents !== undefined) next.documents = body.documents;
+      if (body.labels !== undefined) next.labels = body.labels;
       await tx.tenant.update({
         where: { id: tenantId },
-        data: { settings: { ...settings, printing: { ...printing, documents: body.documents } } as Prisma.InputJsonObject },
+        data: { settings: { ...settings, printing: next } as Prisma.InputJsonObject },
       });
     });
     res.json({ ok: true });
@@ -194,17 +223,63 @@ printingRouter.put(
     const me = actorUserId(req);
     if (!me) throw badRequest("Своя настройка — у сотрудника мастерской");
     const body = z
-      .object({ documents: target.nullable().optional(), intake: z.enum(INTAKE_MODES).optional() })
+      .object({
+        documents: target.nullable().optional(),
+        intake: z.enum(INTAKE_MODES).optional(),
+        labels: target.nullable().optional(),
+        labelsIntake: z.enum(INTAKE_MODES).optional(),
+      })
       .parse(req.body);
     await withTenant(tenantOf(req), async (tx) => {
       if (body.documents) await assertStation(tx, body.documents);
+      if (body.labels) await assertStation(tx, body.labels);
       const user = await tx.user.findFirst({ where: { id: me }, select: { printPrefs: true } });
       const prefs = readPrefs(user?.printPrefs);
       const next: PrintPrefs = {
         documents: body.documents === undefined ? (prefs.documents ?? null) : body.documents,
         intake: body.intake ?? prefs.intake ?? "ask",
+        labels: body.labels === undefined ? (prefs.labels ?? null) : body.labels,
+        labelsIntake: body.labelsIntake ?? prefs.labelsIntake ?? "ask",
       };
       await tx.user.update({ where: { id: me }, data: { printPrefs: next as unknown as Prisma.InputJsonObject } });
+    });
+    res.json({ ok: true });
+  })
+);
+
+// ------------------------------------------------------------ наклейки
+
+/** Что печатать на наклейке. Читают все: по ней рисуется сама наклейка. */
+printingRouter.get(
+  "/labels",
+  ah(async (req, res) => {
+    const tenantId = tenantOf(req);
+    const tenant = await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } }));
+    res.json(readLabels(tenant?.settings));
+  })
+);
+
+printingRouter.put(
+  "/labels",
+  ah(async (req, res) => {
+    if (!has(req, PERMISSIONS.SETTINGS_MANAGE)) throw forbidden("Наклейку настраивает администратор мастерской");
+    const body = labelSettingsSchema.parse(req.body);
+    // Одинаковые пункты разным регистром — один пункт.
+    const seen = new Set<string>();
+    const perItem = body.perItem.filter((x) => {
+      const k = x.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const settings = (tenant?.settings && typeof tenant.settings === "object" ? tenant.settings : {}) as Record<string, unknown>;
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { settings: { ...settings, labels: { ...body, perItem } } as Prisma.InputJsonObject },
+      });
     });
     res.json({ ok: true });
   })
@@ -226,15 +301,20 @@ printingRouter.post(
   ah(async (req, res) => {
     const body = z
       .object({
-        doc: z.enum(["intake", "act", "test"]),
+        doc: z.enum(["intake", "act", "test", "label", "label-test"]),
         orderId: z.string().uuid().optional(),
         stationId: z.string().uuid().optional(),
         printer: z.string().trim().min(1).max(200).optional(),
         copies: z.number().int().min(1).max(2).optional(),
+        /** Наклейки: на что печатать — «device» (сама техника) и пункты комплектности. */
+        items: z.array(z.string().trim().min(1).max(80)).min(1).max(40).optional(),
       })
       .parse(req.body);
-    if (body.doc !== "test" && !body.orderId) throw badRequest("Не указан заказ");
-    if (body.doc === "test" && !(body.stationId && body.printer)) throw badRequest("Не указан принтер");
+    const isTest = body.doc === "test" || body.doc === "label-test";
+    const kind = kindOf(body.doc);
+    if (!isTest && !body.orderId) throw badRequest("Не указан заказ");
+    if (isTest && !(body.stationId && body.printer)) throw badRequest("Не указан принтер");
+    if (body.doc === "label" && !body.items?.length) throw badRequest("Не выбрано, на что печатать наклейки");
 
     const tenantId = tenantOf(req);
     const me = actorUserId(req);
@@ -257,10 +337,17 @@ printingRouter.post(
           me ? tx.user.findFirst({ where: { id: me }, select: { printPrefs: true } }) : null,
           tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } }),
         ]);
-        t = readPrefs(user?.printPrefs).documents ?? workshopTarget(tenant?.settings);
+        const prefs = readPrefs(user?.printPrefs);
+        t = (kind === "labels" ? prefs.labels : prefs.documents) ?? workshopTarget(tenant?.settings, kind);
       }
       if (!t) {
-        throw new AppError(409, "Принтер не назначен. Его выбирают в «Настройки → Периферия»", "no-printer");
+        throw new AppError(
+          409,
+          kind === "labels"
+            ? "Принтер этикеток не назначен. Его выбирают в «Настройки → Периферия»"
+            : "Принтер не назначен. Его выбирают в «Настройки → Периферия»",
+          "no-printer"
+        );
       }
 
       const station = await tx.printStation.findFirst({ where: { id: t.stationId } });
@@ -280,7 +367,9 @@ printingRouter.post(
           printerName: t.printer,
           doc: body.doc,
           orderId: body.orderId ?? null,
-          copies: body.doc === "test" ? 1 : (body.copies ?? t.copies ?? 1),
+          // У наклеек копии — это листы: по одной на каждую вещь.
+          copies: isTest || kind === "labels" ? 1 : (body.copies ?? t.copies ?? 1),
+          options: body.doc === "label" ? { items: body.items } : undefined,
           createdById: me,
         },
       });
@@ -373,8 +462,23 @@ printingRouter.get(
         return claimed.count === 1 ? next : null;
       });
       if (job) {
+        // Наклейке программа задаёт размер листа сама: у принтера этикеток
+        // в Windows часто стоит рулон другого размера, чем в настройке FineCRM.
+        const page =
+          kindOf(job.doc) === "labels"
+            ? labelPage(readLabels((await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } })))?.settings))
+            : null;
+        const opts = (job.options && typeof job.options === "object" ? job.options : {}) as { items?: unknown };
         return res.json({
-          job: { id: job.id, doc: job.doc, orderId: job.orderId, printer: job.printerName, copies: job.copies },
+          job: {
+            id: job.id,
+            doc: job.doc,
+            orderId: job.orderId,
+            printer: job.printerName,
+            copies: job.copies,
+            items: Array.isArray(opts.items) ? opts.items.filter((x): x is string => typeof x === "string") : null,
+            page,
+          },
         });
       }
       if (gone || Date.now() >= deadline) return res.json({ job: null });

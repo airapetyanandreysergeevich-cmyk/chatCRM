@@ -17,7 +17,10 @@ export function PrinterPicker({
   onSave,
   onReload,
   onClose,
+  labels = false,
 }: {
+  /** Принтер этикеток: без копий, проба — наклейкой, а не листом A4. */
+  labels?: boolean;
   title: string;
   stations: Station[];
   current: Target | null;
@@ -43,7 +46,7 @@ export function PrinterPicker({
     setError(null);
     setTest(null);
     try {
-      const job = await printAndWait({ doc: "test", stationId: pick.stationId, printer: pick.printer }, setTest);
+      const job = await printAndWait({ doc: labels ? "label-test" : "test", stationId: pick.stationId, printer: pick.printer }, setTest);
       setTest(job);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось отправить тестовую страницу");
@@ -130,7 +133,7 @@ export function PrinterPicker({
           </div>
         )}
 
-        {pick && (
+        {pick && !labels && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-semibold text-ink-soft">Копий:</span>
             {[1, 2].map((n) => (
@@ -153,7 +156,9 @@ export function PrinterPicker({
         {test && (
           <Banner tone={test.status === "FAILED" ? "error" : "info"}>
             {test.status === "DONE"
-              ? "Тестовая страница напечатана. Если лист вышел — назначайте."
+              ? labels
+                ? "Пробная наклейка напечатана. Если она вышла ровно — назначайте."
+                : "Тестовая страница напечатана. Если лист вышел — назначайте."
               : test.status === "FAILED"
                 ? `Не напечатано: ${test.error ?? "причина неизвестна"}`
                 : test.status === "SENT"
@@ -183,7 +188,7 @@ export function PrinterPicker({
             onClick={() => void runTest()}
             className="sm:flex-1"
           >
-            {testing ? "Печатаем…" : "Тестовая страница"}
+            {testing ? "Печатаем…" : labels ? "Пробная наклейка" : "Тестовая страница"}
           </Button>
         </div>
       </div>

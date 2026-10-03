@@ -1,7 +1,10 @@
 import { Panel } from "../components/Panel";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { LabelDesigner } from "../components/LabelDesigner";
 import { PrinterPicker } from "../components/PrinterPicker";
+import { useAuth } from "../lib/auth";
+import { ordersApi } from "../lib/orders";
 import { Banner, Button, PageHeader, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
@@ -29,6 +32,48 @@ const INTAKE: Array<{ id: IntakeMode; label: string; hint: string }> = [
   { id: "off", label: "Не предлагать", hint: "печать только кнопкой «Квитанция» в заказе" },
 ];
 
+const LABELS_INTAKE: Array<{ id: IntakeMode; label: string; hint: string }> = [
+  { id: "ask", label: "Спрашивать", hint: "после квитанции — окно с наклейками и выбором вещей" },
+  { id: "auto", label: "Печатать сразу", hint: "наклейки на всё, что положено, уходят на принтер этикеток сами" },
+  { id: "off", label: "Не предлагать", hint: "наклейки только кнопкой «Наклейки» в заказе" },
+];
+
+type Picking = "workshop" | "mine" | "labelsWorkshop" | "labelsMine";
+const PICK_TITLE: Record<Picking, string> = {
+  workshop: "Принтер для документов",
+  mine: "Мой принтер",
+  labelsWorkshop: "Принтер этикеток",
+  labelsMine: "Мой принтер этикеток",
+};
+const PICK_DONE: Record<Picking, string> = {
+  workshop: "Принтер мастерской назначен",
+  mine: "Свой принтер выбран",
+  labelsWorkshop: "Принтер этикеток назначен",
+  labelsMine: "Свой принтер этикеток выбран",
+};
+
+function ModePicker({ items, value, onPick }: { items: typeof INTAKE; value: IntakeMode; onPick: (m: IntakeMode) => void }) {
+  return (
+    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+      {items.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          aria-pressed={value === m.id}
+          onClick={() => onPick(m.id)}
+          className={
+            "rounded-card border px-4 py-3 text-left transition-colors duration-150 " +
+            (value === m.id ? "border-brand bg-brand-tint" : "border-line bg-surface-raised hover:border-line-strong")
+          }
+        >
+          <span className={"block text-[14px] font-semibold " + (value === m.id ? "text-brand-ink" : "")}>{m.label}</span>
+          <span className="mt-0.5 block text-[12.5px] text-ink-dim">{m.hint}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Row({ title, hint, children, actions }: { title: string; hint: string; children: ReactNode; actions?: ReactNode }) {
   return (
     <div className="flex flex-col gap-3 border-t border-line py-4 first:border-t-0 first:pt-0 last:pb-0 sm:flex-row sm:items-center">
@@ -42,14 +87,14 @@ function Row({ title, hint, children, actions }: { title: string; hint: string; 
   );
 }
 
-function Assigned({ t, empty }: { t: TargetView | null; empty: string }) {
+function Assigned({ t, empty, single = false }: { t: TargetView | null; empty: string; single?: boolean }) {
   if (!t) return <span className="text-[14px] text-ink-muted">{empty}</span>;
   return (
     <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[14px]">
       <span className={"h-2 w-2 shrink-0 rounded-full " + (t.online ? "bg-state-done" : "bg-ink-dim")} />
       <span className="font-semibold">{targetLabel(t)}</span>
       <span className="text-ink-dim">
-        {t.copies === 2 ? "2 копии" : "1 копия"}
+        {single ? "" : t.copies === 2 ? "2 копии" : "1 копия"}
         {t.stationGone
           ? " · компьютер убран — назначьте заново"
           : t.printerGone
@@ -66,7 +111,10 @@ export default function PeripheralsPage() {
   const [data, setData] = useState<PrintingOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [picking, setPicking] = useState<"workshop" | "mine" | null>(null);
+  const [picking, setPicking] = useState<Picking | null>(null);
+  const [completeness, setCompleteness] = useState<string[]>([]);
+  const { me } = useAuth();
+  const workshopName = me?.kind === "tenant" ? (me.tenant?.name ?? "") : "";
   const here = !!printBridge();
   const [thisPc, setThisPc] = useState<string | null>(null);
 
@@ -84,6 +132,14 @@ export default function PeripheralsPage() {
     const t = setInterval(() => void load(), 20_000);
     return () => clearInterval(t);
   }, [load]);
+
+  // Пункты комплектности мастерской — из них выбирают, на что своя наклейка.
+  useEffect(() => {
+    ordersApi
+      .reference()
+      .then((r) => setCompleteness(r.completeness.map((c) => c.label)))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     void printBridge()
@@ -107,13 +163,18 @@ export default function PeripheralsPage() {
   if (!data) return error ? <Banner tone="error">{error}</Banner> : <Spinner label="Ищем принтеры" />;
 
   const saveTarget = async (t: Target) => {
-    if (picking === "workshop") await printingApi.setWorkshop(t);
+    if (!picking) return;
+    if (picking === "workshop") await printingApi.setWorkshop({ documents: t });
+    else if (picking === "labelsWorkshop") await printingApi.setWorkshop({ labels: t });
+    else if (picking === "labelsMine") await printingApi.setMine({ labels: t });
     else await printingApi.setMine({ documents: t });
+    const done = PICK_DONE[picking];
     setPicking(null);
     await load();
-    setNotice(picking === "workshop" ? "Принтер мастерской назначен" : "Свой принтер выбран");
+    setNotice(done);
     setTimeout(() => setNotice(null), 4000);
   };
+  const L = data.labels;
 
   return (
     <div className="space-y-5">
@@ -158,7 +219,7 @@ export default function PeripheralsPage() {
                     <Button
                       type="button"
                       variant="ghost"
-                      onClick={() => void act(() => printingApi.setWorkshop(null), "Принтер мастерской снят")}
+                      onClick={() => void act(() => printingApi.setWorkshop({ documents: null }), "Принтер мастерской снят")}
                     >
                       Снять
                     </Button>
@@ -195,34 +256,81 @@ export default function PeripheralsPage() {
             </Row>
           )}
 
-          <Row title="Принтер этикеток" hint="Наклейки на технику со штрихкодом заказа.">
-            <span className="text-[14px] text-ink-dim">Появится позже</span>
+          <Row
+            title="Принтер этикеток"
+            hint="Наклейки на технику со штрихкодом заказа. Общий для всех сотрудников по умолчанию."
+            actions={
+              data.canManage && (
+                <>
+                  <Button type="button" variant="secondary" onClick={() => setPicking("labelsWorkshop")}>
+                    {L.workshop ? "Изменить" : "Назначить"}
+                  </Button>
+                  {L.workshop && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void act(() => printingApi.setWorkshop({ labels: null }), "Принтер этикеток снят")}
+                    >
+                      Снять
+                    </Button>
+                  )}
+                </>
+              )
+            }
+          >
+            <Assigned t={L.workshop} single empty={data.canManage ? "Не назначен" : "Не назначен — его назначает администратор"} />
           </Row>
+
+          {data.personal && (
+            <Row
+              title="Мой принтер этикеток"
+              hint="Если у вашего места свой принтер этикеток."
+              actions={
+                <>
+                  <Button type="button" variant="secondary" onClick={() => setPicking("labelsMine")}>
+                    {L.mine ? "Изменить" : "Выбрать свой"}
+                  </Button>
+                  {L.mine && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void act(() => printingApi.setMine({ labels: null }), "Наклейки — на принтер этикеток мастерской")}
+                    >
+                      Вернуть общий
+                    </Button>
+                  )}
+                </>
+              }
+            >
+              <Assigned t={L.mine} single empty="Общий принтер этикеток мастерской" />
+            </Row>
+          )}
         </div>
       </Panel>
 
       {data.personal && (
         <Panel id="peripherals:После приёма техники" title="После приёма техники">
-          <p className="mt-2 text-[13px] text-ink-dim">Ваша настройка: что делать с квитанцией, когда заказ принят.</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            {INTAKE.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                aria-pressed={data.intake === m.id}
-                onClick={() => void act(() => printingApi.setMine({ intake: m.id }), "Сохранено")}
-                className={
-                  "rounded-card border px-4 py-3 text-left transition-colors duration-150 " +
-                  (data.intake === m.id ? "border-brand bg-brand-tint" : "border-line bg-surface-raised hover:border-line-strong")
-                }
-              >
-                <span className={"block text-[14px] font-semibold " + (data.intake === m.id ? "text-brand-ink" : "")}>
-                  {m.label}
-                </span>
-                <span className="mt-0.5 block text-[12.5px] text-ink-dim">{m.hint}</span>
-              </button>
-            ))}
-          </div>
+          <p className="mt-2 text-[13px] text-ink-dim">Ваша настройка: что печатать, когда заказ принят.</p>
+          <p className="mt-4 text-[14px] font-semibold">Квитанция</p>
+          <ModePicker items={INTAKE} value={data.intake} onPick={(m) => void act(() => printingApi.setMine({ intake: m }), "Сохранено")} />
+          <p className="mt-5 text-[14px] font-semibold">Наклейки</p>
+          <ModePicker
+            items={LABELS_INTAKE}
+            value={L.intake}
+            onPick={(m) => void act(() => printingApi.setMine({ labelsIntake: m }), "Сохранено")}
+          />
+        </Panel>
+      )}
+
+      {data.canManage && (
+        <Panel id="peripherals:Наклейка" title="Наклейка" summary={`${L.settings.width} × ${L.settings.height} мм · ${L.settings.code === "qr" ? "QR-код" : "штрихкод"}`}>
+          <LabelDesigner
+            initial={L.settings}
+            completeness={completeness}
+            printer={L.effective}
+            workshop={workshopName}
+            onSaved={() => void load()}
+          />
         </Panel>
       )}
 
@@ -259,9 +367,10 @@ export default function PeripheralsPage() {
 
       {picking && (
         <PrinterPicker
-          title={picking === "workshop" ? "Принтер для документов" : "Мой принтер"}
+          title={PICK_TITLE[picking]}
+          labels={picking === "labelsWorkshop" || picking === "labelsMine"}
           stations={data.stations}
-          current={picking === "workshop" ? data.workshop : data.mine}
+          current={{ workshop: data.workshop, mine: data.mine, labelsWorkshop: L.workshop, labelsMine: L.mine }[picking]}
           onSave={saveTarget}
           onReload={() => void load()}
           onClose={() => setPicking(null)}

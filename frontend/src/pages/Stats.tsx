@@ -28,6 +28,8 @@ import {
   type MasterCard as MasterCardData,
   type MasterRow,
   type MastersStats,
+  type ClientsStats,
+  type MoneyStats,
   type OrdersStats,
   type Overview,
   type PeriodId,
@@ -54,11 +56,13 @@ const PERIOD_KEY = "finecrm.stats.period";
 const CUSTOM_KEY = "finecrm.stats.custom";
 const TAB_KEY = "finecrm.stats.tab";
 
-type Tab = "overview" | "orders" | "masters";
+type Tab = "overview" | "orders" | "masters" | "money" | "clients";
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Обзор" },
   { id: "orders", label: "Заказы" },
   { id: "masters", label: "Мастера" },
+  { id: "money", label: "Деньги" },
+  { id: "clients", label: "Клиенты" },
 ];
 
 const read = <T,>(key: string, ok: (v: unknown) => v is T, d: T): T => {
@@ -183,6 +187,9 @@ export default function StatsPage() {
   if (!access) return <Spinner />;
 
   const { range, name } = periodRange(period, custom, access.firstDay);
+  // «Деньги» — только тем, кому видна касса.
+  const tabs = TABS.filter((t) => t.id !== "money" || access.money);
+  const shown: Tab = tabs.some((t) => t.id === tab) ? tab : "overview";
   const bad = period === "custom" && custom && custom.from > custom.to;
 
   return (
@@ -228,24 +235,26 @@ export default function StatsPage() {
       {access.full ? (
         <>
           <div role="tablist" className="-mb-1 flex gap-1 overflow-x-auto border-b border-line">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.id}
                 role="tab"
-                aria-selected={tab === t.id}
+                aria-selected={shown === t.id}
                 onClick={() => setTab(t.id)}
                 className={
                   "-mb-px whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[14px] font-bold transition-colors " +
-                  (tab === t.id ? "border-brand text-ink" : "border-transparent text-ink-muted hover:text-ink")
+                  (shown === t.id ? "border-brand text-ink" : "border-transparent text-ink-muted hover:text-ink")
                 }
               >
                 {t.label}
               </button>
             ))}
           </div>
-          {tab === "overview" && <OverviewTab range={range} name={name} />}
-          {tab === "orders" && <OrdersTab range={range} />}
-          {tab === "masters" && <MastersTab range={range} />}
+          {shown === "overview" && <OverviewTab range={range} name={name} />}
+          {shown === "orders" && <OrdersTab range={range} />}
+          {shown === "masters" && <MastersTab range={range} />}
+          {shown === "money" && <MoneyTab range={range} name={name} />}
+          {shown === "clients" && <ClientsTab range={range} />}
         </>
       ) : access.me && isMaster ? (
         <MasterCard id={access.me} range={range} />
@@ -870,6 +879,257 @@ function MasterCard({ id, range }: { id: string; range: Range }) {
           )}
         </Grid>
       </div>
+    </Loading>
+  );
+}
+
+// ================================================================ Деньги
+
+const PAY_LABEL: Record<"CASH" | "ACQUIRING" | "BANK", string> = { CASH: "Наличные", ACQUIRING: "Эквайринг", BANK: "Банк" };
+const PAY_COLOR: Record<"CASH" | "ACQUIRING" | "BANK", string> = { CASH: C.brand, ACQUIRING: C.amber, BANK: C.teal };
+
+/** Шаг графика: дни, недели, месяцы — только те, что имеют смысл для длины периода. */
+function useGrans(range: Range) {
+  const spanDays = Math.round((new Date(range.to).getTime() - new Date(range.from).getTime()) / 86_400_000) + 1;
+  return GRANS.filter((g) => (g.id === "day" ? spanDays <= 120 : g.id === "month" ? spanDays >= 40 : spanDays >= 8));
+}
+
+function MoneyTab({ range, name }: { range: Range; name: string }) {
+  const [gran, setGran] = useState<Gran | null>(null);
+  useEffect(() => setGran(null), [range.from, range.to]);
+  const { data, error, busy } = useLoad(() => statsApi.money(range, gran ?? undefined), [range.from, range.to, gran]);
+  const grans = useGrans(range);
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!data) return <Spinner />;
+  const d: MoneyStats = data;
+  const labels = bucketLabels(d.keys, d.gran, d.range);
+  const cur = d.tiles.cur, prev = d.tiles.prev;
+  const stepName = d.gran === "day" ? "по дням" : d.gran === "week" ? "по неделям" : "по месяцам";
+  const payTotal = d.pay.kinds.reduce((a, k) => a + k.total, 0);
+  const wp = d.worksParts;
+  const margin = wp.margin && wp.margin.sale > 0 ? wp.margin : null;
+  const gransPills = grans.length > 1 ? <Pills items={grans} value={d.gran} onChange={(g) => setGran(g)} label="Шаг графика" /> : undefined;
+
+  return (
+    <Loading busy={busy}>
+      <Grid>
+        <Tile className="col-span-12 sm:col-span-6 xl:col-span-3" label="Приход" value={rubShort(cur.income)}
+          sub="все поступления в кассу" delta={<Delta cur={cur.income} prev={prev?.income} kind="rel" />} />
+        <Tile className="col-span-12 sm:col-span-6 xl:col-span-3" label="Расход" value={rubShort(cur.expense)}
+          sub={d.tiles.withdrawn ? `без выемки (выемка — ${rubShort(d.tiles.withdrawn)})` : "без выемки"}
+          delta={<Delta cur={cur.expense} prev={prev?.expense} kind="rel" goodUp={false} />} />
+        <Tile className="col-span-12 sm:col-span-6 xl:col-span-3" label="Осталось" value={rubShort(cur.left)}
+          sub="приход минус расход" delta={<Delta cur={cur.left} prev={prev?.left} kind="rel" />} />
+        <Tile className="col-span-12 sm:col-span-6 xl:col-span-3" label="Средний чек" value={rub(cur.check)}
+          sub="по выданным заказам с суммой" delta={<Delta cur={cur.check} prev={prev?.check} kind="rel" />} />
+
+        <ChartCard
+          className="col-span-12"
+          title="Приход и расход"
+          hint={`${stepName}, по дате движения в кассе. Выемка не считается — это перемещение денег мастерской`}
+          actions={gransPills}
+          table={() => ({
+            cols: ["Период", "Приход", "Расход", "Разница"],
+            rows: d.keys.map((_, i) => [labels[i].full, rub(d.series.income[i]), rub(d.series.expense[i]), rub(d.series.income[i] - d.series.expense[i])]),
+          })}
+        >
+          <Legend items={[["Приход", C.brand], ["Расход", C.amber]]} />
+          <ColumnChart
+            title="Приход и расход"
+            fmt={rub}
+            axisFmt={axisRub}
+            labels={labels.map((l) => l.short)}
+            full={labels.map((l) => l.full)}
+            series={[
+              { name: "Приход", values: d.series.income, color: C.brand, kind: "bar" },
+              { name: "Расход", values: d.series.expense, color: C.amber, kind: "bar" },
+            ]}
+          />
+        </ChartCard>
+
+        <ChartCard
+          className="col-span-12 xl:col-span-7"
+          title="Как платят"
+          hint={payTotal ? `доля в приходе по видам касс · ${name}` : "доля в приходе по видам касс"}
+          table={() => ({
+            cols: ["Период", ...d.pay.kinds.map((k) => PAY_LABEL[k.kind])],
+            rows: d.keys.map((_, i) => [labels[i].full, ...d.pay.kinds.map((k) => rub(k.values[i] ?? 0))]),
+          })}
+        >
+          <Legend items={d.pay.kinds.map((k) => [`${PAY_LABEL[k.kind]} · ${payTotal ? pct(k.total / payTotal) : "—"}`, PAY_COLOR[k.kind]] as [string, string])} />
+          <ColumnChart
+            title="Как платят"
+            height={220}
+            stacked
+            percent
+            fmt={rub}
+            labels={labels.map((l) => l.short)}
+            full={labels.map((l) => l.full)}
+            series={d.pay.kinds.map((k) => ({ name: PAY_LABEL[k.kind], values: k.values, color: PAY_COLOR[k.kind], kind: "bar" as const }))}
+          />
+        </ChartCard>
+
+        <ChartCard
+          className="col-span-12 xl:col-span-5"
+          title="На что уходят деньги"
+          hint="расходы по статьям кассы, без выемки"
+          table={() => ({ cols: ["Статья", "Сумма"], rows: d.expenses.map((x) => [x.label, rub(x.v)]) })}
+        >
+          <HBars rows={d.expenses.map((x) => ({ label: x.label, n: x.v }))} fmt={rubShort} color={C.amber} unit="Сумма" />
+        </ChartCard>
+
+        <ChartCard
+          className="col-span-12 lg:col-span-6"
+          title="Средний чек по технике"
+          hint="выданные за период заказы с суммой"
+          table={() => ({ cols: ["Тип", "Заказов", "Средний чек"], rows: d.checkByKind.map((x) => [x.label, num(x.n), rub(x.avg)]) })}
+        >
+          <HBars rows={[...d.checkByKind].sort((a, b) => b.avg - a.avg).map((x) => ({ label: `${x.label} · ${num(x.n)}`, n: x.avg }))} fmt={rub} share={false} unit="Средний чек" />
+        </ChartCard>
+
+        <ChartCard
+          className="col-span-12 lg:col-span-6"
+          title="Работы и запчасти"
+          hint="из чего сложились выданные за период заказы; скидки — с работ"
+          table={() => ({
+            cols: ["Что", "Сумма"],
+            rows: [
+              ["Работы", rub(wp.works)],
+              ["Запчасти", rub(wp.parts)],
+              ...(margin ? [["Запчасти с закупочной ценой", rub(margin.sale)], ["Их закупка", rub(margin.cost)], ["Наценка", rub(margin.sale - margin.cost)]] : []),
+            ],
+          })}
+        >
+          <Donut
+            center={rubShort(wp.works + wp.parts).replace(/ (млн|тыс) ₽$| ₽$/, "")}
+            caption={`${(rubShort(wp.works + wp.parts).match(/(млн|тыс) ₽$/)?.[0] ?? "₽")} за период`}
+            unit="Сумма"
+            fmt={rubShort}
+            parts={[
+              { label: "Работы", n: wp.works, color: C.brand },
+              { label: "Запчасти", n: wp.parts, color: C.amber },
+            ]}
+          />
+          {margin && (
+            <p className="mt-3 text-[13px] text-ink-muted">
+              Наценка на запчасти: <b className="text-ink">{rubShort(margin.sale - margin.cost)}</b>
+              {margin.cost > 0 && <> ({pct((margin.sale - margin.cost) / margin.cost)} к закупке)</>} — там, где указана закупочная
+              цена.
+            </p>
+          )}
+        </ChartCard>
+      </Grid>
+    </Loading>
+  );
+}
+
+// ================================================================ Клиенты
+
+function ClientsTab({ range }: { range: Range }) {
+  const [gran, setGran] = useState<Gran | null>(null);
+  useEffect(() => setGran(null), [range.from, range.to]);
+  const { data, error, busy } = useLoad(() => statsApi.clients(range, gran ?? undefined), [range.from, range.to, gran]);
+  const grans = useGrans(range);
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!data) return <Spinner />;
+  const d: ClientsStats = data;
+  const labels = bucketLabels(d.keys, d.gran, d.range);
+  const cur = d.tiles.cur, prev = d.tiles.prev;
+  const t = d.types;
+
+  return (
+    <Loading busy={busy}>
+      <Grid>
+        <Tile className="col-span-12 sm:col-span-4" label="Клиентов за период" value={num(cur.people)}
+          sub="кто сдавал технику" delta={<Delta cur={cur.people} prev={prev?.people} kind="rel" />} />
+        <Tile className="col-span-12 sm:col-span-4" label="Новых" value={num(cur.newPeople)}
+          sub="пришли впервые" delta={<Delta cur={cur.newPeople} prev={prev?.newPeople} kind="rel" />} />
+        <Tile className="col-span-12 sm:col-span-4" label="Вернулись снова" value={pct(cur.returningShare)}
+          sub="заказов от постоянных клиентов" delta={<Delta cur={cur.returningShare} prev={prev?.returningShare} kind="pp" />} />
+
+        <ChartCard
+          className="col-span-12 xl:col-span-7"
+          title="Новые и постоянные"
+          hint="заказы по дате приёма: первый заказ клиента или повторный"
+          actions={grans.length > 1 ? <Pills items={grans} value={d.gran} onChange={(g) => setGran(g)} label="Шаг графика" /> : undefined}
+          table={() => ({
+            cols: ["Период", "Новые", "Постоянные"],
+            rows: d.keys.map((_, i) => [labels[i].full, num(d.series.fresh[i]), num(d.series.back[i])]),
+          })}
+        >
+          <Legend items={[["Новые клиенты", C.brand], ["Постоянные", C.teal]]} />
+          <ColumnChart
+            title="Новые и постоянные"
+            stacked
+            labels={labels.map((l) => l.short)}
+            full={labels.map((l) => l.full)}
+            series={[
+              { name: "Новые клиенты", values: d.series.fresh, color: C.brand, kind: "bar" },
+              { name: "Постоянные", values: d.series.back, color: C.teal, kind: "bar" },
+            ]}
+          />
+        </ChartCard>
+
+        <section className="col-span-12 min-w-0 rounded-panel border border-line bg-surface p-4 shadow-card sm:p-5 xl:col-span-5">
+          <h2 className="text-[15px] font-bold">Лучшие клиенты</h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-dim">
+            {d.money ? "по сумме выданных за период заказов" : "по числу заказов за период"}
+          </p>
+          {d.top.length ? (
+            <div className="mt-3 overflow-x-auto">
+              <DataTable
+                cols={["Клиент", "Заказов", ...(d.money ? ["Сумма"] : [])]}
+                rows={d.top.map((x) => [
+                  <Link key="c" to={`/clients/${x.id}`} className="block max-w-[240px] truncate text-left font-semibold text-brand-ink hover:underline">
+                    {x.name}
+                    {x.company && <span className="ml-1.5 rounded-pill bg-surface-raised px-1.5 py-0.5 text-[11px] font-bold text-ink-muted">орг.</span>}
+                  </Link>,
+                  num(x.orders),
+                  ...(d.money ? [rub(x.sum ?? 0)] : []),
+                ])}
+              />
+            </div>
+          ) : (
+            <p className="mt-3 text-[13px] text-ink-dim">За период ничего нет</p>
+          )}
+        </section>
+
+        <ChartCard
+          className="col-span-12 lg:col-span-6"
+          title="Частные и организации"
+          hint="кто сдавал технику за период"
+          table={() => ({
+            cols: ["", "Клиентов", "Заказов"],
+            rows: [["Частные лица", num(t.people.person), num(t.orders.person)], ["Организации", num(t.people.company), num(t.orders.company)]],
+          })}
+        >
+          <Donut
+            center={num(t.people.person + t.people.company)}
+            caption={word(t.people.person + t.people.company, "клиент", "клиента", "клиентов")}
+            unit="Клиентов"
+            parts={[
+              { label: "Частные лица", n: t.people.person, color: C.brand },
+              { label: "Организации", n: t.people.company, color: C.teal },
+            ]}
+          />
+        </ChartCard>
+
+        <ChartCard
+          className="col-span-12 lg:col-span-6"
+          title="Откуда пришли новые"
+          hint="поле «Откуда узнал» при приёме нового клиента"
+          table={d.sources.length ? () => ({ cols: ["Откуда узнал", "Клиентов"], rows: d.sources.map((x) => [x.label, num(x.n)]) }) : undefined}
+        >
+          {d.sources.length ? (
+            <HBars rows={d.sources.map((x) => ({ label: x.label, n: x.n, color: x.label === "Не указано" ? C.ghost : undefined }))} unit="Клиентов" />
+          ) : (
+            <p className="text-[13px] text-ink-dim">
+              У новых клиентов не заполнено «Откуда узнал». Если отмечать это при приёме, здесь будет видно, какая
+              реклама работает.
+            </p>
+          )}
+        </ChartCard>
+      </Grid>
     </Loading>
   );
 }
