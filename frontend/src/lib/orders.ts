@@ -230,8 +230,40 @@ export const money = (v: number | null | undefined) =>
 /** Как показать мастера в списке — просто по имени, владельца тоже. */
 export const masterLabel = (m: { fullName: string }) => m.fullName;
 
+/** Строка истории техники и прошлых заказов клиента (backend orders/history.ts). */
+export interface HistoryRow {
+  id: string;
+  number: string;
+  kind: Order["kind"];
+  acceptedAt: string;
+  completedAt: string | null;
+  issuedAt: string | null;
+  status: { name: string; group: StatusGroup; color: string | null };
+  outcome: "ok" | "no" | "work";
+  complaint: string;
+  diagnosis: string;
+  master: string | null;
+  device: { id: string; kind: string; brand: string | null; model: string | null; serial: string | null } | null;
+  /** Только в истории техники: тот же экземпляр (а не только серийный) и чужой клиент. */
+  sameDevice?: boolean;
+  otherCustomer?: boolean;
+}
+
+/** Техника клиента с её заказами — для приёма. */
+export interface CustomerDevice {
+  device: HistoryRow["device"];
+  orders: HistoryRow[];
+  last: string;
+}
+
+/** Заказ для просмотра окном поверх (из истории): canOpen — можно ли перейти в сам заказ. */
+export type PeekOrder = Order & { canOpen: boolean };
+
 export const ordersApi = {
   reference: () => api.get<Reference>("/reference"),
+  deviceHistory: (id: string) => api.get<{ items: HistoryRow[] }>(`/orders/${id}/device-history`),
+  peek: (id: string) => api.get<PeekOrder>(`/orders/${id}/peek`),
+  customerDevices: (customerId: string) => api.get<{ items: CustomerDevice[] }>(`/customers/${customerId}/devices`),
   list: (params: Record<string, string>) =>
     api.get<Page<Order> & { debtTotal?: number }>(`/orders?${new URLSearchParams(params).toString()}`),
   get: (id: string) => api.get<Order>(`/orders/${id}`),

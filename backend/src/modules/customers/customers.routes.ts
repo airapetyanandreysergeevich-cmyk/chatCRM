@@ -1,3 +1,4 @@
+import { customerDevices } from "../orders/history";
 import { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import { z } from "zod";
@@ -300,6 +301,23 @@ customersRouter.get(
         ...debtFields(c.owed, money),
       }))
     );
+  })
+);
+
+/**
+ * Техника клиента с её заказами — для приёма: «3 заказа» раскрывается в
+ * список, и прошлую технику можно взять в новый заказ одной кнопкой.
+ */
+customersRouter.get(
+  "/:id/devices",
+  requirePermission(PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.ORDERS_CREATE),
+  ah(async (req, res) => {
+    const items = await withTenant(tenantOf(req), async (tx) => {
+      const customer = await tx.customer.findFirst({ where: { id: req.params.id, deletedAt: null }, select: { id: true } });
+      if (!customer) throw notFound("Клиент не найден");
+      return customerDevices(tx, customer.id);
+    });
+    res.json({ items });
   })
 );
 

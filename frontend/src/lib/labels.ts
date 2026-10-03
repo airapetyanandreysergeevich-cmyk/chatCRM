@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { api } from "./api";
+import { printFormsApi } from "./printForms";
 import type { Order } from "./orders";
 import type { LabelData } from "../components/Label";
 
@@ -10,6 +12,7 @@ import type { LabelData } from "../components/Label";
  */
 
 export const LABEL_FIELDS = [
+  { id: "logo", label: "Логотип" },
   { id: "workshop", label: "Название мастерской" },
   { id: "number", label: "Номер заказа крупно" },
   { id: "item", label: "Вещь и «1 из 3»" },
@@ -192,3 +195,84 @@ export const SAMPLE_LABEL: LabelData = {
   date: "03.10.26",
   due: "06.10.26",
 };
+
+// ---------------------------------------------------------------- логотип
+
+/**
+ * Логотип для термопринтера: только чёрное и белое.
+ *
+ * Термопринтер не печатает серого — полутон он превращает в редкие точки, и
+ * цветной логотип выходит грязным пятном. Поэтому картинка заранее
+ * переводится в два цвета: прозрачное — белое, светлее порога — белое,
+ * остальное — чёрное. Порог — середина между самым светлым и самым тёмным
+ * у самой картинки: бледно-голубой логотип не пропадает целиком, а чёрный не
+ * заливается.
+ */
+export async function monoLogo(src: string, maxHeightPx = 240): Promise<string | null> {
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
+  try {
+    await img.decode();
+  } catch {
+    return null;
+  }
+  const k = Math.min(1, maxHeightPx / img.naturalHeight);
+  const w = Math.max(1, Math.round(img.naturalWidth * k));
+  const h = Math.max(1, Math.round(img.naturalHeight * k));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h);
+  const px = data.data;
+  // Яркость каждой точки (прозрачное уже на белом фоне).
+  let lo = 255, hi = 0;
+  const lum = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const y = Math.round(0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2]);
+    lum[i] = y;
+    if (y < lo) lo = y;
+    if (y > hi) hi = y;
+  }
+  if (hi - lo < 16) return null; // однотонная картинка — печатать нечего
+  const t = (lo + hi) / 2;
+  for (let i = 0; i < w * h; i++) {
+    const v = lum[i] < t ? 0 : 255;
+    px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v;
+    px[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(data, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+/**
+ * Логотип мастерской для наклейки — тот же, что на бланках («Настройки →
+ * Бланки»), уже чёрно-белый. ready — можно рисовать: логотип готов или его нет.
+ */
+export function useLabelLogo(wanted: boolean): { logo: string | null; ready: boolean; missing: boolean } {
+  const [state, setState] = useState<{ logo: string | null; ready: boolean; missing: boolean }>({ logo: null, ready: !wanted, missing: false });
+  useEffect(() => {
+    if (!wanted) {
+      setState({ logo: null, ready: true, missing: false });
+      return;
+    }
+    let alive = true;
+    setState((s) => ({ ...s, ready: false }));
+    printFormsApi
+      .get()
+      .then(async (f) => {
+        const logo = f.logo ? await monoLogo(f.logo) : null;
+        if (alive) setState({ logo, ready: true, missing: !f.logo });
+      })
+      .catch(() => alive && setState({ logo: null, ready: true, missing: false }));
+    return () => {
+      alive = false;
+    };
+  }, [wanted]);
+  return state;
+}

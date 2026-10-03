@@ -5,6 +5,8 @@ import { IconCamera, IconClose, IconCompany, IconPerson, IconSettings } from "..
 import { PhotoShooter } from "../components/PhotoShooter";
 import { formatSize } from "../lib/photos";
 import { PlateScanner } from "../components/PlateScanner";
+import { CustomerDevices } from "../components/CustomerDevices";
+import { OrderPeek } from "../components/OrderPeek";
 import { mergeDevice } from "../lib/plate";
 import { QuickPickEditor } from "../components/QuickPickEditor";
 import {
@@ -121,6 +123,11 @@ export default function OrderNew() {
     source: "",
   });
   const [device, setDevice] = useState({ kind: "", brand: "", model: "", serial: "" });
+  /** Прошлые заказы клиента раскрыты; техника, взятая из них («Эта техника»); заказ в окне поверх. */
+  const [showDevices, setShowDevices] = useState(false);
+  const [sameDevice, setSameDevice] = useState<{ id: string; number: string; orderId: string } | null>(null);
+  const [peek, setPeek] = useState<string | null>(null);
+  const deviceCard = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState({
     kind: "REPAIR",
     isUrgent: false,
@@ -213,6 +220,8 @@ export default function OrderNew() {
       source: c.source ?? "",
     });
     setPicked(c);
+    setShowDevices(false);
+    setSameDevice(null);
     setPhoneHits([]);
     setNameHits([]);
   }
@@ -220,6 +229,8 @@ export default function OrderNew() {
   /** «Это другой человек»: отвязываем карточку, поля оставляем как есть. */
   function unpickCustomer() {
     setPicked(null);
+    setShowDevices(false);
+    setSameDevice(null);
     setCustomer((c) => ({ ...c, id: "" }));
   }
 
@@ -296,7 +307,8 @@ export default function OrderNew() {
           address: customer.address || undefined,
           source: customer.source || undefined,
         },
-        device,
+        // Та же техника, что в прошлом заказе, — та же карточка устройства: история не рвётся.
+        device: sameDevice ? { ...device, id: sameDevice.id } : device,
         kind: form.kind,
         isUrgent: form.isUrgent,
         complaint: form.complaint,
@@ -378,10 +390,19 @@ export default function OrderNew() {
                     {picked.name}
                   </span>
                   {picked.orderCount > 0 && (
-                    <span className="text-ink-muted">
+                    <>
                       {" "}
-                      · {plural(picked.orderCount, "заказ", "заказа", "заказов")}
-                    </span>
+                      ·{" "}
+                      {/* Прошлые заказы — кнопкой: список техники клиента, «Эта техника» и просмотр заказа. */}
+                      <button
+                        type="button"
+                        aria-expanded={showDevices}
+                        onClick={() => setShowDevices((v) => !v)}
+                        className="font-semibold text-brand-ink underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                      >
+                        {plural(picked.orderCount, "заказ", "заказа", "заказов")} {showDevices ? "▴" : "▾"}
+                      </button>
+                    </>
                   )}
                   {/* Скидка достанется заказу автоматически, но приёмщик
                       должен знать о ней до того, как назовёт клиенту сумму. */}
@@ -402,6 +423,20 @@ export default function OrderNew() {
                   это другой человек
                 </button>
               </div>
+            )}
+            {picked && showDevices && (
+              <CustomerDevices
+                customerId={picked.id}
+                pickedId={sameDevice?.id ?? null}
+                onPeek={setPeek}
+                onPick={(d, from) => {
+                  setDevice({ kind: d.kind ?? "", brand: d.brand ?? "", model: d.model ?? "", serial: d.serial ?? "" });
+                  setSameDevice({ id: d.id, number: from.number, orderId: from.id });
+                  if (d.serial) setScannedSerial(true);
+                  setShowDevices(false);
+                  deviceCard.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              />
             )}
 
             {/* Подсказки лежат рядом с полем, а не внутри него: Field — это
@@ -491,7 +526,7 @@ export default function OrderNew() {
         </Card>
 
         <Card>
-          <div className="flex items-start justify-between gap-3">
+          <div ref={deviceCard} className="flex items-start justify-between gap-3 scroll-mt-4">
             <SectionLabel>Техника</SectionLabel>
             {ref.features.plateOcr && (
               <button
@@ -506,6 +541,20 @@ export default function OrderNew() {
               </button>
             )}
           </div>
+          {sameDevice && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-field border border-brand/40 bg-brand-tint px-3 py-2 text-[13px]">
+              <span>
+                Та же техника, что в заказе{" "}
+                <button type="button" onClick={() => setPeek(sameDevice.orderId)} className="font-mono font-semibold text-brand-ink hover:underline">
+                  {sameDevice.number}
+                </button>{" "}
+                — история ремонтов продолжится
+              </span>
+              <button type="button" onClick={() => setSameDevice(null)} className="text-[12.5px] font-semibold text-brand-ink hover:underline">
+                это другая вещь
+              </button>
+            </div>
+          )}
           <div className="mt-4 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               {/* Вид, марку и модель мастерская набирает руками, и одни и те
@@ -822,6 +871,7 @@ export default function OrderNew() {
     {/* Окно правки кнопок — рядом с формой бланка, а не внутри неё: форма в
         форме недопустима, и Enter в поле «Новая кнопка» отправил бы весь
         заказ. */}
+    {peek && <OrderPeek orderId={peek} allowOpen={false} onClose={() => setPeek(null)} />}
     {scanning && (
       <PlateScanner
         current={device}

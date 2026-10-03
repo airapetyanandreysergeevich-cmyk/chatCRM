@@ -15,6 +15,8 @@ import { code128Bars, moduleWidth, type LabelSettings } from "../lib/labels";
 
 export interface LabelData {
   workshop: string;
+  /** Логотип мастерской, уже чёрно-белый (lib/labels → monoLogo). */
+  logo?: string | null;
   number: string;
   /** Цифры номера — содержимое штрихкода. */
   code: string;
@@ -129,11 +131,31 @@ export function Label({
   const who = [f.client ? data.client : null, f.phone && data.phone ? `…${data.phone}` : null].filter(Boolean).join(" · ");
   const when = [f.date ? `Принят ${data.date}` : null, f.due && data.due ? `Срок ${data.due}` : null].filter(Boolean).join(" · ");
 
+  // Шапка: логотип и название мастерской в одну строку.
+  const logoH = clamp(small * 1.5, 2.6, ch * 0.2);
+  const showLogo = f.logo && !!data.logo;
+  const showName = f.workshop && !!data.workshop;
+  const header =
+    showLogo || showName ? (
+      <div style={{ display: "flex", alignItems: "center", gap: mm(base * 0.6), flexShrink: 0, minWidth: 0 }}>
+        {showLogo && (
+          <img
+            src={data.logo!}
+            alt=""
+            style={{ height: mm(logoH), maxWidth: showName ? "45%" : "100%", objectFit: "contain", objectPosition: "left center", display: "block", flexShrink: 0 }}
+          />
+        )}
+        {showName && (
+          <div style={{ ...one, flexShrink: 1, minWidth: 0, fontSize: mm(small), fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {data.workshop}
+          </div>
+        )}
+      </div>
+    ) : null;
+
   const lines = (
     <>
-      {f.workshop && data.workshop && (
-        <div style={{ ...one, fontSize: mm(small), fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{data.workshop}</div>
-      )}
+      {header}
       {(f.number || counter) && (
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: mm(base), flexShrink: 0 }}>
           {f.number ? <div style={{ ...one, flexShrink: 1, minWidth: 0, fontSize: mm(big), fontWeight: 800, letterSpacing: "-0.01em" }}>{data.number}</div> : <span />}
@@ -187,11 +209,7 @@ export function Label({
           </div>
         ) : (
           <div ref={body} style={{ display: "flex", flexDirection: "column", gap: mm(base * 0.12), height: "100%", overflow: "hidden" }}>
-            {f.workshop && data.workshop && (
-              <div style={{ ...one, fontSize: mm(small), fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {data.workshop}
-              </div>
-            )}
+            {header}
             {(f.number || counter) && (
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: mm(base), flexShrink: 0 }}>
                 {f.number ? <div style={{ ...one, flexShrink: 1, minWidth: 0, fontSize: mm(big), fontWeight: 800 }}>{data.number}</div> : <span />}

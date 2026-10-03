@@ -9,6 +9,8 @@ import { printingApi } from "../lib/printing";
 import { IconCamera, IconPlus } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
+import { Photo } from "../components/OrderPhoto";
+import { DeviceHistory } from "../components/DeviceHistory";
 import { OrderChat } from "../components/OrderChat";
 import { OrderEditModal } from "../components/OrderEditModal";
 import {
@@ -44,46 +46,6 @@ import {
 import { matchServices, PINNED_LIMIT, type Service } from "../lib/services";
 import { IssueDialog } from "../components/IssueDialog";
 import { PAYMENT_LABEL } from "../lib/debt";
-
-/** Ссылка на файл подписанная и живёт недолго, поэтому запрашиваем её при показе. */
-function Photo({
-  orderId,
-  attachmentId,
-  name,
-  onOpen,
-}: {
-  orderId: string;
-  attachmentId: string;
-  name: string;
-  onOpen: () => void;
-}) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    ordersApi
-      .attachmentUrl(orderId, attachmentId)
-      .then((r) => alive && setUrl(r.url))
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [orderId, attachmentId]);
-
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={name}
-      className="block h-[92px] w-[92px] overflow-hidden rounded-card border border-line bg-surface-input transition-all duration-150 hover:border-line-strong"
-    >
-      {url ? (
-        <img src={url} alt={name} loading="lazy" className="h-full w-full object-cover" />
-      ) : (
-        <span className="flex h-full items-center justify-center text-[11px] text-ink-dim">…</span>
-      )}
-    </button>
-  );
-}
 
 function Rows({ items }: { items: Array<{ label: string; value: React.ReactNode }> }) {
   return (
@@ -622,6 +584,9 @@ export default function OrderCard() {
               </div>
             </div>
           </Card>
+
+          {/* Прошлые ремонты той же вещи — сразу под жалобой: мастер смотрит их до того, как браться. */}
+          <DeviceHistory orderId={order.id} />
 
           <Card>
             <div className="flex flex-wrap items-center justify-between gap-3">

@@ -14,6 +14,7 @@ import { z } from "zod";
  */
 
 export const LABEL_FIELDS = [
+  "logo",
   "workshop",
   "number",
   "item",
@@ -46,6 +47,7 @@ export const DEFAULT_LABELS: LabelSettings = {
   rotate: false,
   code: "code128",
   fields: {
+    logo: false,
     workshop: false,
     number: true,
     item: true,

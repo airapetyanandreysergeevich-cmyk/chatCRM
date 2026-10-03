@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { labelData, labelItems } from "../lib/labels";
+import { labelData, labelItems, useLabelLogo } from "../lib/labels";
 import type { Order } from "../lib/orders";
 import { printAndWait, printingApi, targetLabel, type PrintingOverview, type PrintJob } from "../lib/printing";
 import { Label } from "./Label";
@@ -77,7 +77,8 @@ export function LabelDialog({
   const openPage = () => navigate(`/orders/${order.id}/label?${chosen.map((i) => `i=${encodeURIComponent(i.key)}`).join("&")}`);
   const count = chosen.length;
   const word = count === 1 ? "наклейку" : count >= 2 && count <= 4 ? "наклейки" : "наклеек";
-  const preview = data && chosen[0] ? labelData(order, chosen[0], 1, chosen.length, workshop) : null;
+  const logo = useLabelLogo(!!data?.labels.settings.fields.logo);
+  const preview = data && chosen[0] ? { ...labelData(order, chosen[0], 1, chosen.length, workshop), logo: logo.logo } : null;
   const S = data?.labels.settings;
   const scale = S ? Math.min(1.4, 300 / ((S.width * 96) / 25.4)) : 1;
 

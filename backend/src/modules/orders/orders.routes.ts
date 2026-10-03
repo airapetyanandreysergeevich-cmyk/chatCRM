@@ -40,6 +40,8 @@ import {
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { rememberDevice } from "../hints/hints.service";
 import { countQuickPicks } from "../quickpicks/quickpicks.service";
+import { deviceHistory } from "./history";
+import { matchableSerial, realSerial } from "../../lib/serial";
 import { assertAssignable } from "../staff/masters";
 import {
   assertOrderAccess,
@@ -325,6 +327,8 @@ const acceptSchema = z.object({
     source: z.string().trim().max(80).optional(),
   }),
   device: z.object({
+    /** Та же техника, что в прошлом заказе клиента («Эта техника» при приёме). */
+    id: z.string().uuid().optional(),
     kind: z.string().trim().min(2, "Укажите тип техники"),
     brand: z.string().trim().optional(),
     model: z.string().trim().optional(),
@@ -458,18 +462,46 @@ ordersRouter.post(
         });
       }
 
+      // Техника: та же карточка, что в прошлом заказе, — история ремонтов
+      // этой вещи не рвётся. Выбрана явно («Эта техника») — берём её и
+      // записываем то, что приёмщик поправил. Не выбрана, но у этого же
+      // клиента есть вещь с тем же серийным (и марка с моделью не спорят) —
+      // тоже она, только пустое дописываем. Иначе — новая карточка.
       // Отдельными вызовами, без вложенных create: прокси в withTenant
       // до дочерних записей не дотягивается, и RLS их отклонит.
-      const device = await tx.device.create({
-        data: {
-          tenantId,
-          customerId: customer.id,
-          kind: body.device.kind,
-          brand: body.device.brand || null,
-          model: body.device.model || null,
-          serial: body.device.serial || null,
-        },
-      });
+      const deviceData = {
+        kind: body.device.kind,
+        brand: body.device.brand || null,
+        model: body.device.model || null,
+        serial: body.device.serial || null,
+      };
+      let device = body.device.id
+        ? await tx.device.findFirst({ where: { id: body.device.id, customerId: customer.id } })
+        : null;
+      if (device) {
+        device = await tx.device.update({ where: { id: device.id }, data: deviceData });
+      } else {
+        const serial = realSerial(body.device.serial);
+        if (matchableSerial(serial)) {
+          const found = await tx.device.findFirst({
+            where: { customerId: customer.id, serial: { equals: serial, mode: "insensitive" } },
+            orderBy: { createdAt: "desc" },
+          });
+          const same = (a?: string | null, b?: string | null) => !a || !b || a.toLowerCase() === b.toLowerCase();
+          if (found && same(found.brand, deviceData.brand) && same(found.model, deviceData.model)) {
+            device = await tx.device.update({
+              where: { id: found.id },
+              data: {
+                brand: found.brand ?? deviceData.brand,
+                model: found.model ?? deviceData.model,
+              },
+            });
+          }
+        }
+      }
+      if (!device) {
+        device = await tx.device.create({ data: { tenantId, customerId: customer.id, ...deviceData } });
+      }
 
       // Вид, марку и модель кладём в память подсказок: в следующий раз такую
       // же технику приёмщик выберет из списка, а не наберёт заново.
@@ -603,6 +635,70 @@ ordersRouter.get(
       });
     });
     res.json({ orders: found.map((o) => ({ id: o.id, number: o.number })) });
+  })
+);
+
+/** Смотреть заказы вообще (просмотр из истории техники). */
+const canPeek = (req: Request) =>
+  [PERMISSIONS.ORDERS_VIEW_ALL, PERMISSIONS.ORDERS_VIEW_ASSIGNED, PERMISSIONS.ORDERS_VIEW_DELIVERY, PERMISSIONS.ORDERS_CREATE].some((p) =>
+    permissionsOf(req).includes(p)
+  );
+
+/** Может ли сотрудник открыть сам заказ: свой — всегда, чужой — если видит все. */
+function canOpen(req: Request, order: { assignedMasterId: string | null }) {
+  try {
+    assertOrderAccess(req, order);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * История техники заказа: другие заказы того же устройства и с тем же
+ * серийным номером (history.ts). Мастер видит в ней и чужие ремонты —
+ * решение Андрея 03.10.2026: прошлый ремонт вещи нужнее всего именно ему.
+ */
+ordersRouter.get(
+  "/:id/device-history",
+  requirePermission(PERMISSIONS.ORDERS_VIEW_ALL, PERMISSIONS.ORDERS_VIEW_ASSIGNED, PERMISSIONS.ORDERS_VIEW_DELIVERY),
+  ah(async (req, res) => {
+    const rows = await withTenant(tenantOf(req), async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: req.params.id, deletedAt: null },
+        select: { id: true, customerId: true, deviceId: true, assignedMasterId: true },
+      });
+      if (!order) throw notFound("Заказ не найден");
+      assertOrderAccess(req, order);
+      return deviceHistory(tx, order);
+    });
+    res.json({ items: rows });
+  })
+);
+
+/**
+ * Заказ для просмотра окном поверх — из истории техники или из прошлых
+ * заказов клиента при приёме. Только чтение, и открыт любому, кто вообще
+ * видит заказы, — в том числе мастеру чужой ремонт. Деньги и контакты — по
+ * тем же правам, что везде. canOpen — можно ли перейти в сам заказ.
+ */
+ordersRouter.get(
+  "/:id/peek",
+  requirePermission(PERMISSIONS.ORDERS_VIEW_ALL, PERMISSIONS.ORDERS_VIEW_ASSIGNED, PERMISSIONS.ORDERS_VIEW_DELIVERY, PERMISSIONS.ORDERS_CREATE),
+  ah(async (req, res) => {
+    const data = await withTenant(tenantOf(req), async (tx) => {
+      const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null }, include: orderInclude });
+      if (!order) throw notFound("Заказ не найден");
+      const money = seesMoney(req);
+      const projected = projectOrder(order, { contacts: seesCustomerContacts(req), money });
+      return {
+        ...projected,
+        // Внутренний комментарий — для своих в этом ремонте; в чужом просмотре ему не место.
+        internalComment: canOpen(req, order) ? projected.internalComment : null,
+        canOpen: canOpen(req, order),
+      };
+    });
+    res.json(data);
   })
 );
 
@@ -1250,7 +1346,9 @@ ordersRouter.get(
     const key = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
-      assertOrderAccess(req, order);
+      // Снимки видны там же, где сам заказ: в его карточке — по правам на
+      // заказ, в просмотре из истории техники — всем, кто видит заказы.
+      if (!canOpen(req, order) && !canPeek(req)) assertOrderAccess(req, order);
 
       const attachment = await tx.attachment.findFirst({
         where: { id: req.params.attachmentId, orderId: order.id },

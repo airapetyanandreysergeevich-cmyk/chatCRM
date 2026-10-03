@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Label, type LabelData } from "../components/Label";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { labelData, labelItems, labelsApi, SAMPLE_LABEL, type LabelSettings } from "../lib/labels";
+import { labelData, labelItems, labelsApi, SAMPLE_LABEL, useLabelLogo, type LabelSettings } from "../lib/labels";
 import { ordersApi, type Order } from "../lib/orders";
 import { isStationPage, STATION_FAILED, STATION_READY } from "../lib/printing";
 
@@ -41,18 +41,21 @@ export default function OrderLabel({ test = false }: { test?: boolean }) {
 
   const workshop = me?.kind === "tenant" ? (me.tenant?.name ?? "") : me?.kind === "platform" ? (me.impersonating?.name ?? "") : "";
 
+  // Логотип — тот же, что на бланках, переведённый в чёрно-белый; без галочки не грузим.
+  const logo = useLabelLogo(!!settings?.fields.logo);
+
   let labels: LabelData[] = [];
-  if (settings && test) labels = [{ ...SAMPLE_LABEL, workshop: workshop || SAMPLE_LABEL.workshop }];
+  if (settings && test) labels = [{ ...SAMPLE_LABEL, workshop: workshop || SAMPLE_LABEL.workshop, logo: logo.logo }];
   if (settings && order) {
     const all = labelItems(order, settings);
     const wanted = params.getAll("i");
     const items = wanted.length ? all.filter((x) => wanted.includes(x.key)) : all;
-    labels = items.map((it, i) => labelData(order, it, i + 1, items.length, workshop));
+    labels = items.map((it, i) => ({ ...labelData(order, it, i + 1, items.length, workshop), logo: logo.logo }));
   }
 
   // Программа FineCRM ждёт сигнала «дорисовано» в заголовке (desktop/src/printing.js).
   const station = isStationPage();
-  const ready = !!settings && (test || !!order);
+  const ready = !!settings && (test || !!order) && logo.ready;
   useEffect(() => {
     if (!station) return;
     if (error) {
@@ -67,6 +70,12 @@ export default function OrderLabel({ test = false }: { test?: boolean }) {
     let alive = true;
     void (async () => {
       await document.fonts?.ready;
+      // Логотип — картинка: печатать, только когда она дорисована.
+      await Promise.all(
+        [...document.images].map((img) =>
+          img.complete ? null : new Promise((r) => (img.addEventListener("load", r, { once: true }), img.addEventListener("error", r, { once: true })))
+        )
+      );
       requestAnimationFrame(() => requestAnimationFrame(() => alive && (document.title = STATION_READY)));
     })();
     return () => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError } from "../lib/api";
-import { LABEL_FIELDS, LABEL_SIZES, SAMPLE_LABEL, labelsApi, type LabelField, type LabelSettings } from "../lib/labels";
+import { LABEL_FIELDS, LABEL_SIZES, SAMPLE_LABEL, labelsApi, useLabelLogo, type LabelField, type LabelSettings } from "../lib/labels";
 import { printAndWait, type PrintJob, type TargetView } from "../lib/printing";
 import { Label, barcodeDots } from "./Label";
 import { Banner, Button, Checkbox, Input } from "./ui";
@@ -73,10 +74,9 @@ export function LabelDesigner({
   // Отмеченные раньше пункты, которых уже нет среди кнопок, тоже показываем — чтобы их можно было снять.
   const itemChoices = [...completeness, ...s.perItem.filter((p) => !completeness.some((c) => c.toLowerCase() === p.toLowerCase()))];
 
-  const data =
-    sample === "accessory"
-      ? { ...SAMPLE_LABEL, workshop: workshop || SAMPLE_LABEL.workshop }
-      : { ...SAMPLE_LABEL, workshop: workshop || SAMPLE_LABEL.workshop, item: { title: "Ноутбук", index: 1, total: 3, accessory: false } };
+  const logo = useLabelLogo(s.fields.logo);
+  const base = { ...SAMPLE_LABEL, workshop: workshop || SAMPLE_LABEL.workshop, logo: logo.logo };
+  const data = sample === "accessory" ? base : { ...base, item: { title: "Ноутбук", index: 1, total: 3, accessory: false } };
   const dots = s.code === "code128" ? barcodeDots(s, SAMPLE_LABEL.code) : 3;
   // Предпросмотр — не шире 360 точек и не выше 300.
   const scale = Math.min(360 / (s.width * PX_PER_MM), 300 / (s.height * PX_PER_MM), 2.4);
@@ -189,6 +189,20 @@ export function LabelDesigner({
               <Checkbox key={f.id} checked={s.fields[f.id]} onChange={() => toggleField(f.id)} label={f.label} />
             ))}
           </div>
+          {s.fields.logo && logo.ready && logo.missing && (
+            <p className="mt-2 text-[12.5px] text-state-waiting">
+              Логотип не загружен. Он берётся из{" "}
+              <Link to="/settings/print" className="font-semibold underline">
+                «Настройки → Бланки»
+              </Link>{" "}
+              — тот же, что на квитанции.
+            </p>
+          )}
+          {s.fields.logo && logo.logo && (
+            <p className="mt-2 text-[12.5px] text-ink-dim">
+              Логотип — из «Бланков», для термопринтера переведён в чёрно-белый: так он и выйдет на наклейке.
+            </p>
+          )}
         </section>
 
         <section>
