@@ -9,8 +9,8 @@ import { actorUserId, authenticate, currentTenantId, permissionsOf, requireTenan
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { assertOrderAccess, seesCustomerContacts } from "../orders/orders.service";
 import { createPairCode, listPhones, revokePhone } from "./sms.phone";
-import { networkInterfaces } from "node:os";
 import { env } from "../../lib/env";
+import { lanAddresses } from "../../lib/lan";
 import { relayAgentState } from "../relay/relay.instance";
 import { defaultRelayUrl, readRemoteAccess } from "../relay/remoteAccess";
 import { publicAddress } from "../relay/invite";
@@ -183,18 +183,21 @@ smsRouter.post(
  * интернет (узел связи /b/<код>/ — работает и по сотовой сети) и по сети
  * мастерской (http://<адрес компьютера>:<порт>/ — только в том же Wi-Fi).
  */
-async function phoneAddresses(): Promise<{ remote?: string; lan?: string }> {
+async function phoneAddresses(): Promise<{ box?: true; remote?: string; lan?: string; lans?: string[] }> {
   if (env.storageDriver !== "local") return {};
-  const out: { remote?: string; lan?: string } = {};
+  const out: { box: true; remote?: string; lan?: string; lans?: string[] } = { box: true };
   const saved = await readRemoteAccess().catch(() => null);
   if (saved?.enabled && saved.code && relayAgentState().state === "online") {
     out.remote = publicAddress(saved.url || defaultRelayUrl(), saved.code);
   }
-  const ip = Object.values(networkInterfaces())
-    .flat()
-    .find((a) => a && a.family === "IPv4" && !a.internal && !a.address.startsWith("169.254."));
   // Основа слушает только себя, пока раздача по сети не включена, — тогда адрес в сети бесполезен.
-  if (ip && env.bindHost !== "127.0.0.1" && env.bindHost !== "localhost") out.lan = `http://${ip.address}:${env.port}/`;
+  if (env.bindHost !== "127.0.0.1" && env.bindHost !== "localhost") {
+    const lans = lanAddresses().map((ip) => `http://${ip}:${env.port}/`);
+    if (lans.length) {
+      out.lan = lans[0];
+      out.lans = lans;
+    }
+  }
   return out;
 }
 

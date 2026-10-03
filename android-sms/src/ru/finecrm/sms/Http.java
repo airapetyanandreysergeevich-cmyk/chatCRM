@@ -7,9 +7,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.ConnectException;
 import java.net.HttpURLConnection;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+
+import javax.net.ssl.SSLException;
 
 /**
  * Запросы к FineCRM: JSON туда и обратно, ключ телефона — в заголовке
@@ -26,7 +32,7 @@ final class Http {
     }
 
     /** Сервер ответил отказом с объяснением — его и показываем. */
-    static final class Refused extends IOException {
+    static class Refused extends IOException {
         final int code;
 
         Refused(int code, String message) {
@@ -35,12 +41,24 @@ final class Http {
         }
     }
 
+    /** По адресу ответил кто-то другой (роутер, чужой сайт) — значит, адрес не тот. */
+    static final class NotFineCrm extends Refused {
+        NotFineCrm(int code) {
+            super(code, "по этому адресу отвечает не FineCRM (HTTP " + code + ")");
+        }
+    }
+
     static JSONObject request(String method, String url, String token, JSONObject body, int readTimeoutMs)
+            throws IOException, Unauthorized {
+        return request(method, url, token, body, readTimeoutMs, 15000);
+    }
+
+    static JSONObject request(String method, String url, String token, JSONObject body, int readTimeoutMs, int connectTimeoutMs)
             throws IOException, Unauthorized {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         try {
             conn.setRequestMethod(method);
-            conn.setConnectTimeout(15000);
+            conn.setConnectTimeout(connectTimeoutMs);
             conn.setReadTimeout(readTimeoutMs);
             conn.setUseCaches(false);
             conn.setRequestProperty("Accept", "application/json");
@@ -66,7 +84,7 @@ final class Http {
                 json = text.isEmpty() ? new JSONObject() : new JSONObject(text);
             } catch (JSONException e) {
                 // Вместо ответа FineCRM пришла страница: адрес не тот или мешает сеть.
-                throw new Refused(code, "По этому адресу отвечает не FineCRM (HTTP " + code + ")");
+                throw new NotFineCrm(code);
             }
             if (code == 401) throw new Unauthorized(json.optString("error", "Телефон отключён от мастерской"));
             if (code >= 400) throw new Refused(code, json.optString("error", "Сервер ответил ошибкой " + code));
@@ -74,6 +92,22 @@ final class Http {
         } finally {
             conn.disconnect();
         }
+    }
+
+    /**
+     * Ошибка связи — человеческими словами. Android пишет «failed to connect to
+     * /26.124.34.218 (port 7373) from /192.168.1.246 … after 15000ms», а человеку
+     * нужно понять, что делать.
+     */
+    static String human(Exception e) {
+        if (e instanceof Refused) return e.getMessage();
+        if (e instanceof UnknownHostException) return "адрес не найден — проверьте адрес и интернет на телефоне";
+        if (e instanceof SocketTimeoutException || e instanceof ConnectException || e instanceof NoRouteToHostException) {
+            return "компьютер с FineCRM не отвечает по этому адресу";
+        }
+        if (e instanceof SSLException) return "не удалось установить защищённое соединение";
+        String m = e.getMessage();
+        return m == null || m.isEmpty() ? "нет связи" : m;
     }
 
     private static String read(InputStream in) throws IOException {

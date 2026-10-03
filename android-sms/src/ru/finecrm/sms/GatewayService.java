@@ -135,8 +135,7 @@ public class GatewayService extends Service {
                 break;
             } catch (Exception e) {
                 if (!running) break;
-                String why = e.getMessage() == null ? "нет связи" : e.getMessage();
-                Store.setStatus(this, false, "Нет связи с FineCRM: " + why);
+                Store.setStatus(this, false, "Нет связи с FineCRM: " + Http.human(e));
                 update("Нет связи с FineCRM — пробуем снова");
                 sleep(backoff);
                 backoff = Math.min(backoff * 2, 60000);

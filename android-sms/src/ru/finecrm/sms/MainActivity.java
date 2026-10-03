@@ -26,6 +26,9 @@ import android.widget.TextView;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Единственный экран: подключение к мастерской, состояние связи и три
  * разрешения, без которых шлюз не работает (SMS, уведомления, экономия
@@ -109,7 +112,10 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
-    /** Ссылка из QR-кода: finecrmsms://pair?u=<адрес>&c=<код> — подключаемся сразу. */
+    /** Запасные адреса из QR-кода: у компьютера бывает несколько сетей, и первая может оказаться не той. */
+    private final List<String> alternates = new ArrayList<>();
+
+    /** Ссылка из QR-кода: finecrmsms://pair?u=<адрес>&c=<код>[&a=<запасной>…] — подключаемся сразу. */
     private void handleLink(Intent intent) {
         Uri data = intent == null ? null : intent.getData();
         render();
@@ -117,6 +123,11 @@ public class MainActivity extends Activity {
         String u = data.getQueryParameter("u");
         String c = data.getQueryParameter("c");
         if (u == null || c == null) return;
+        alternates.clear();
+        for (String a : data.getQueryParameters("a")) {
+            String n = Http.normalizeBase(a);
+            if (!n.isEmpty()) alternates.add(n);
+        }
         if (Store.paired(this)) {
             say("Телефон уже подключён к «" + Store.workshop(this) + "». Чтобы подключить к другой мастерской, сначала нажмите «Отключить».", BAD);
             return;
@@ -245,26 +256,52 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // Сначала введённый адрес, потом запасные из QR-кода. Сервер ответил
+                // отказом (код устарел) — дальше не перебираем: ответ уже есть.
+                List<String> tries = new ArrayList<>();
+                tries.add(base);
+                for (String a : alternates) if (!tries.contains(a)) tries.add(a);
                 String error = null;
-                try {
-                    JSONObject body = new JSONObject();
-                    body.put("code", c);
-                    body.put("name", Build.MANUFACTURER + " " + Build.MODEL);
-                    body.put("info", GatewayService.state(MainActivity.this));
-                    JSONObject r = Http.request("POST", base + "api/sms/phone/pair", null, body, 20000);
-                    Store.pair(MainActivity.this, base, r.getString("token"), r.optString("workshop", ""));
-                } catch (Exception e) {
-                    error = e.getMessage() == null ? "Не удалось подключиться" : e.getMessage();
+                String worked = null;
+                for (int i = 0; i < tries.size(); i++) {
+                    String at = tries.get(i);
+                    try {
+                        JSONObject body = new JSONObject();
+                        body.put("code", c);
+                        body.put("name", Build.MANUFACTURER + " " + Build.MODEL);
+                        body.put("info", GatewayService.state(MainActivity.this));
+                        // С запасными адресами не ждём по 15 секунд на каждый.
+                        int connect = tries.size() > 1 ? 7000 : 15000;
+                        JSONObject r = Http.request("POST", at + "api/sms/phone/pair", null, body, 20000, connect);
+                        Store.pair(MainActivity.this, at, r.getString("token"), r.optString("workshop", ""));
+                        worked = at;
+                        error = null;
+                        break;
+                    } catch (Http.NotFineCrm e) {
+                        error = e.getMessage() + " (" + at + ")";
+                    } catch (Http.Refused e) {
+                        error = e.getMessage();
+                        break;
+                    } catch (Exception e) {
+                        error = Http.human(e) + " (" + at + ")";
+                    }
                 }
                 final String failed = error;
+                final String address2 = worked;
+                final boolean many = tries.size() > 1;
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
                         busy = false;
                         if (failed != null) {
-                            say("Не получилось: " + failed, BAD);
+                            say("Не получилось: " + failed + ".\n\n"
+                                    + (many ? "Ни один из адресов мастерской не ответил. " : "")
+                                    + "Телефон должен быть в том же Wi-Fi, что и компьютер с FineCRM. "
+                                    + "Или включите в FineCRM «Настройки → Доступ из интернета» и возьмите новый код — "
+                                    + "тогда телефон подключится откуда угодно.", BAD);
                             return;
                         }
+                        if (address2 != null) address.setText(address2);
                         say("Подключено к «" + Store.workshop(MainActivity.this) + "»", OK);
                         GatewayService.start(MainActivity.this);
                         if (!granted(Manifest.permission.SEND_SMS) && Build.VERSION.SDK_INT >= 23) {

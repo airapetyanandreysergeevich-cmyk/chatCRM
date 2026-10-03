@@ -436,6 +436,16 @@ function PhonesBlock({ phones, onPair, onChanged }: { phones: SmsPhone[] | null;
 const isLocal = (host: string) => host === "localhost" || host.startsWith("127.") || host === "[::1]";
 
 /**
+ * Адреса для телефона, лучший первым. Основа сама говорит, где её искать
+ * (через интернет, потом сеть мастерской); облако — нет, там годится адрес
+ * этой страницы.
+ */
+function addressOptions(pair: PairCode, here: string | null): string[] {
+  const list = pair.box ? [pair.remote, ...(pair.lans ?? (pair.lan ? [pair.lan] : []))] : [here];
+  return [...new Set(list.filter((a): a is string => !!a))];
+}
+
+/**
  * Подключение телефона: QR-код и 6 цифр. QR открывает в браузере телефона
  * страницу «/sms-phone» — с неё приложение запускается уже с адресом и кодом.
  * Окно само замечает новый телефон и закрывается.
@@ -457,11 +467,23 @@ function PairModal({ known, onClose, onPaired }: { known: Set<string>; onClose: 
     void get();
   }, [get]);
 
-  // Куда стучаться телефону: у Основы — через интернет, если доступ включён;
-  // иначе тот адрес, по которому открыта эта страница (если он не «этот компьютер»).
+  // Куда стучаться телефону. В облаке — туда же, где открыта эта страница.
+  // У Основы — через интернет, если доступ включён (работает и без Wi-Fi), иначе
+  // адрес компьютера в сети мастерской. Адрес этой страницы у Основы не годится:
+  // её могли открыть через Radmin VPN или другой адрес, которого телефон не знает.
   const here = window.location.origin + BASE;
-  const server = pair?.remote ?? (!isLocal(window.location.hostname) ? here : pair?.lan) ?? null;
-  const link = pair && server ? `${server}sms-phone?c=${pair.code}&u=${encodeURIComponent(server)}` : null;
+  const options = pair ? addressOptions(pair, isLocal(window.location.hostname) ? null : here) : [];
+  const [picked, setPicked] = useState<string | null>(null);
+  const server = picked && options.includes(picked) ? picked : options[0] ?? null;
+  // Запасные адреса едут в QR-коде: не достучится по первому — приложение попробует их.
+  const link =
+    pair && server
+      ? `${server}sms-phone?c=${pair.code}&u=${encodeURIComponent(server)}` +
+        options
+          .filter((a) => a !== server)
+          .map((a) => `&a=${encodeURIComponent(a)}`)
+          .join("")
+      : null;
 
   useEffect(() => {
     if (!link || !qrRef.current) return;
@@ -517,13 +539,45 @@ function PairModal({ known, onClose, onPaired }: { known: Set<string>; onClose: 
                   </span>
                 </p>
                 <p className="text-[12.5px] text-ink-dim">Код действует 10 минут, до {formatDateTime(pair.expiresAt)}.</p>
+                {options.length > 1 && (
+                  <div className="text-[12.5px] text-ink-dim">
+                    Не подключается — другой адрес:
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {options
+                        .filter((a) => a !== server)
+                        .map((a) => (
+                          <button
+                            key={a}
+                            type="button"
+                            onClick={() => setPicked(a)}
+                            className="rounded-full border border-line px-2.5 py-0.5 font-mono text-[12px] text-ink-soft hover:border-brand hover:text-ink"
+                          >
+                            {a}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
             <Banner tone="warning">
-              Телефону некуда подключиться: страница открыта на самом компьютере Основы, а доступ из интернета не включён
-              и раздача по сети тоже. Включите «Доступ из интернета» в настройках или откройте эту страницу с другого
-              устройства в сети мастерской.
+              Телефону некуда подключиться: доступ из интернета не включён, и Основа не открыта для других устройств в
+              сети мастерской. Включите{" "}
+              <Link to="/settings/remote-access" className="font-semibold underline">
+                «Доступ из интернета»
+              </Link>{" "}
+              — тогда телефон подключится и по Wi-Fi, и по мобильной сети.
+            </Banner>
+          )}
+          {pair.box && !pair.remote && server && (
+            <Banner tone="info">
+              Телефон подключится, только если он в том же Wi-Fi, что и этот компьютер. Чтобы SMS уходили, даже когда
+              телефон в мобильной сети, включите{" "}
+              <Link to="/settings/remote-access" className="font-semibold underline">
+                «Доступ из интернета»
+              </Link>{" "}
+              и возьмите новый код.
             </Banner>
           )}
           <p className="text-[12.5px] text-ink-dim">

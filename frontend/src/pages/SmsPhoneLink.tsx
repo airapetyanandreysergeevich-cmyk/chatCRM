@@ -13,8 +13,13 @@ export default function SmsPhoneLink() {
   const [params] = useSearchParams();
   const code = (params.get("c") ?? "").replace(/\D/g, "").slice(0, 6);
   const server = params.get("u") ?? "";
+  // Запасные адреса: приложение попробует их, если по первому не достучится.
+  const extra = params
+    .getAll("a")
+    .map((a) => `&a=${encodeURIComponent(a)}`)
+    .join("");
   const intent =
-    `intent://pair?u=${encodeURIComponent(server)}&c=${code}` +
+    `intent://pair?u=${encodeURIComponent(server)}&c=${code}${extra}` +
     `#Intent;scheme=finecrmsms;package=ru.finecrm.sms;S.browser_fallback_url=${encodeURIComponent(SMS_APP_URL)};end`;
 
   return (
