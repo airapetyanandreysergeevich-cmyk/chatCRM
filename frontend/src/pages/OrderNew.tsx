@@ -1,6 +1,6 @@
 import { copyable } from "../components/CopyMenu";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { IconCamera, IconClose, IconCompany, IconPerson, IconSettings } from "../components/icons";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { formatSize } from "../lib/photos";
@@ -233,6 +233,51 @@ export default function OrderNew() {
     setSameDevice(null);
     setCustomer((c) => ({ ...c, id: "" }));
   }
+
+  /**
+   * «Принять снова — та же техника» из меню заказа: клиент и техника того
+   * заказа сразу на бланке, новый заказ продолжает историю той же вещи
+   * (как «Эта техника» в прошлых заказах клиента). Метка в истории браузера
+   * снимается — обновление страницы не подставит второй раз.
+   */
+  const location = useLocation();
+  const repeatFrom = (location.state as { repeatFrom?: string } | null)?.repeatFrom ?? null;
+  useEffect(() => {
+    if (!repeatFrom) return;
+    navigate(location.pathname, { replace: true, state: null });
+    void (async () => {
+      try {
+        const o = await ordersApi.get(repeatFrom);
+        const c = o.customer;
+        if (c.name) {
+          const hits = c.phone ? await ordersApi.suggestCustomers({ phone: c.phone }).catch(() => []) : [];
+          const hit = hits.find((h) => h.id === c.id);
+          pickCustomer(
+            hit ?? {
+              id: c.id,
+              type: c.type,
+              name: c.name,
+              phone: c.phone ?? "",
+              phone2: c.phone2 ?? null,
+              email: c.email ?? null,
+              address: c.address ?? null,
+              source: null,
+              color: c.color ?? null,
+              discountPercent: 0,
+              orderCount: 0,
+            }
+          );
+        }
+        if (o.device) {
+          setDevice({ kind: o.device.kind ?? "", brand: o.device.brand ?? "", model: o.device.model ?? "", serial: o.device.serial ?? "" });
+          setSameDevice({ id: o.device.id, number: o.number, orderId: o.id });
+          if (o.device.serial) setScannedSerial(true);
+        }
+      } catch {
+        /* не нашли заказ — обычный пустой бланк */
+      }
+    })();
+  }, [repeatFrom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Превью снимков — память браузера: освобождаем, когда форма закрыта.
   const photoUrls = useRef<string[]>([]);

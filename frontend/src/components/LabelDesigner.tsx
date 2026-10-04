@@ -60,12 +60,18 @@ export function LabelDesigner({
   const [sample, setSample] = useState<"device" | "accessory" | "long">("accessory");
   const [overKinds, setOverKinds] = useState<ElKind[]>([]);
 
-  useEffect(() => {
-    setS(initial);
-    setSaved(initial);
-  }, [initial]);
-
   const dirty = !sameSettings(s, saved);
+  // Страница «Периферия» перезагружает настройки каждые 20 секунд (компьютеры с принтерами появляются и
+  // пропадают) — и каждый раз приходит новый объект. Несохранённую правку он не затирает: принимаем его,
+  // только если настройка и правда изменилась (сохранили с другого компьютера), а у нас ничего не начато.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const initialKey = JSON.stringify(initial);
+  useEffect(() => {
+    setSaved((prev) => (sameSettings(prev, initial) ? prev : initial));
+    if (!dirtyRef.current) setS((cur) => (sameSettings(cur, initial) ? cur : initial));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialKey]);
   const set = (patch: Partial<LabelSettings>) => setS((x) => ({ ...x, ...patch }));
   const toggleField = (f: LabelField) => setS((x) => ({ ...x, fields: { ...x.fields, [f]: !x.fields[f] } }));
   const hasItem = (label: string) => s.perItem.some((x) => x.toLowerCase() === label.toLowerCase());

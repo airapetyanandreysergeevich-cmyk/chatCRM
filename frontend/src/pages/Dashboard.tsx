@@ -6,7 +6,9 @@ import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
-import { money } from "../lib/orders";
+import { money, type OrderStatus } from "../lib/orders";
+import { menuFromBoard, useOrderMenu } from "../components/OrderMenu";
+import { IconMore } from "../components/icons";
 import { STAGES, type Stage } from "../lib/stages";
 import { GearButton, PanelMenu } from "../components/PanelMenu";
 import { columnsFor, isShown, panelLabel, withPanel } from "../lib/dashboard";
@@ -117,21 +119,64 @@ function OverduePanel({ rows, total }: { rows: OverdueDebt[]; total: number }) {
   );
 }
 
-function OrderCardTile({ card }: { card: BoardCard }) {
+type Om = ReturnType<typeof useOrderMenu>;
+
+function OrderCardTile({
+  card,
+  om,
+  dragging,
+  onDragStart,
+  onDragEnd,
+}: {
+  card: BoardCard;
+  om: Om;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
   const due = dueLabel(card.dueAt);
   const device =
     [card.device?.kind, card.device?.brand, card.device?.model].filter(Boolean).join(" ") ||
     "Техника не указана";
+  const menu = menuFromBoard(card);
+  // Тянуть можно то, чей статус человеку можно менять: мастер с правом «только свои» — свои.
+  const canDrag = om.canStatus(menu);
 
   return (
     <Link
       to={`/orders/${card.id}`}
-      className="block rounded-card border border-line bg-surface-raised p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+      data-card={card.id}
+      {...om.bind(menu)}
+      draggable={canDrag}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", card.number);
+        // Поля статусов — уже после начала перетаскивания: если менять страницу
+        // прямо внутри dragstart, Chromium (и программа на Electron) обрывает перетаскивание.
+        setTimeout(onDragStart, 0);
+      }}
+      onDragEnd={() => setTimeout(onDragEnd, 0)}
+      className={
+        "group relative block select-none rounded-card border border-line bg-surface-raised p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand " +
+        (canDrag ? "cursor-grab active:cursor-grabbing " : "") +
+        (dragging ? "opacity-40" : "")
+      }
     >
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-[13px] font-semibold text-ink-soft" {...copyable("order", card.number)}>{card.number}</span>
+      {/* Место под «⋯» — только где она видна всегда (телефон); мышью она появляется поверх, при наведении. */}
+      <div className="flex items-center gap-2 [@media(hover:none)]:pr-7">
+        <span className="whitespace-nowrap font-mono text-[13px] font-semibold text-ink-soft" {...copyable("order", card.number)}>{card.number}</span>
         {card.isUrgent && <Badge tone="danger">срочный</Badge>}
       </div>
+      {/* «⋯» — то же меню, что по правой кнопке: на телефоне правой кнопки нет,
+          а долгое нажатие не всякий догадается сделать. */}
+      <button
+        type="button"
+        aria-label={`Меню заказа ${card.number}`}
+        onClick={(e) => om.openFrom(menu, e)}
+        className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-field bg-surface-raised text-ink-dim opacity-0 transition-opacity duration-150 hover:bg-surface-input hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+      >
+        <IconMore className="h-[18px] w-[18px]" />
+      </button>
 
       <p className="mt-1.5 truncate text-[14px] font-semibold">{device}</p>
 
@@ -163,6 +208,59 @@ function OrderCardTile({ card }: { card: BoardCard }) {
   );
 }
 
+/**
+ * Куда бросить перетаскиваемый заказ: статусы колонки отдельными полями
+ * поверх неё («Ожидает согласования» / «Ожидание запчасти»). Нынешний статус
+ * заказа виден, но бросить в него нельзя.
+ */
+function DropZones({
+  statuses,
+  card,
+  onDrop,
+}: {
+  statuses: OrderStatus[];
+  card: BoardCard;
+  onDrop: (s: OrderStatus) => void;
+}) {
+  const [over, setOver] = useState<string | null>(null);
+  return (
+    <div className="absolute inset-x-2 bottom-2 top-[46px] z-10 flex flex-col gap-2" data-drop-zones>
+      {statuses.map((s) => {
+        const here = s.id === card.status.id;
+        return (
+          <div
+            key={s.id}
+            data-drop={s.name}
+            onDragOver={(e) => {
+              if (here) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (over !== s.id) setOver(s.id);
+            }}
+            onDragLeave={() => setOver((v) => (v === s.id ? null : v))}
+            onDrop={(e) => {
+              e.preventDefault();
+              setOver(null);
+              if (!here) onDrop(s);
+            }}
+            className={
+              "flex min-h-[64px] flex-1 items-center justify-center rounded-card border-2 border-dashed px-3 text-center text-[14px] font-bold backdrop-blur-[3px] transition-colors duration-100 " +
+              (here
+                ? "border-line bg-surface/80 text-ink-dim"
+                : over === s.id
+                  ? "border-brand bg-brand-tint/95 text-brand-ink"
+                  : "border-line-strong bg-surface/85 text-ink-soft")
+            }
+          >
+            {s.name}
+            {here && <span className="ml-1.5 font-normal">— сейчас здесь</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Общая рамка колонки: подсветка сверху, заголовок с числом и шестерёнкой. */
 function PanelShell({
   title,
@@ -172,8 +270,10 @@ function PanelShell({
   glow,
   dot,
   gear,
+  tall = false,
   children,
 }: {
+  tall?: boolean;
   title: string;
   count: number;
   titleHref?: string;
@@ -197,7 +297,7 @@ function PanelShell({
   );
 
   return (
-    <section className="relative rounded-panel border border-line bg-surface p-3 sm:p-3.5">
+    <section className={"relative rounded-panel border border-line bg-surface p-3 sm:p-3.5 " + (tall ? "min-h-[260px]" : "")} data-stage-panel>
       {/* Цвет стадии — тонкая светящаяся полоса по верхней грани. Отдельным
           элементом, а не рамкой: рамка читается как контур, а нужна
           подсветка. Чуть отступает от углов, чтобы не спорить со скруглением. */}
@@ -232,6 +332,11 @@ function StageColumnPanel({
   prefs,
   gear,
   onOpenMenu,
+  om,
+  drag,
+  setDrag,
+  statuses,
+  onDrop,
 }: {
   stage: Stage;
   column: StageColumn;
@@ -240,6 +345,13 @@ function StageColumnPanel({
   prefs: PanelPrefs | undefined;
   gear: React.ReactNode;
   onOpenMenu: () => void;
+  om: Om;
+  /** Заказ, который сейчас тянут. */
+  drag: BoardCard | null;
+  setDrag: (c: BoardCard | null) => void;
+  /** Статусы этой колонки — куда можно бросить. */
+  statuses: OrderStatus[];
+  onDrop: (card: BoardCard, s: OrderStatus) => void;
 }) {
   // Число задано руками — показываем ровно столько, иначе сколько влезает.
   const limit = prefs?.limit ?? fit;
@@ -256,13 +368,21 @@ function StageColumnPanel({
       glow={stage.glow}
       dot={stage.dot}
       gear={gear}
+      tall={!!drag && statuses.length > 0}
     >
       {shown.length === 0 ? (
         <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Пусто</p>
       ) : (
         <div className="space-y-2" data-cards>
           {shown.map((card) => (
-            <OrderCardTile key={card.id} card={card} />
+            <OrderCardTile
+              key={card.id}
+              card={card}
+              om={om}
+              dragging={drag?.id === card.id}
+              onDragStart={() => setDrag(card)}
+              onDragEnd={() => setDrag(null)}
+            />
           ))}
         </div>
       )}
@@ -287,6 +407,8 @@ function StageColumnPanel({
           скрыто фильтром: {filtered}
         </button>
       )}
+
+      {drag && statuses.length > 0 && <DropZones statuses={statuses} card={drag} onDrop={(st) => onDrop(drag, st)} />}
     </PanelShell>
   );
 }
@@ -487,7 +609,10 @@ export default function Dashboard() {
     const n = ++request.current;
     return summaryApi
       .get()
-      .then((d) => n === request.current && setData(d))
+      .then((d) => {
+        if (n === request.current) setData(d);
+        return d;
+      })
       .catch((err) => {
         if (n === request.current) setError(err instanceof ApiError ? err.message : "Не удалось загрузить доску");
       });
@@ -496,6 +621,37 @@ export default function Dashboard() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Меню заказа (правая кнопка, долгое нажатие) и перетаскивание между колонками.
+  const om = useOrderMenu({ onChanged: load });
+  const [drag, setDrag] = useState<BoardCard | null>(null);
+
+  async function dropTo(card: BoardCard, status: OrderStatus) {
+    setDrag(null);
+    if (status.id === card.status.id) return;
+    // Карточка переезжает сразу; ответ сервера и перечитанная доска поставят её на место по сортировке.
+    setData((d) => {
+      if (!d) return d;
+      return {
+        ...d,
+        stages: d.stages.map((col) => {
+          const had = col.items.some((c) => c.id === card.id);
+          const items = col.items.filter((c) => c.id !== card.id);
+          if (col.key === status.group) return { ...col, items: [{ ...card, status }, ...items], total: col.total + (had ? 0 : 1) };
+          return had ? { ...col, items, total: Math.max(0, col.total - 1) } : col;
+        }),
+      };
+    });
+    await om.changeStatus(menuFromBoard(card), status, {
+      note: (reloaded) => {
+        const d = reloaded as Summary | false | undefined;
+        if (!d) return null;
+        const col = d.stages.find((c) => c.key === status.group);
+        const limit = d.prefs.panels[status.group as ColumnKey]?.limit ?? fit;
+        return col?.items.slice(0, limit).some((c) => c.id === card.id) ? null : "в колонке не видно: скрыт фильтром или не поместился";
+      },
+    });
+  }
 
   // Сохраняем с небольшой задержкой: пять щелчков по галочкам подряд — это
   // одна запись и одна перерисовка, а не пять.
@@ -661,11 +817,17 @@ export default function Dashboard() {
                 prefs={prefs.panels[key]}
                 gear={gearFor(key)}
                 onOpenMenu={() => setMenu(key)}
+                om={om}
+                drag={drag}
+                setDrag={setDrag}
+                statuses={(om.reference?.statuses ?? []).filter((st) => st.group === key)}
+                onDrop={(card, st) => void dropTo(card, st)}
               />
             );
           })}
         </div>
       )}
+      {om.element}
     </div>
   );
 }

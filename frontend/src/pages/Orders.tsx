@@ -31,6 +31,7 @@ import {
   type Order,
 } from "../lib/orders";
 import { STAGES } from "../lib/stages";
+import { menuFromOrder, useOrderMenu } from "../components/OrderMenu";
 import { fixLayoutEnabled } from "../lib/searchPrefs";
 import { SearchFixedHint } from "../components/SearchFixedHint";
 import { listPref, remember } from "../lib/listPrefs";
@@ -152,8 +153,9 @@ export default function Orders() {
     window.scrollTo({ top: 0 });
   };
 
-  const load = useCallback(async () => {
-    setRows(null);
+  // quiet — перечитать после действия из меню заказа, не мигая списком.
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setRows(null);
     try {
       const query: Record<string, string> = { page: String(page) };
       if (group === "DEBT") query.debt = "1";
@@ -178,6 +180,8 @@ export default function Orders() {
     const t = setTimeout(() => void load(), search ? 350 : 0);
     return () => clearTimeout(t);
   }, [load, search]);
+
+  const om = useOrderMenu({ onChanged: () => load(true) });
 
   if (error) return <Banner tone="error">{error}</Banner>;
 
@@ -283,6 +287,8 @@ export default function Orders() {
                 // запросом: карточка подсветит ту самую запись.
                 to={o.foundMessage ? `/orders/${o.id}?found=${o.foundMessage.id}#history` : `/orders/${o.id}`}
                 className="block"
+                data-order-row={o.id}
+                {...om.bind(menuFromOrder(o))}
               >
                 <ListRow
                   glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
@@ -365,6 +371,7 @@ export default function Orders() {
       )}
 
       {rows && <Pager {...pageInfo} onPage={setPage} />}
+      {om.element}
     </div>
   );
 }
