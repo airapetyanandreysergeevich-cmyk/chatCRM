@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import qrcode from "qrcode-generator";
-import { code128Bars, moduleWidth, type LabelSettings } from "../lib/labels";
+import { code128Bars, DOT_MM, moduleWidth, type LabelSettings } from "../lib/labels";
+import { activeLayout, elOn, elText, isText, PT, type ElKind, type LabelLayout } from "../lib/labelLayout";
 
 /**
  * Одна наклейка — в миллиметрах, чёрным по белому.
@@ -33,7 +34,7 @@ export interface LabelData {
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const mm = (v: number) => `${Math.round(v * 100) / 100}mm`;
 
-function Code128({ code, width, height }: { code: string; width: number; height: number }) {
+function Code128({ code, width, height, align = "center" }: { code: string; width: number; height: number; align?: "left" | "center" | "right" }) {
   const { bars, modules } = useMemo(() => code128Bars(code), [code]);
   const m = moduleWidth(modules, width);
   return (
@@ -43,7 +44,7 @@ function Code128({ code, width, height }: { code: string; width: number; height:
       viewBox={`0 0 ${modules} 10`}
       preserveAspectRatio="none"
       shapeRendering="crispEdges"
-      style={{ display: "block", margin: "0 auto" }}
+      style={{ display: "block", margin: align === "center" ? "0 auto" : align === "right" ? "0 0 0 auto" : "0" }}
       aria-label={`Штрихкод ${code}`}
     >
       {bars.map(([x, w]) => (
@@ -53,7 +54,7 @@ function Code128({ code, width, height }: { code: string; width: number; height:
   );
 }
 
-function QrCode({ code, size }: { code: string; size: number }) {
+function QrCode({ code, size, style }: { code: string; size: number; style?: CSSProperties }) {
   const cells = useMemo(() => {
     const q = qrcode(0, "M");
     q.addData(code);
@@ -70,7 +71,7 @@ function QrCode({ code, size }: { code: string; size: number }) {
       height={mm(size)}
       viewBox={`${-pad} ${-pad} ${cells.n + pad * 2} ${cells.n + pad * 2}`}
       shapeRendering="crispEdges"
-      style={{ display: "block", flexShrink: 0 }}
+      style={{ display: "block", flexShrink: 0, ...style }}
       aria-label={`QR-код ${code}`}
     >
       {cells.out.map(([x, y]) => (
@@ -87,19 +88,140 @@ export function barcodeDots(settings: LabelSettings, code: string): number {
   return moduleWidth(code128Bars(code).modules, iw - pad * 2).dots;
 }
 
+
+/**
+ * Свой макет: каждый элемент — на своём месте, в миллиметрах. Тот же код
+ * рисует и наклейку на печать, и макет в конструкторе (там поверх ложатся
+ * рамки для перетаскивания), — что видно в редакторе, то и выйдет.
+ *
+ * onOverflow получает элементы, которые не влезли: текст длиннее рамки,
+ * штрихкод уже одной точки на модуль, элемент за краем этикетки.
+ */
+export function LayoutElements({
+  layout,
+  settings,
+  data,
+  onOverflow,
+  placeholders = false,
+}: {
+  layout: LabelLayout;
+  settings: LabelSettings;
+  data: LabelData;
+  onOverflow?: (kinds: ElKind[]) => void;
+  /** В редакторе: пустой элемент (у техники нет «вещи из комплекта») всё равно занимает место — его видно и можно двигать. */
+  placeholders?: boolean;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const shown = layout.elements.filter((e) => elOn(settings, e.kind));
+  const key = JSON.stringify([shown, data, settings.code]);
+  useLayoutEffect(() => {
+    if (!onOverflow || !box.current) return;
+    const bad: ElKind[] = [];
+    for (const e of shown) {
+      const out = e.x < -0.05 || e.y < -0.05 || e.x + e.w > layout.w + 0.05 || e.y + e.h > layout.h + 0.05;
+      let over = false;
+      const node = box.current.querySelector<HTMLElement>(`[data-kind="${e.kind}"]`);
+      const t = node?.querySelector<HTMLElement>("[data-text]");
+      if (t && node) {
+        over = t.scrollWidth > t.clientWidth + 0.5 || t.scrollHeight > t.clientHeight + 1 || t.offsetHeight > node.clientHeight + 0.5;
+      }
+      if (e.kind === "code" && settings.code === "code128") over = code128Bars(data.code).modules * DOT_MM > e.w + 0.01;
+      if (out || over) bad.push(e.kind);
+    }
+    onOverflow(bad);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return (
+    <div ref={box} style={{ position: "absolute", inset: 0 }}>
+      {shown.map((e) => {
+        const pos: CSSProperties = { position: "absolute", left: mm(e.x), top: mm(e.y), width: mm(e.w), height: mm(e.h), overflow: "hidden" };
+        if (e.kind === "code") {
+          return (
+            <div key={e.kind} data-kind={e.kind} style={pos}>
+              {settings.code === "qr" ? (
+                <QrCode
+                  code={data.code}
+                  size={Math.min(e.w, e.h)}
+                  style={{ marginLeft: e.align === "center" ? "auto" : e.align === "right" ? "auto" : 0, marginRight: e.align === "center" ? "auto" : 0 }}
+                />
+              ) : (
+                <Code128 code={data.code} width={e.w} height={e.h} align={e.align ?? "center"} />
+              )}
+            </div>
+          );
+        }
+        if (e.kind === "logo") {
+          if (!data.logo && !placeholders) return null;
+          return (
+            <div key={e.kind} data-kind={e.kind} style={pos}>
+              {data.logo ? (
+                <img
+                  src={data.logo}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: `${e.align ?? "left"} center`, display: "block" }}
+                />
+              ) : (
+                <div style={{ width: "100%", height: "100%", border: "0.3mm dashed #000", fontSize: "2mm", display: "grid", placeItems: "center" }}>лого</div>
+              )}
+            </div>
+          );
+        }
+        if (!isText(e.kind)) return null;
+        const text = elText(e.kind, data);
+        if (text === null && !placeholders) return null;
+        const lines = e.lines ?? 1;
+        const size = (e.size ?? 8) * PT;
+        const style: CSSProperties = {
+          fontSize: mm(size),
+          fontWeight: e.bold ? (e.kind === "number" ? 800 : 700) : 400,
+          lineHeight: 1.15,
+          textAlign: e.align ?? "left",
+          textTransform: e.upper ? "uppercase" : undefined,
+          letterSpacing: e.upper ? "0.03em" : undefined,
+          overflow: "hidden",
+          ...(lines === 1
+            ? { whiteSpace: "nowrap", textOverflow: "ellipsis" }
+            : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", maxHeight: mm(size * 1.15 * lines) }),
+          opacity: text === null ? 0.35 : 1,
+        };
+        return (
+          <div key={e.kind} data-kind={e.kind} style={pos}>
+            <div data-text style={style}>
+              {text ?? EMPTY_HINT[e.kind]}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Что показать в пустом элементе на макете. */
+const EMPTY_HINT: Partial<Record<ElKind, string>> = {
+  counter: "1/3",
+  item: "Блок питания",
+  serial: "S/N —",
+  due: "Срок —",
+};
+
 export function Label({
   settings,
   data,
   onOverflow,
+  onOverflowKinds,
   className = "",
 }: {
   settings: LabelSettings;
   data: LabelData;
   /** Не всё влезло — для подсказки в конструкторе. */
   onOverflow?: (overflow: boolean) => void;
+  /** Свой макет: какие именно элементы не влезли. */
+  onOverflowKinds?: (kinds: ElKind[]) => void;
   className?: string;
 }) {
   const { width: W, height: H, rotate, fields: f } = settings;
+  const layout = activeLayout(settings);
   const iw = rotate ? H : W;
   const ih = rotate ? W : H;
   const pad = clamp(Math.min(W, H) * 0.045, 1.2, 2.4);
@@ -119,7 +241,7 @@ export function Label({
   const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = body.current;
-    if (!el || !onOverflow) return;
+    if (!el || !onOverflow || layout) return;
     onOverflow(el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1);
   });
 
@@ -201,8 +323,18 @@ export function Label({
       className={className}
       style={{ position: "relative", width: mm(W), height: mm(H), overflow: "hidden", background: "#fff", color: "#000", fontFamily: "Inter, Arial, sans-serif", lineHeight: lh }}
     >
-      <div style={inner}>
-        {settings.code === "qr" ? (
+      <div style={layout ? { ...inner, padding: 0 } : inner}>
+        {layout ? (
+          <LayoutElements
+            layout={layout}
+            settings={settings}
+            data={data}
+            onOverflow={(k) => {
+              onOverflow?.(k.length > 0);
+              onOverflowKinds?.(k);
+            }}
+          />
+        ) : settings.code === "qr" ? (
           <div ref={body} style={{ display: "flex", gap: mm(pad), height: "100%", overflow: "hidden" }}>
             <QrCode code={data.code} size={qrSide} />
             <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: mm(base * 0.12) }}>{lines}</div>

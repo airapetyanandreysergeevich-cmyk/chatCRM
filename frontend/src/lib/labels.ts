@@ -3,6 +3,7 @@ import { api } from "./api";
 import { printFormsApi } from "./printForms";
 import type { Order } from "./orders";
 import type { LabelData } from "../components/Label";
+import type { LabelLayout } from "./labelLayout";
 
 /**
  * Наклейки на технику: настройка, штрихкод и что на какой наклейке.
@@ -33,6 +34,9 @@ export interface LabelSettings {
   code: "code128" | "qr";
   fields: Record<LabelField, boolean>;
   perItem: string[];
+  /** Компоновка: автоматическая или свой макет (lib/labelLayout.ts). */
+  mode: "auto" | "custom";
+  layout: LabelLayout | null;
 }
 
 /** Ходовые размеры этикеток, мм: ширина × высота, как пишут на рулоне. */
@@ -276,3 +280,17 @@ export function useLabelLogo(wanted: boolean): { logo: string | null; ready: boo
   }, [wanted]);
   return state;
 }
+
+/** «Длинные данные» в конструкторе: проверить, что длинная фамилия или модель не вылезет за рамку. */
+export const LONG_LABEL: LabelData = {
+  ...SAMPLE_LABEL,
+  workshop: "Сервисный центр «Мастер на все руки»",
+  number: "Р-2026-123456",
+  code: "2026123456",
+  item: { title: "Сумка или чехол для ноутбука", index: 3, total: 4, accessory: true },
+  client: "Константинопольский К. К.",
+  phone: "9876",
+  device: "Ноутбук ASUS VivoBook Pro 15 OLED K6502VV-MA023",
+  serial: "R9N0CX12345678ABCDEF",
+  complaint: "Не включается после того, как залили сладким чаем, до этого периодически выключался при нагрузке",
+};
