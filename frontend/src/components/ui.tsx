@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ComponentType, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import {
   IconChevronDown,
@@ -201,6 +201,40 @@ export function Textarea({
         invalid ? "border-state-off" : "border-line",
         className
       )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * Однострочное поле, которое растёт вниз, когда текст не влезает: длинное
+ * название работы видно целиком, а не обрезано по краю (как и в акте).
+ * Enter новую строку не делает — это по-прежнему одно название.
+ */
+export function GrowText({
+  invalid,
+  className,
+  value,
+  onKeyDown,
+  ...props
+}: import("react").TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean; value: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onKeyDown={(e) => {
+        onKeyDown?.(e);
+        if (e.key === "Enter" && !e.defaultPrevented) e.preventDefault();
+      }}
+      className={cx(control, "block resize-none overflow-hidden py-[11px] leading-snug", invalid ? "border-state-off" : "border-line", className)}
       {...props}
     />
   );

@@ -161,6 +161,8 @@ ordersRouter.get(
         color: colorFilterField,
         /** Только с задолженностью: выданы, а оплачены не полностью. */
         debt: z.enum(["1", "0"]).optional(),
+        /** Аутсорс: «1» — заказы всех клиентов-аутсорс, иначе id одного такого клиента. */
+        outsource: z.union([z.literal("1"), z.string().uuid()]).optional(),
         /** Типы техники через запятую, как их отдаёт /summary/kinds (без регистра). */
         kind: z.string().max(600).optional(),
         /** Исправлять раскладку: «yjen,er» → «ноутбук». Включается на устройстве. */
@@ -189,7 +191,20 @@ ordersRouter.get(
       ...(onlyMine && me ? { assignedMasterId: me } : {}),
       ...(q.statusId ? { statusId: q.statusId } : {}),
       ...(q.group ? { status: { group: q.group } } : {}),
-      ...(q.color ? { customer: { is: customerColorWhere(q.color) } } : {}),
+      // Метка и аутсорс — оба условия на клиента, поэтому одним «customer».
+      ...(q.color || q.outsource === "1"
+        ? {
+            customer: {
+              is: {
+                AND: [
+                  ...(q.color ? [customerColorWhere(q.color) as Prisma.CustomerWhereInput] : []),
+                  ...(q.outsource === "1" ? [{ isOutsource: true } as Prisma.CustomerWhereInput] : []),
+                ],
+              },
+            },
+          }
+        : {}),
+      ...(q.outsource && q.outsource !== "1" ? { customerId: q.outsource } : {}),
       // Тип техники — свободный текст, набранный при приёме: сравниваем без
       // регистра, несколько типов — любой из них.
       ...(kinds.length
@@ -883,7 +898,7 @@ ordersRouter.post(
     const tenantId = tenantOf(req);
     const me = req.auth?.kind === "tenant" ? req.auth.userId : null;
 
-    const becameReady = await withTenant(tenantId, async (tx) => {
+    const result = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
 
@@ -893,14 +908,21 @@ ordersRouter.post(
 
       const status = await tx.orderStatus.findFirst({ where: { id: statusId } });
       if (!status) throw badRequest("Статус не найден");
-      if (status.id === order.statusId) return false;
+      if (status.id === order.statusId) return null;
       const was = await tx.orderStatus.findFirst({ where: { id: order.statusId }, select: { group: true } });
+      const becameReady = status.group === "DONE" && was?.group !== "DONE";
+      const now = new Date();
 
       await tx.order.update({
         where: { id: order.id },
         data: {
           statusId: status.id,
-          completedAt: status.group === "DONE" ? new Date() : order.completedAt,
+          completedAt: status.group === "DONE" ? now : order.completedAt,
+          // «Готов» теперь ставят статусом (кнопки «Ремонт готов» больше нет):
+          // гарантия считается отсюда же, от дня готовности.
+          ...(becameReady && order.warrantyDays
+            ? { warrantyUntil: new Date(now.getTime() + order.warrantyDays * 24 * 60 * 60 * 1000) }
+            : {}),
         },
       });
       await tx.orderStatusHistory.create({
@@ -922,12 +944,39 @@ ordersRouter.post(
         diff: { to: status.name },
         ip: clientIp(req),
       });
-      return status.group === "DONE" && was?.group !== "DONE";
+      const device = becameReady
+        ? await tx.device.findFirst({ where: { id: order.deviceId ?? "" }, select: { kind: true, brand: true, model: true } })
+        : null;
+      return {
+        becameReady,
+        number: order.number,
+        device: [device?.kind, device?.brand, device?.model].filter(Boolean).join(" "),
+        noDiagnosis: !order.diagnosis?.trim(),
+      };
     });
 
+    if (result?.becameReady) {
+      // То же оповещение, что давала кнопка «Ремонт готов».
+      void notifyTenant(tenantId, {
+        event: "order.completed",
+        title: `Ремонт готов — ${result.number}`,
+        body: result.device ? `${result.device}. Можно звонить клиенту.` : "Можно звонить клиенту.",
+        url: `/orders/${req.params.id}`,
+        exceptUserId: me,
+        payload: { orderId: req.params.id },
+      });
+    }
+
     // Стал «Готов к выдаче» — предложить SMS клиенту (или отправить, если так настроено).
-    const sms = becameReady ? await readyHint(req, req.params.id).catch(() => null) : null;
-    res.json({ ok: true, ...(sms ? { sms } : {}) });
+    const sms = result?.becameReady ? await readyHint(req, req.params.id).catch(() => null) : null;
+    res.json({
+      ok: true,
+      ...(sms ? { sms } : {}),
+      // Готов, а диагноз не записан — не мешаем, но говорим: его не будет в истории техники.
+      ...(result?.becameReady && result.noDiagnosis
+        ? { warn: "Диагноз не заполнен — в истории техники и при гарантийном возврате не будет видно, что было не так" }
+        : {}),
+    });
   })
 );
 
@@ -1068,6 +1117,55 @@ const completeSchema = z.object({
   recommendation: z.string().trim().optional(),
   warrantyDays: z.number().int().min(0).max(3650).optional(),
 });
+
+/**
+ * Итог ремонта без смены статуса: диагноз, комментарий, рекомендации,
+ * гарантия. Сохраняется общей кнопкой «Сохранить» карточки; «Готов» ставят
+ * статусом. Гарантия считается от дня готовности: заказ ещё не готов — срок
+ * появится, когда его переведут в «Готов».
+ */
+const finishSchema = z.object({
+  diagnosis: z.string().trim().max(5000),
+  masterComment: z.string().trim().max(5000).optional(),
+  recommendation: z.string().trim().max(2000).optional(),
+  warrantyDays: z.number().int().min(0).max(3650).nullable().optional(),
+});
+
+ordersRouter.put(
+  "/:id/finish",
+  ah(async (req, res) => {
+    const body = finishSchema.parse(req.body);
+    const tenantId = tenantOf(req);
+    const me = req.auth?.kind === "tenant" ? req.auth.userId : null;
+
+    await withTenant(tenantId, async (tx) => {
+      const order = await loadEditableOrder(req, tx);
+      const days = body.warrantyDays ?? null;
+      const data = {
+        diagnosis: body.diagnosis || null,
+        masterComment: body.masterComment || null,
+        recommendation: body.recommendation || null,
+        warrantyDays: days,
+        warrantyUntil:
+          days && days > 0 && order.completedAt ? new Date(order.completedAt.getTime() + days * 24 * 60 * 60 * 1000) : null,
+      };
+      await tx.order.update({ where: { id: order.id }, data });
+      const changes = changesOf(order as unknown as Record<string, unknown>, data);
+      if (Object.keys(changes).length) {
+        await writeAudit(tx, {
+          tenantId,
+          userId: me,
+          entity: "Order",
+          entityId: order.id,
+          action: "UPDATE",
+          diff: changes,
+          ip: clientIp(req),
+        });
+      }
+    });
+    res.json({ ok: true });
+  })
+);
 
 ordersRouter.post(
   "/:id/complete",

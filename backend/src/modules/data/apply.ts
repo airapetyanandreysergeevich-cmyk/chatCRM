@@ -202,6 +202,8 @@ async function applyCustomer(
     inn: val(v["ИНН"]),
     source: val(v["Источник"]),
     discountPercent: numOrUndef(v["Скидка, %"]),
+    // Пустая ячейка не трогает отметку: старые файлы без этой колонки её не сбрасывают.
+    isOutsource: yesNo(v["Аутсорс"]) ?? undefined,
     note: val(v["Примечание"]),
   };
 
@@ -871,3 +873,4 @@ async function applyStaffRows(
   }
   return result;
 }
+

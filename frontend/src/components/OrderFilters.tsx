@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { api } from "../lib/api";
 import { Modal } from "./Modal";
 import { Button } from "./ui";
 import { IconClose, IconFilter } from "./icons";
@@ -32,10 +33,34 @@ export interface OrderFilterState {
   kinds: string[];
   color: ColorFilterValue;
   sort: string;
+  /** Аутсорс: "" — все заказы, "1" — все клиенты-аутсорс, иначе id одного из них. */
+  outsource: string;
 }
 
-/** Сколько фильтров выбрано: стадия, каждый тип техники, метка. Сортировка — не фильтр. */
-export const filterCount = (f: OrderFilterState) => (f.group ? 1 : 0) + f.kinds.length + (f.color ? 1 : 0);
+/** Сколько фильтров выбрано: стадия, каждый тип техники, метка, аутсорс. Сортировка — не фильтр. */
+export const filterCount = (f: OrderFilterState) =>
+  (f.group ? 1 : 0) + f.kinds.length + (f.color ? 1 : 0) + (f.outsource ? 1 : 0);
+
+export interface OutsourceClient {
+  id: string;
+  name: string;
+  address: string | null;
+}
+
+/** «Сервис Плюс — ул. Мира, 5»: двух партнёров с одним именем различают по адресу. */
+export const outsourceLabel = (c: OutsourceClient) => (c.address ? `${c.name} — ${c.address}` : c.name);
+
+/** Клиенты-аутсорс для фильтра. Нет права видеть клиентов — пустой список, раздела в окне нет. */
+export function useOutsourceClients(): OutsourceClient[] | null {
+  const [list, setList] = useState<OutsourceClient[] | null>(null);
+  useEffect(() => {
+    api
+      .get<{ items: OutsourceClient[] }>("/customers/outsource")
+      .then((r) => setList(r.items))
+      .catch(() => setList([]));
+  }, []);
+  return list;
+}
 
 const KINDS_FIRST = 12;
 
@@ -85,18 +110,21 @@ export function ActiveFilters({
   stages,
   sorts,
   kindLabel,
+  outsource,
   onChange,
 }: {
   value: OrderFilterState;
   stages: StageOption[];
   sorts: SortOption[];
   kindLabel: (key: string) => string;
+  outsource: OutsourceClient[] | null;
   onChange: (next: OrderFilterState) => void;
 }) {
   const stage = stages.find((s) => s.value === value.group && s.value);
   const color = value.color === "none" ? "Без метки" : customerColor(value.color)?.label;
   const sort = value.sort !== "default" ? sorts.find((s) => s.value === value.sort)?.label : null;
-  if (!stage && !value.kinds.length && !value.color && !sort) return null;
+  const partner = value.outsource && value.outsource !== "1" ? outsource?.find((c) => c.id === value.outsource) : null;
+  if (!stage && !value.kinds.length && !value.color && !sort && !value.outsource) return null;
 
   const Chip = ({ label, cls, onRemove }: { label: string; cls?: string | null; onRemove: () => void }) => (
     <button type="button" onClick={onRemove} className={chip(true, cls) + " pr-2.5"} title="Снять">
@@ -114,6 +142,12 @@ export function ActiveFilters({
       {value.color && (
         <Chip label={`Метка: ${color ?? value.color}`} onRemove={() => onChange({ ...value, color: "" })} />
       )}
+      {value.outsource && (
+        <Chip
+          label={value.outsource === "1" ? "Аутсорс: все" : `Аутсорс: ${partner ? partner.name : "выбранный"}`}
+          onRemove={() => onChange({ ...value, outsource: "" })}
+        />
+      )}
       {sort && <span className="ml-1 text-[13px] text-ink-dim">Сортировка: {sort}</span>}
     </div>
   );
@@ -125,6 +159,7 @@ export function OrderFiltersModal({
   stages,
   sorts,
   kinds,
+  outsource,
   onApply,
   onClose,
 }: {
@@ -132,6 +167,8 @@ export function OrderFiltersModal({
   stages: StageOption[];
   sorts: SortOption[];
   kinds: DeviceKindOption[] | null;
+  /** Клиенты-аутсорс; пусто — раздела нет. */
+  outsource: OutsourceClient[] | null;
   onApply: (next: OrderFilterState) => void;
   onClose: () => void;
 }) {
@@ -216,6 +253,38 @@ export function OrderFiltersModal({
           ))}
         </Section>
 
+        {(outsource?.length ?? 0) > 0 && (
+          <Section title="Аутсорс">
+            <button type="button" aria-pressed={!draft.outsource} onClick={() => setDraft((d) => ({ ...d, outsource: "" }))} className={chip(!draft.outsource)}>
+              Все заказы
+            </button>
+            <button
+              type="button"
+              aria-pressed={draft.outsource === "1"}
+              onClick={() => setDraft((d) => ({ ...d, outsource: "1" }))}
+              className={chip(draft.outsource === "1")}
+            >
+              Все аутсорс
+            </button>
+            <select
+              aria-label="Аутсорс: конкретный"
+              value={draft.outsource && draft.outsource !== "1" ? draft.outsource : ""}
+              onChange={(e) => setDraft((d) => ({ ...d, outsource: e.target.value }))}
+              className={
+                "min-h-[34px] w-full max-w-full rounded-pill border bg-surface-raised px-3.5 py-1.5 text-[13px] font-semibold outline-none transition-colors focus:border-brand sm:w-auto sm:max-w-[360px] " +
+                (draft.outsource && draft.outsource !== "1" ? "border-brand text-brand-ink" : "border-line text-ink-muted")
+              }
+            >
+              <option value="">Конкретный…</option>
+              {outsource!.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {outsourceLabel(c)}
+                </option>
+              ))}
+            </select>
+          </Section>
+        )}
+
         <Section title="Сортировка">
           {sorts.map((s) => (
             <button
@@ -239,7 +308,7 @@ export function OrderFiltersModal({
           <Button
             type="button"
             variant="secondary"
-            onClick={() => setDraft({ group: "", kinds: [], color: "", sort: "default" })}
+            onClick={() => setDraft({ group: "", kinds: [], color: "", sort: "default", outsource: "" })}
             className="sm:flex-1"
           >
             Сбросить всё

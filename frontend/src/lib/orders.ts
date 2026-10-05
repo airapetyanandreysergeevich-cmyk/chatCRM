@@ -276,6 +276,11 @@ export const ordersApi = {
   saveWorks: (id: string, works: OrderWork[]) => api.put(`/orders/${id}/works`, { works }),
   saveParts: (id: string, parts: OrderPart[]) => api.put(`/orders/${id}/parts`, { parts }),
   complete: (id: string, body: unknown) => api.post(`/orders/${id}/complete`, body),
+  /** Итог ремонта без смены статуса: диагноз, комментарий, рекомендации, гарантия. */
+  saveFinish: (
+    id: string,
+    body: { diagnosis: string; masterComment?: string; recommendation?: string; warrantyDays?: number | null }
+  ) => api.put(`/orders/${id}/finish`, body),
   issue: (
     id: string,
     opts: { discount?: number; reason?: string; payment?: { method: PaymentMethod; promisedAt?: string } } = {}

@@ -118,6 +118,8 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
       { title: "ИНН", width: 14 },
       { title: "Источник", aliases: ["Откуда узнал"], width: 18 },
       { title: "Скидка, %", aliases: ["Скидка"], width: 11, kind: "number" },
+      // «да» — партнёр-аутсорс (фильтр в заказах); пусто — обычный клиент.
+      { title: "Аутсорс", width: 10 },
       { title: "Примечание", aliases: ["Комментарий"], width: 30 },
       {
         title: "Техника",

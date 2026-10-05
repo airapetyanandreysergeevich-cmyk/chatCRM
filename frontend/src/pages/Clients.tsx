@@ -8,6 +8,7 @@ import {
   DebtBadge,
   Banner,
   Button,
+  Checkbox,
   Card,
   EmptyState,
   Field,
@@ -46,6 +47,8 @@ export interface Client {
   note: string | null;
   /** Цветная метка: ключ цвета или пусто. Что он значит, решает мастерская. */
   color: string | null;
+  /** Аутсорс: партнёр, который сдаёт технику на ремонт. Фильтр в заказах. */
+  isOutsource?: boolean;
   discountPercent: number;
   createdAt: string;
   orderCount: number;
@@ -66,6 +69,7 @@ const blank = {
   note: "",
   color: "",
   discountPercent: "0",
+  isOutsource: false,
 };
 
 type Form = typeof blank;
@@ -80,6 +84,7 @@ const formOf = (c: Client): Form => ({
   note: c.note ?? "",
   color: c.color ?? "",
   discountPercent: String(c.discountPercent ?? 0),
+  isOutsource: !!c.isOutsource,
 });
 
 const SORTS = [
@@ -248,6 +253,7 @@ export default function Clients() {
                     {c.name}
                   </span>
                   {c.type === "COMPANY" && <Badge>организация</Badge>}
+                  {c.isOutsource && <Badge tone="brand">аутсорс</Badge>}
                   {c.inDebt && <DebtBadge amount={c.debt} />}
                 </>
               }
@@ -354,7 +360,7 @@ export function ClientModal({
   /** Удаление в два шага: кнопка сначала спрашивает, потом удаляет. */
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const set = (k: keyof Form) => (e: { target: { value: string } }) =>
+  const set = (k: Exclude<keyof Form, "isOutsource">) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function submit(e: FormEvent) {
@@ -452,6 +458,18 @@ export function ClientModal({
             invalid={!!error?.field("discountPercent")}
           />
         </Field>
+
+        <div>
+          <Checkbox
+            checked={form.isOutsource}
+            onChange={(isOutsource) => setForm((f) => ({ ...f, isOutsource }))}
+            label="Аутсорс"
+          />
+          <span className="mt-1.5 block text-[12.5px] text-ink-dim">
+            Партнёр, который сдаёт технику на ремонт. В заказах такие клиенты выбираются фильтром «Аутсорс» — все сразу
+            или кто-то один.
+          </span>
+        </div>
 
         <div>
           <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Цветная метка</span>

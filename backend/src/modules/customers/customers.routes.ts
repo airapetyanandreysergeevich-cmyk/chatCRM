@@ -53,6 +53,7 @@ const customerRow = (c: Prisma.CustomerGetPayload<{ include: { _count: { select:
   source: c.source,
   note: c.note,
   color: c.color,
+  isOutsource: c.isOutsource,
   discountPercent: Number(c.discountPercent),
   createdAt: c.createdAt,
   orderCount: c._count.orders,
@@ -186,6 +187,27 @@ customersRouter.get(
  * Поиск по телефону для формы приёма: приёмщик вводит номер, и если человек
  * уже обращался, его данные подставляются, а карточка не дублируется.
  */
+/**
+ * Клиенты-аутсорс — для фильтра заказов: имя и адрес (двух «Сервис Плюс»
+ * в разных концах города различают по адресу). Тому, кто не видит
+ * клиентов, список пустой: имя — тоже контакт.
+ */
+customersRouter.get(
+  "/outsource",
+  requirePermission(PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.ORDERS_CUSTOMER_CONTACTS),
+  ah(async (req, res) => {
+    const rows = await withTenant(tenantOf(req), (tx) =>
+      tx.customer.findMany({
+        where: { isOutsource: true, deletedAt: null },
+        select: { id: true, name: true, address: true },
+        orderBy: { name: "asc" },
+        take: 500,
+      })
+    );
+    res.json({ items: rows });
+  })
+);
+
 customersRouter.get(
   "/lookup",
   requirePermission(PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.ORDERS_CREATE),
@@ -296,6 +318,7 @@ customersRouter.get(
         address: c.address,
         source: c.source,
         color: c.color,
+        isOutsource: c.isOutsource,
         discountPercent: Number(c.discountPercent),
         orderCount: c._count.orders,
         ...debtFields(c.owed, money),
@@ -382,6 +405,7 @@ customersRouter.get(
           inn: customer.inn,
           note: customer.note,
           color: customer.color,
+          isOutsource: customer.isOutsource,
           discountPercent: Number(customer.discountPercent),
           createdAt: customer.createdAt,
         },
@@ -454,6 +478,7 @@ const customerSchema = z.object({
   note: z.string().trim().optional(),
   // Из формы число приходит строкой, поэтому coerce, а не number.
   discountPercent: z.coerce.number().min(0).max(100).optional(),
+  isOutsource: z.boolean().optional(),
 });
 
 /**

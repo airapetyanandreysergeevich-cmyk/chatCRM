@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Label, type LabelData } from "../components/Label";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { labelData, labelItems, labelsApi, SAMPLE_LABEL, useLabelLogo, type LabelSettings } from "../lib/labels";
+import { labelData, labelItems, labelsApi, labelsFor, SAMPLE_LABEL, useLabelLogo, type LabelSettings, type LabelsView } from "../lib/labels";
 import { ordersApi, type Order } from "../lib/orders";
 import { isStationPage, STATION_FAILED, STATION_READY } from "../lib/printing";
 
@@ -23,14 +23,16 @@ export default function OrderLabel({ test = false }: { test?: boolean }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { me } = useAuth();
-  const [settings, setSettings] = useState<LabelSettings | null>(null);
+  const [view, setView] = useState<LabelsView | null>(null);
+  // ?t= — каким шаблоном (окно «Наклейки», пробная из конструктора); без него — основным.
+  const settings: LabelSettings | null = view ? labelsFor(view, params.get("t")) : null;
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     labelsApi
       .get()
-      .then(setSettings)
+      .then(setView)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить настройку наклейки"));
     if (!test)
       ordersApi

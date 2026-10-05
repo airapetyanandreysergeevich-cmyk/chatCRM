@@ -490,6 +490,9 @@ model Customer {
   /// Цветная метка в списках: мастерская сама решает, что значит каждый цвет
   /// («щедрый», «спорит из-за каждой копейки»). Пусто — без метки.
   color           String?
+  /// Аутсорс: партнёр, который сдаёт технику на ремонт (не частный клиент).
+  /// Отметка в анкете; в заказах — фильтр «все аутсорс» или конкретный.
+  isOutsource     Boolean      @default(false)
   note            String?
   consentAt       DateTime? // согласие на обработку персональных данных
   createdById     String?
@@ -506,6 +509,7 @@ model Customer {
   @@unique([tenantId, number])
   @@index([tenantId, phone])
   @@index([tenantId, name])
+  @@index([tenantId, isOutsource])
 }
 
 /// Экземпляр техники клиента — чтобы видеть историю ремонтов одного аппарата.

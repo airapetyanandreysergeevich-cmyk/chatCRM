@@ -405,6 +405,26 @@ export function LabelLayoutEditor({
         </div>
       </div>
 
+<div className="mt-2">
+      {/* Свойства выбранного — строкой под макетом (над ним она сдвигала бы
+          макет при выборе элемента — прямо под курсором). Место и размер
+          задаются мышью на самом макете, полей для них нет. */}
+      <Toolbar
+        el={selEl}
+        settings={settings}
+        data={data}
+        onPatch={(p) => selEl && patchEl(selEl.kind, p)}
+        onRemove={
+          selEl && FIELD_OF[selEl.kind]
+            ? () => {
+                onToggleField(FIELD_OF[selEl.kind]!);
+                setSel(null);
+              }
+            : undefined
+        }
+      />
+      </div>
+
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-ink-dim">
         <span>Тяните элемент, уголки — размер. Стрелки — 0,5 мм, с Shift — 0,1. С Alt — без шага сетки.</span>
         <span className="flex gap-1.5">
@@ -417,143 +437,137 @@ export function LabelLayoutEditor({
         </span>
       </div>
 
-      {selEl ? (
-        <Props el={selEl} settings={settings} data={data} onPatch={(p) => patchEl(selEl.kind, p)} onRemove={FIELD_OF[selEl.kind] ? () => { onToggleField(FIELD_OF[selEl.kind]!); setSel(null); } : undefined} />
-      ) : (
-        <p className="mt-3 rounded-field border border-dashed border-line px-3 py-2.5 text-[13px] text-ink-dim">
-          Нажмите на элемент на макете — здесь появятся его размер, шрифт и выравнивание.
-        </p>
-      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------- свойства
 
-function Num({ label, value, onChange, step = 0.5, min, max, suffix }: { label: string; value: number; onChange: (v: number) => void; step?: number; min: number; max: number; suffix: string }) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => setText(String(value)), [value]);
-  const put = (v: number) => onChange(r2(Math.min(max, Math.max(min, v))));
-  const btn = "w-9 shrink-0 bg-surface-raised text-[16px] font-bold text-ink-muted transition-colors hover:bg-surface hover:text-ink";
-  return (
-    <label className="flex min-w-0 flex-col gap-1 text-[12px] font-semibold text-ink-muted">
-      <span>
-        {label}, <span className="font-normal text-ink-dim">{suffix}</span>
-      </span>
-      <span className="flex h-9 min-w-0 overflow-hidden rounded-field border border-line focus-within:border-brand">
-        <button type="button" aria-label={`${label}: меньше`} onClick={() => put(value - step)} className={btn + " border-r border-line"}>
-          −
-        </button>
-        <input
-          aria-label={label}
-          inputMode="decimal"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => {
-            const v = Number(text.replace(",", "."));
-            if (Number.isFinite(v)) put(v);
-            else setText(String(value));
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-          className="w-full min-w-0 flex-1 bg-surface-input px-1 text-center text-[14px] tabular-nums text-ink outline-none"
-        />
-        <button type="button" aria-label={`${label}: больше`} onClick={() => put(value + step)} className={btn + " border-l border-line"}>
-          +
-        </button>
-      </span>
-    </label>
-  );
-}
+const tbBtn = (on = false) =>
+  "inline-flex h-8 min-w-[32px] items-center justify-center rounded-field border px-2 text-[13px] font-semibold transition-colors " +
+  (on ? "border-brand bg-brand-tint text-brand-ink" : "border-line bg-surface-raised text-ink-muted hover:text-ink");
 
-function Seg<T extends string | number>({ items, value, onPick, label }: { items: Array<[T, string]>; value: T; onPick: (v: T) => void; label: string }) {
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex overflow-hidden rounded-field border border-line">
-      {items.map(([v, t]) => (
-        <button
-          key={String(v)}
-          type="button"
-          role="radio"
-          aria-checked={value === v}
-          onClick={() => onPick(v)}
-          className={"min-h-[34px] flex-1 px-2.5 text-[12.5px] font-semibold transition-colors " + (value === v ? "bg-brand-tint text-brand-ink" : "bg-surface-raised text-ink-muted hover:text-ink")}
-        >
-          {t}
-        </button>
-      ))}
+    <div role="group" aria-label={label} className="flex items-center gap-1">
+      {children}
     </div>
   );
 }
 
-function Props({
+/** Шрифт: − / число / +. Число можно набрать. */
+function FontSize({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const put = (v: number) => onChange(Math.round(Math.min(72, Math.max(3, v)) * 10) / 10);
+  return (
+    <Group label="Шрифт">
+      <span className="mr-0.5 text-[12px] font-semibold text-ink-dim">Шрифт</span>
+      <button type="button" aria-label="Шрифт: меньше" onClick={() => put(Math.round(value) - 1)} className={tbBtn()}>
+        −
+      </button>
+      <input
+        aria-label="Шрифт"
+        inputMode="decimal"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          const v = Number(text.replace(",", "."));
+          if (Number.isFinite(v) && v > 0) put(v);
+          else setText(String(value));
+        }}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        className="h-8 w-12 rounded-field border border-line bg-surface-input text-center text-[13px] tabular-nums text-ink outline-none focus:border-brand"
+      />
+      <button type="button" aria-label="Шрифт: больше" onClick={() => put(Math.round(value) + 1)} className={tbBtn()}>
+        +
+      </button>
+    </Group>
+  );
+}
+
+function Toolbar({
   el,
   settings,
   data,
   onPatch,
   onRemove,
 }: {
-  el: LayoutEl;
+  el: LayoutEl | null;
   settings: LabelSettings;
   data: LabelData;
   onPatch: (p: Partial<LayoutEl>) => void;
   onRemove?: () => void;
 }) {
-  const dots = el.kind === "code" && settings.code === "code128" ? moduleWidth(code128Bars(data.code).modules, el.w).dots : null;
-  const tooNarrow = el.kind === "code" && settings.code === "code128" && code128Bars(data.code).modules * DOT_MM > el.w;
+  if (!el) {
+    return (
+      <div className="flex min-h-[44px] items-center rounded-field border border-dashed border-line px-3 text-[13px] text-ink-dim">
+        Нажмите на элемент — здесь появятся шрифт и выравнивание. Двигать и растягивать — мышью на макете.
+      </div>
+    );
+  }
+  const qr = el.kind === "code" && settings.code === "qr";
+  const bars = el.kind === "code" && !qr ? code128Bars(data.code).modules : 0;
+  const dots = bars ? moduleWidth(bars, el.w).dots : null;
+  const tooNarrow = bars > 0 && bars * DOT_MM > el.w;
+  const align = el.align ?? (el.kind === "code" ? "center" : "left");
   return (
-    <div className="mt-3 space-y-3 rounded-card border border-line bg-surface-raised/50 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[14px] font-bold">{el.kind === "code" && settings.code === "qr" ? "QR-код" : EL_NAME[el.kind]}</p>
-        {onRemove && (
-          <button type="button" onClick={onRemove} className="text-[12.5px] font-semibold text-state-off hover:underline">
-            Убрать с наклейки
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-        <Num label="X" value={el.x} min={0} max={160} onChange={(x) => onPatch({ x })} suffix="мм" />
-        <Num label="Y" value={el.y} min={0} max={160} onChange={(y) => onPatch({ y })} suffix="мм" />
-        <Num label="Ширина" value={el.w} min={MIN} max={160} onChange={(w) => onPatch(el.kind === "code" && settings.code === "qr" ? { w, h: w } : { w })} suffix="мм" />
-        <Num label="Высота" value={el.h} min={MIN} max={160} onChange={(h) => onPatch(el.kind === "code" && settings.code === "qr" ? { w: h, h } : { h })} suffix="мм" />
-      </div>
+    <div data-toolbar className="flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-field border border-line bg-surface-raised/60 px-2.5 py-1.5">
+      <span className="text-[13px] font-bold">{qr ? "QR-код" : EL_NAME[el.kind]}</span>
       {isText(el.kind) && (
         <>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-            <Num label="Шрифт" value={el.size ?? 8} step={1} min={3} max={72} onChange={(size) => onPatch({ size })} suffix="пт" />
-            <div className="flex flex-col gap-1 text-[12px] font-semibold text-ink-muted">
-              Строк
-              <Seg label="Строк" items={[[1, "1"], [2, "2"], [3, "3"]]} value={el.lines ?? 1} onPick={(lines) => onPatch({ lines })} />
-            </div>
-            <div className="col-span-2 flex flex-col gap-1 text-[12px] font-semibold text-ink-muted">
-              Начертание
-              <div className="flex flex-wrap gap-1.5">
-                <Seg label="Жирный" items={[[0, "Обычный"], [1, "Жирный"]]} value={el.bold ? 1 : 0} onPick={(v) => onPatch({ bold: v === 1 })} />
-                <Seg label="Заглавные" items={[[0, "Аа"], [1, "АА"]]} value={el.upper ? 1 : 0} onPick={(v) => onPatch({ upper: v === 1 })} />
-              </div>
-            </div>
-          </div>
+          <FontSize value={el.size ?? 8} onChange={(size) => onPatch({ size })} />
+          <Group label="Строк">
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                type="button"
+                aria-pressed={(el.lines ?? 1) === n}
+                title={`Строк: ${n}`}
+                onClick={() => onPatch({ lines: n })}
+                className={tbBtn((el.lines ?? 1) === n)}
+              >
+                {n}
+              </button>
+            ))}
+            <span className="ml-0.5 text-[12px] text-ink-dim">стр.</span>
+          </Group>
+          <Group label="Начертание">
+            <button type="button" aria-pressed={!!el.bold} title="Жирный" onClick={() => onPatch({ bold: !el.bold })} className={tbBtn(!!el.bold) + " font-black"}>
+              Ж
+            </button>
+            <button type="button" aria-pressed={!!el.upper} title="Заглавные буквы" onClick={() => onPatch({ upper: !el.upper })} className={tbBtn(!!el.upper)}>
+              АА
+            </button>
+          </Group>
         </>
       )}
-      <div className="flex flex-col gap-1 text-[12px] font-semibold text-ink-muted">
-        Выравнивание
-        <Seg
-          label="Выравнивание"
-          items={[
-            ["left", "Влево"],
-            ["center", "По центру"],
-            ["right", "Вправо"],
-          ]}
-          value={el.align ?? (el.kind === "code" ? "center" : "left")}
-          onPick={(align) => onPatch({ align })}
-        />
-      </div>
+      <Group label="Выравнивание">
+        {(
+          [
+            ["left", "Влево", "M4 6h16M4 12h10M4 18h13"],
+            ["center", "По центру", "M4 6h16M7 12h10M5.5 18h13"],
+            ["right", "Вправо", "M4 6h16M10 12h10M7 18h13"],
+          ] as const
+        ).map(([v, t, d]) => (
+          <button key={v} type="button" aria-pressed={align === v} title={t} aria-label={t} onClick={() => onPatch({ align: v })} className={tbBtn(align === v)}>
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d={d} />
+            </svg>
+          </button>
+        ))}
+      </Group>
+      {onRemove && (
+        <button type="button" onClick={onRemove} className="ml-auto text-[12.5px] font-semibold text-state-off hover:underline">
+          Убрать с наклейки
+        </button>
+      )}
       {dots !== null && (
-        <p className={"text-[12.5px] " + (tooNarrow || dots < 2 ? "text-state-waiting" : "text-ink-dim")}>
+        <p className={"w-full text-[12px] " + (tooNarrow || dots < 2 ? "text-state-waiting" : "text-ink-dim")}>
           {tooNarrow
-            ? "Штрихкод не помещается в такую ширину — сделайте шире."
+            ? "Штрихкод не помещается в такую ширину — растяните рамку."
             : dots < 2
-              ? "Штрихкод получается слишком плотным — сканер может его не прочитать. Сделайте шире."
+              ? "Штрихкод получается слишком плотным — сканер может его не прочитать. Растяните рамку."
               : `Полоса штрихкода — ${dots} ${dots === 1 ? "точка" : dots < 5 ? "точки" : "точек"} принтера: сканер прочитает.`}
         </p>
       )}

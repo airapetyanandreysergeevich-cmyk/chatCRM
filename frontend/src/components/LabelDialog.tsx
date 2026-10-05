@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { labelData, labelItems, useLabelLogo } from "../lib/labels";
+import { labelData, labelItems, labelsFor, useLabelLogo } from "../lib/labels";
 import type { Order } from "../lib/orders";
 import { printAndWait, printingApi, targetLabel, type PrintingOverview, type PrintJob } from "../lib/printing";
 import { Label } from "./Label";
@@ -34,6 +34,8 @@ export function LabelDialog({
   const [job, setJob] = useState<PrintJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Каким шаблоном; null — основным (он же печатается сам после приёма). */
+  const [tpl, setTpl] = useState<string | null>(null);
   const started = useRef(false);
 
   useEffect(() => {
@@ -46,7 +48,10 @@ export function LabelDialog({
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось узнать принтер этикеток"));
   }, [order]);
 
-  const items = data ? labelItems(order, data.labels.settings) : [];
+  const view = data?.labels.settings ?? null;
+  const tplId = tpl ?? view?.main ?? null;
+  const S = view ? labelsFor(view, tplId) : null;
+  const items = S ? labelItems(order, S) : [];
   const chosen = items.filter((i) => picked?.has(i.key));
   const t = data?.labels.effective ?? null;
   const usable = !!t && t.online && !t.stationGone && !t.printerGone;
@@ -58,7 +63,10 @@ export function LabelDialog({
     setError(null);
     setJob(null);
     try {
-      const done = await printAndWait({ doc: "label", orderId: order.id, items: chosen.map((i) => i.key) }, setJob);
+      const done = await printAndWait(
+        { doc: "label", orderId: order.id, items: chosen.map((i) => i.key), ...(tplId ? { template: tplId } : {}) },
+        setJob
+      );
       setJob(done);
       if (done.status === "DONE") setTimeout(onClose, 1500);
     } catch (err) {
@@ -74,12 +82,14 @@ export function LabelDialog({
     if (usable) void send();
   }, [auto, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openPage = () => navigate(`/orders/${order.id}/label?${chosen.map((i) => `i=${encodeURIComponent(i.key)}`).join("&")}`);
+  const openPage = () =>
+    navigate(
+      `/orders/${order.id}/label?${chosen.map((i) => `i=${encodeURIComponent(i.key)}`).join("&")}${tplId ? `&t=${encodeURIComponent(tplId)}` : ""}`
+    );
   const count = chosen.length;
   const word = count === 1 ? "наклейку" : count >= 2 && count <= 4 ? "наклейки" : "наклеек";
-  const logo = useLabelLogo(!!data?.labels.settings.fields.logo);
+  const logo = useLabelLogo(!!S?.fields.logo);
   const preview = data && chosen[0] ? { ...labelData(order, chosen[0], 1, chosen.length, workshop), logo: logo.logo } : null;
-  const S = data?.labels.settings;
   const scale = S ? Math.min(1.4, 300 / ((S.width * 96) / 25.4)) : 1;
 
   return (
@@ -90,6 +100,29 @@ export function LabelDialog({
         ) : data && S ? (
           <>
             {afterIntake && !job && !busy && <p className="text-[15px]">Распечатать наклейки на технику?</p>}
+            {view && view.templates.length > 1 && (
+              <div role="radiogroup" aria-label="Шаблон наклейки" className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[13px] text-ink-muted">Шаблон:</span>
+                {view.templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={tplId === t.id}
+                    onClick={() => setTpl(t.id)}
+                    className={
+                      "rounded-pill border px-3 py-1.5 text-[13px] font-semibold transition-colors " +
+                      (tplId === t.id ? "border-brand bg-brand-tint text-brand-ink" : "border-line bg-surface-raised text-ink-muted hover:text-ink")
+                    }
+                  >
+                    {t.name}
+                    <span className="ml-1.5 font-normal opacity-70">
+                      {t.width}×{t.height}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="grid gap-2">
               {items.map((it, i) => (
                 <Checkbox

@@ -79,6 +79,7 @@ async function customersSheet(tx: Prisma.TransactionClient): Promise<SheetData> 
       inn: true,
       source: true,
       discountPercent: true,
+      isOutsource: true,
       note: true,
       createdAt: true,
       devices: { select: { kind: true, brand: true, model: true, serial: true } },
@@ -112,6 +113,7 @@ async function customersSheet(tx: Prisma.TransactionClient): Promise<SheetData> 
       c.inn,
       c.source,
       num(c.discountPercent),
+      c.isOutsource ? "да" : "",
       c.note,
       // Формат такой же, какой ждёт загрузка: «вид Бренд Модель (серийный)».
       c.devices

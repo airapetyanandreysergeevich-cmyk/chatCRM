@@ -1,6 +1,6 @@
 import { api, ApiError } from "./api";
 import { BASE } from "./basePath";
-import type { LabelSettings } from "./labels";
+import type { LabelsView } from "./labels";
 
 /**
  * Печать через CRM.
@@ -56,7 +56,7 @@ export interface PrintingOverview {
     mine: TargetView | null;
     effective: (TargetView & { source: "mine" | "workshop" }) | null;
     intake: IntakeMode;
-    settings: LabelSettings;
+    settings: LabelsView;
   };
   canManage: boolean;
   personal: boolean;
@@ -77,7 +77,7 @@ export const printingApi = {
   setMine: (body: { documents?: Target | null; intake?: IntakeMode; labels?: Target | null; labelsIntake?: IntakeMode }) =>
     api.put<{ ok: true }>("/printing/mine", body),
   removeStation: (id: string) => api.del(`/printing/stations/${id}`),
-  send: (body: { doc: PrintDoc; orderId?: string; stationId?: string; printer?: string; copies?: number; items?: string[] }) =>
+  send: (body: { doc: PrintDoc; orderId?: string; stationId?: string; printer?: string; copies?: number; items?: string[]; template?: string }) =>
     api.post<PrintJob>("/printing/jobs", body),
   job: (id: string) => api.get<PrintJob>(`/printing/jobs/${id}`),
 };
@@ -138,14 +138,16 @@ export const isStationPage = () => new URLSearchParams(window.location.search).g
 
 /** Адрес бланка для станции — на этом же сервере, с приставкой /b/<код>/, если она есть. */
 export function stationUrl(
-  job: { doc: string; orderId: string | null; printer: string; items?: string[] | null },
+  job: { doc: string; orderId: string | null; printer: string; items?: string[] | null; template?: string | null },
   stationName: string
 ): string {
+  // Шаблон наклейки — в адресе страницы: она рисует наклейку им, а не основным.
+  const t = job.template ? `&t=${encodeURIComponent(job.template)}` : "";
   const path =
     job.doc === "label-test"
-      ? "label-test?station=1"
+      ? `label-test?station=1${t}`
       : job.doc === "label" && job.orderId
-        ? `orders/${job.orderId}/label?${(job.items ?? []).map((i) => `i=${encodeURIComponent(i)}`).join("&")}&station=1`
+        ? `orders/${job.orderId}/label?${(job.items ?? []).map((i) => `i=${encodeURIComponent(i)}`).join("&")}&station=1${t}`
         : job.doc === "test" || !job.orderId
           ? `print-test?station=1&printer=${encodeURIComponent(job.printer)}&pc=${encodeURIComponent(stationName)}`
           : `orders/${job.orderId}/print?doc=${job.doc === "act" ? "act" : "intake"}&station=1`;
@@ -159,6 +161,7 @@ type StationJob = {
   printer: string;
   copies: number;
   items?: string[] | null;
+  template?: string | null;
   page?: { width: number; height: number } | null;
 };
 

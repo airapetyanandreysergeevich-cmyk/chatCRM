@@ -145,6 +145,7 @@ export default function ClientCard() {
                 )}
                 <span style={nameStyle(c.color)} {...copyable("name", c.name)}>{c.name}</span>
                 {c.type === "COMPANY" && <Badge>организация</Badge>}
+                {c.isOutsource && <Badge tone="brand">аутсорс</Badge>}
                 {/* Здесь — просто «Долг»: сумма и разбивка по заказам в панели ниже и в строках заказов. */}
                 {data.debt.total > 0 && <DebtBadge />}
                 {c.discountPercent > 0 && <Badge tone="brand">скидка {c.discountPercent}%</Badge>}

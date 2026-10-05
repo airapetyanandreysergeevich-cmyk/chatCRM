@@ -7,7 +7,7 @@ import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { assertOrderAccess } from "../orders/orders.service";
-import { labelPage, labelSettingsSchema, readLabels } from "./labels";
+import { labelPage, labelSettingsSchema, labelsConfigSchema, labelsFor, readLabels, type LabelsConfig } from "./labels";
 
 /**
  * Печать через CRM.
@@ -263,22 +263,37 @@ printingRouter.put(
   "/labels",
   ah(async (req, res) => {
     if (!has(req, PERMISSIONS.SETTINGS_MANAGE)) throw forbidden("Наклейку настраивает администратор мастерской");
-    const body = labelSettingsSchema.parse(req.body);
-    // Одинаковые пункты разным регистром — один пункт.
-    const seen = new Set<string>();
-    const perItem = body.perItem.filter((x) => {
-      const k = x.toLowerCase();
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
     const tenantId = tenantOf(req);
     await withTenant(tenantId, async (tx) => {
       const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
       const settings = (tenant?.settings && typeof tenant.settings === "object" ? tenant.settings : {}) as Record<string, unknown>;
+      let config: LabelsConfig;
+      // Новый вид — {perItem, templates, main}. С «width» — старая вкладка (одна наклейка,
+      // даже если она пересылает и полученные шаблоны): её правка — правка основного шаблона.
+      if (req.body && typeof req.body === "object" && "templates" in req.body && !("width" in req.body)) {
+        config = labelsConfigSchema.parse(req.body);
+      } else {
+        // Старая вкладка без шаблонов присылает одну наклейку — это правка основного шаблона.
+        const one = labelSettingsSchema.parse(req.body);
+        const cur = readLabels(settings);
+        const { perItem, ...t } = one;
+        config = {
+          perItem,
+          main: cur.main,
+          templates: cur.templates.map((x) => (x.id === cur.main ? { ...x, ...t } : x)),
+        };
+      }
+      // Одинаковые пункты разным регистром — один пункт.
+      const seen = new Set<string>();
+      const perItem = config.perItem.filter((x) => {
+        const k = x.toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
       await tx.tenant.update({
         where: { id: tenantId },
-        data: { settings: { ...settings, labels: { ...body, perItem } } as Prisma.InputJsonObject },
+        data: { settings: { ...settings, labels: { ...config, perItem } } as Prisma.InputJsonObject },
       });
     });
     res.json({ ok: true });
@@ -308,6 +323,8 @@ printingRouter.post(
         copies: z.number().int().min(1).max(2).optional(),
         /** Наклейки: на что печатать — «device» (сама техника) и пункты комплектности. */
         items: z.array(z.string().trim().min(1).max(80)).min(1).max(40).optional(),
+        /** Наклейки: каким шаблоном. Нет — основным. */
+        template: z.string().trim().min(1).max(40).optional(),
       })
       .parse(req.body);
     const isTest = body.doc === "test" || body.doc === "label-test";
@@ -369,7 +386,12 @@ printingRouter.post(
           orderId: body.orderId ?? null,
           // У наклеек копии — это листы: по одной на каждую вещь.
           copies: isTest || kind === "labels" ? 1 : (body.copies ?? t.copies ?? 1),
-          options: body.doc === "label" ? { items: body.items } : undefined,
+          options:
+            body.doc === "label"
+              ? { items: body.items, ...(body.template ? { template: body.template } : {}) }
+              : body.doc === "label-test" && body.template
+                ? { template: body.template }
+                : undefined,
           createdById: me,
         },
       });
@@ -464,11 +486,17 @@ printingRouter.get(
       if (job) {
         // Наклейке программа задаёт размер листа сама: у принтера этикеток
         // в Windows часто стоит рулон другого размера, чем в настройке FineCRM.
+        const opts = (job.options && typeof job.options === "object" ? job.options : {}) as { items?: unknown; template?: unknown };
+        const template = typeof opts.template === "string" ? opts.template : null;
         const page =
           kindOf(job.doc) === "labels"
-            ? labelPage(readLabels((await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } })))?.settings))
+            ? labelPage(
+                labelsFor(
+                  readLabels((await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } })))?.settings),
+                  template
+                )
+              )
             : null;
-        const opts = (job.options && typeof job.options === "object" ? job.options : {}) as { items?: unknown };
         return res.json({
           job: {
             id: job.id,
@@ -477,6 +505,7 @@ printingRouter.get(
             printer: job.printerName,
             copies: job.copies,
             items: Array.isArray(opts.items) ? opts.items.filter((x): x is string => typeof x === "string") : null,
+            template,
             page,
           },
         });

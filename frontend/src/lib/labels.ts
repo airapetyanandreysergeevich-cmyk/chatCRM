@@ -39,27 +39,30 @@ export interface LabelSettings {
   layout: LabelLayout | null;
 }
 
-/** Ходовые размеры этикеток, мм: ширина × высота, как пишут на рулоне. */
-export const LABEL_SIZES: Array<[number, number]> = [
-  [58, 40],
-  [40, 58],
-  [58, 30],
-  [58, 60],
-  [50, 30],
-  [50, 40],
-  [43, 25],
-  [40, 30],
-  [40, 25],
-  [30, 20],
-  [60, 40],
-  [75, 50],
-  [80, 50],
-  [100, 50],
-];
+/** Шаблон наклейки: название + сама наклейка. Общий список «вещей со своей наклейкой» — один на все. */
+export interface LabelTemplate extends Omit<LabelSettings, "perItem"> {
+  id: string;
+  name: string;
+}
+
+/** Что отдаёт сервер: основной шаблон «плоско» (по нему рисуют) + все шаблоны. */
+export interface LabelsView extends LabelSettings {
+  templates: LabelTemplate[];
+  main: string;
+}
+
+export const MAX_TEMPLATES = 6;
+
+/** Наклейка для печати шаблоном: выбранный (если такой есть) или основной. */
+export function labelsFor(v: LabelsView, templateId?: string | null): LabelSettings {
+  const t = (templateId && v.templates.find((x) => x.id === templateId)) || v.templates.find((x) => x.id === v.main) || v.templates[0];
+  const { id: _id, name: _name, ...rest } = t;
+  return { ...rest, perItem: v.perItem };
+}
 
 export const labelsApi = {
-  get: () => api.get<LabelSettings>("/printing/labels"),
-  save: (s: LabelSettings) => api.put<{ ok: true }>("/printing/labels", s),
+  get: () => api.get<LabelsView>("/printing/labels"),
+  save: (c: { perItem: string[]; templates: LabelTemplate[]; main: string }) => api.put<{ ok: true }>("/printing/labels", c),
   byCode: (code: string) => api.get<{ orders: Array<{ id: string; number: string }> }>(`/orders/by-code/${code}`),
 };
 

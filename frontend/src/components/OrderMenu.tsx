@@ -143,10 +143,17 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
     async (o: MenuOrder, to: OrderStatus, opts: { note?: (reloaded: unknown) => string | null } = {}) => {
       if (to.id === o.status.id) return;
       try {
-        const res = (await ordersApi.setStatus(o.id, to.id)) as { sms?: ReadyHint } | undefined;
+        const res = (await ordersApi.setStatus(o.id, to.id)) as { sms?: ReadyHint; warn?: string } | undefined;
         const reloaded = await changed.current();
         const sms = res?.sms;
-        const extra = [sms && "auto" in sms ? "SMS клиенту отправляется" : null, opts.note?.(reloaded) ?? null].filter(Boolean).join(" · ");
+        const extra = [
+          sms && "auto" in sms ? "SMS клиенту отправляется" : null,
+          // «Готов» без диагноза: не мешаем, но говорим.
+          res?.warn ? "диагноз не заполнен" : null,
+          opts.note?.(reloaded) ?? null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const from = o.status;
         say({
           text: `${o.number} → ${to.name}${extra ? ` · ${extra}` : ""}`,
@@ -381,11 +388,11 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
           role="status"
           data-order-toast
           className={
-            "fixed bottom-24 left-1/2 z-[95] flex max-w-[94vw] -translate-x-1/2 items-center gap-3 rounded-pill px-4 py-2 text-[13.5px] font-semibold shadow-raised sm:bottom-6 " +
+            "fixed bottom-24 left-1/2 z-[95] flex max-w-[94vw] -translate-x-1/2 items-center gap-3 rounded-[18px] px-4 py-2 text-[13.5px] font-semibold shadow-raised sm:bottom-6 " +
             (toast.tone === "error" ? "bg-state-off text-white" : "bg-ink text-surface")
           }
         >
-          <span className="min-w-0 truncate">{toast.text}</span>
+          <span className="line-clamp-2 min-w-0">{toast.text}</span>
           {toast.undo && (
             <button type="button" onClick={toast.undo} className="shrink-0 rounded-pill px-2 py-0.5 font-bold text-brand underline-offset-2 hover:underline">
               Отменить

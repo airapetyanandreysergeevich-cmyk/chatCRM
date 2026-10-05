@@ -23,7 +23,10 @@ export function useBarcodeScanner(onCode: (code: string) => void) {
     let last = 0;
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
-      const now = performance.now();
+      // Время нажатия, а не обработки: пока страница перерисовывается после
+      // первой цифры (поиск в списке заказов), остальные ждут в очереди, и по
+      // часам обработчика промежуток вырастал больше 50 мс — скан рвался.
+      const now = e.timeStamp || performance.now();
       if (now - last > GAP_MS) buf = "";
       last = now;
       if (e.key === "Enter") {

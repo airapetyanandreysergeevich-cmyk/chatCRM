@@ -42,6 +42,7 @@ import {
   OrderFiltersModal,
   filterCount,
   useDeviceKinds,
+  useOutsourceClients,
   type OrderFilterState,
 } from "../components/OrderFilters";
 
@@ -122,7 +123,10 @@ export default function Orders() {
   const deviceKinds = useDeviceKinds();
   const kindLabel = (key: string) => deviceKinds?.find((k) => k.key === key)?.label ?? key.charAt(0).toUpperCase() + key.slice(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const filters: OrderFilterState = { group, kinds, color, sort };
+  // Аутсорс: «1» — все такие клиенты, иначе id одного (в адресе, как остальные фильтры).
+  const outsource = params.get("outsource") ?? "";
+  const outsourceClients = useOutsourceClients();
+  const filters: OrderFilterState = { group, kinds, color, sort, outsource };
 
   /** Всё выбранное в окне — одним переходом: по отдельности сеттеры затирали бы друг друга. */
   const applyFilters = (next: OrderFilterState) => {
@@ -131,6 +135,7 @@ export default function Orders() {
     put("group", next.group);
     put("kind", next.kinds.join(","));
     put("color", next.color);
+    put("outsource", next.outsource);
     put("sort", next.sort === "default" ? "" : next.sort);
     p.delete("page");
     setParams(p, { replace: true });
@@ -165,6 +170,7 @@ export default function Orders() {
       if (search.trim() && !exact && fixLayoutEnabled()) query.layout = "1";
       if (color) query.color = color;
       if (kindsParam) query.kind = kindsParam;
+      if (outsource) query.outsource = outsource;
       const data = await ordersApi.list(query);
       setRows(data.rows);
       setDebtTotal(data.debtTotal ?? null);
@@ -173,7 +179,7 @@ export default function Orders() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [group, search, page, sort, color, exact, kindsParam]);
+  }, [group, search, page, sort, color, exact, kindsParam, outsource]);
 
   useEffect(() => {
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
@@ -227,7 +233,7 @@ export default function Orders() {
             <FilterButton count={filterCount(filters)} onClick={() => setFiltersOpen(true)} />
           </div>
         </div>
-        <ActiveFilters value={filters} stages={FILTERS} sorts={sorts} kindLabel={kindLabel} onChange={applyFilters} />
+        <ActiveFilters value={filters} stages={FILTERS} sorts={sorts} kindLabel={kindLabel} outsource={outsourceClients} onChange={applyFilters} />
       </Card>
 
       {filtersOpen && (
@@ -236,6 +242,7 @@ export default function Orders() {
           stages={FILTERS}
           sorts={sorts}
           kinds={deviceKinds}
+          outsource={outsourceClients}
           onApply={applyFilters}
           onClose={() => setFiltersOpen(false)}
         />
