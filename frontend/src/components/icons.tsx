@@ -488,3 +488,25 @@ export const IconSms = (p: IconProps) => (
     <path d="M7 10h10M7 13.5h6" />
   </Icon>
 );
+
+/** Агенты: помощник, который сам сходит и узнает (Настройки → Агенты). */
+export const IconAgent = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4.5" y="8" width="15" height="11" rx="3.5" />
+    <path d="M12 8V5" />
+    <circle cx="12" cy="4" r="1.2" />
+    <circle cx="9.3" cy="13" r="1.1" />
+    <circle cx="14.7" cy="13" r="1.1" />
+    <path d="M10 16.3h4" />
+    <path d="M2.5 12.5v2.5M21.5 12.5v2.5" />
+  </Icon>
+);
+
+/** Открыть на чужом сайте, в новой вкладке. */
+export const IconExternal = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 4h6v6" />
+    <path d="M20 4 11 13" />
+    <path d="M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10" />
+  </Icon>
+);

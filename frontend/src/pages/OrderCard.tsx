@@ -6,7 +6,8 @@ import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
 import type { ReadyHint } from "../lib/sms";
 import { printingApi } from "../lib/printing";
-import { IconCamera, IconPlus } from "../components/icons";
+import { IconCamera, IconPlus, IconSearch } from "../components/icons";
+import { PartsSearch, type PickedOffer } from "../components/PartsSearch";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Photo } from "../components/OrderPhoto";
@@ -180,12 +181,15 @@ function LineEditor<T extends OrderWork>({
   empty,
   extraColumn,
   services,
+  actions,
 }: {
   title: string;
   rows: T[];
   setRows: (next: T[]) => void;
   empty: T;
   extraColumn?: (row: T, update: (patch: Partial<T>) => void) => React.ReactNode;
+  /** Кнопки рядом с «Добавить строку» (у запчастей — поиск у поставщиков). */
+  actions?: React.ReactNode;
   /** Прайс для подсказок. Не передан — поле обычное, как было. */
   services?: Service[];
 }) {
@@ -277,6 +281,7 @@ function LineEditor<T extends OrderWork>({
         <Button type="button" variant="secondary" icon={<IconPlus />} onClick={() => setRows([...rows, { ...empty }])}>
           Добавить строку
         </Button>
+        {actions}
       </div>
     </Card>
   );
@@ -298,6 +303,8 @@ export default function OrderCard() {
   const [saving, setSaving] = useState(false);
   const [works, setWorks] = useState<OrderWork[]>([]);
   const [parts, setParts] = useState<OrderPart[]>([]);
+  /** Окно поиска у поставщиков: что искать и какую строку заполнить найденным (-1 — новая). */
+  const [suppliers, setSuppliers] = useState<{ q: string; row: number } | null>(null);
   const [finish, setFinish] = useState<Finish>({ diagnosis: "", masterComment: "", recommendation: "", warrantyDays: "" });
   const [returnReason, setReturnReason] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -970,6 +977,20 @@ export default function OrderCard() {
             rows={parts}
             setRows={setParts}
             empty={{ name: "", qty: 1, price: 0, source: "STOCK" }}
+            actions={
+              <Button
+                type="button"
+                variant="secondary"
+                icon={<IconSearch />}
+                onClick={() => {
+                  // Набрали название, а цены нет — ищем его и найденным заполним эту же строку.
+                  const i = parts.map((p, k) => (p.name.trim() && !Number(p.price) ? k : -1)).filter((k) => k >= 0).pop() ?? -1;
+                  setSuppliers({ q: i >= 0 ? parts[i].name.trim() : "", row: i });
+                }}
+              >
+                Найти у поставщиков
+              </Button>
+            }
 
             extraColumn={(row, update) => (
               <Select
@@ -985,6 +1006,23 @@ export default function OrderCard() {
               </Select>
             )}
           />
+
+          {suppliers && (
+            <PartsSearch
+              initialQuery={suppliers.q}
+              onClose={() => setSuppliers(null)}
+              onPick={(o: PickedOffer) => {
+                // Цена — магазина: наценку мастер поправит в строке. Деталь куплена, а не со склада.
+                const row: OrderPart = { name: o.name, qty: 1, price: o.price ?? 0, source: "PURCHASED" };
+                setParts((cur) =>
+                  suppliers.row >= 0 && suppliers.row < cur.length
+                    ? cur.map((r, i) => (i === suppliers.row ? { ...row, qty: r.qty || 1 } : r))
+                    : [...cur, row]
+                );
+                setSuppliers(null);
+              }}
+            />
+          )}
 
           <Card>
             <div className="flex flex-wrap items-baseline justify-between gap-2">

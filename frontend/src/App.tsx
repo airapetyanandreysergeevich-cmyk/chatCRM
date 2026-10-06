@@ -10,6 +10,7 @@ import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
 import Boxes from "./pages/platform/Boxes";
 import FeedbackPage from "./pages/Feedback";
+import AgentsPage from "./pages/Agents";
 import PlatformFeedback from "./pages/platform/Feedback";
 import Clients from "./pages/Clients";
 import ClientCard from "./pages/ClientCard";
@@ -98,6 +99,7 @@ export default function App() {
           <Route path="/settings/peripherals" element={<PeripheralsPage />} />
           <Route path="/settings/integrations" element={<IntegrationsPage />} />
           <Route path="/settings/feedback" element={<FeedbackPage />} />
+          <Route path="/settings/agents" element={<AgentsPage />} />
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}
           <Route path="/notifications" element={<Navigate to="/settings/notifications" replace />} />

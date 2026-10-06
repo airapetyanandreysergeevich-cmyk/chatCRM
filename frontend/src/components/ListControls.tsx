@@ -30,7 +30,7 @@ export function SortSelect<T extends string>({
         aria-label="Сортировка"
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className="min-h-[44px] flex-1 cursor-pointer appearance-none bg-transparent pl-1.5 pr-9 text-[14.5px] font-semibold text-ink outline-none"
+        className="min-h-[44px] min-w-0 flex-1 cursor-pointer appearance-none bg-transparent pl-1.5 pr-9 text-[14.5px] font-semibold text-ink outline-none"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

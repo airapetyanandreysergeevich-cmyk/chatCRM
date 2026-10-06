@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms } from "../components/icons";
+import { IconAgent, IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ordersApi } from "../lib/orders";
@@ -63,6 +63,13 @@ const SECTIONS: Section[] = [
     text: "Прайс мастерской: что делаем и почём. Отсюда подставляются названия и цены в выполненные работы.",
     icon: <IconServices />,
     need: "settings.manage",
+  },
+  {
+    // Видна всем: магазины для поиска запчастей каждый выбирает себе сам.
+    to: "/settings/agents",
+    title: "Агенты",
+    text: "Помощники, которые сами сходят и узнают. Поиск запчастей по магазинам: где искать именно вам.",
+    icon: <IconAgent />,
   },
   {
     to: "/settings/data",

@@ -6,7 +6,8 @@ import { SearchFixedHint } from "../components/SearchFixedHint";
 import { SortSelect } from "../components/ListControls";
 import { useSearchParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
-import { IconDownload, IconPlus, IconStock, IconUpload } from "../components/icons";
+import { IconDownload, IconPlus, IconSearch, IconStock, IconUpload } from "../components/icons";
+import { PartsSearch } from "../components/PartsSearch";
 import {
   Badge,
   Banner,
@@ -67,6 +68,8 @@ export default function Stock() {
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<{ item: StockItem; type: MoveType } | null>(null);
   const [history, setHistory] = useState<StockItem | null>(null);
+  // Поиск у поставщиков: с тем, что набрано в поиске склада, — чего нет у себя, ищут у них.
+  const [suppliers, setSuppliers] = useState<string | null>(null);
 
   const filter = params.get("filter") ?? "all";
   const [sort, setSort] = listPref<Sort>(params, setParams, {
@@ -128,13 +131,19 @@ export default function Stock() {
         title="Склад"
         subtitle="Остатки запчастей и расходников. Любое изменение остатка — движение с автором и причиной."
         actions={
-          canMove && (
-            <Button icon={<IconPlus />} onClick={() => setCreating(true)}>
-              Новая позиция
+          <>
+            <Button variant="secondary" icon={<IconSearch />} onClick={() => setSuppliers(search.trim())}>
+              Найти у поставщиков
             </Button>
-          )
+            {canMove && (
+              <Button icon={<IconPlus />} onClick={() => setCreating(true)}>
+                Новая позиция
+              </Button>
+            )}
+          </>
         }
       />
+      {suppliers !== null && <PartsSearch initialQuery={suppliers} onClose={() => setSuppliers(null)} />}
 
       <Card className="p-3.5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -193,6 +202,10 @@ export default function Stock() {
                 canMove && !search && filter === "all" ? (
                   <Button icon={<IconPlus />} onClick={() => setCreating(true)}>
                     Завести первую позицию
+                  </Button>
+                ) : search.trim().length >= 2 ? (
+                  <Button variant="secondary" icon={<IconSearch />} onClick={() => setSuppliers(search.trim())}>
+                    Найти «{search.trim()}» у поставщиков
                   </Button>
                 ) : undefined
               }
