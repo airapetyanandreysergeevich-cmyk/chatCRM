@@ -120,7 +120,8 @@ export type Fetcher = (url: string, init?: { method?: string; body?: string; con
 
 /** Скачать страницу магазина: таймаут, потолок размера, только свой домен. */
 export function makeFetcher(shop: Shop): Fetcher {
-  const own = hostOf(shop.searchUrl("x"));
+  const own = hostOf((shop.fetchUrl ?? shop.searchUrl)("x"));
+  const okAfterRedirect = (h: string) => h === own || (shop.redirectHosts ?? []).some((x) => h === x || h.endsWith("." + x));
   return async (url, init) => {
     if (hostOf(url) !== own) throw new ShopError("чужой адрес");
     let res: Response;
@@ -137,7 +138,7 @@ export function makeFetcher(shop: Shop): Fetcher {
       if (name === "TimeoutError" || name === "AbortError") throw new ShopError(`не ответил за ${TIMEOUT_MS / 1000} с`);
       throw new ShopError("сайт недоступен");
     }
-    if (hostOf(res.url) !== own) throw new ShopError("перенаправил на другой сайт");
+    if (!okAfterRedirect(hostOf(res.url))) throw new ShopError("перенаправил на другой сайт");
     if (res.status === 403 || res.status === 429 || res.status === 503)
       throw new ShopError("не пустил запрос — защита от роботов");
     if (!res.ok) throw new ShopError(`ответил ошибкой ${res.status}`);
@@ -172,7 +173,7 @@ export async function searchShop(shopId: string, rawQ: string, opts: { fetcher?:
   const t0 = Date.now();
   const fetcher = opts.fetcher ?? makeFetcher(shop);
   try {
-    const html = await fetcher(url);
+    const html = await fetcher((shop.fetchUrl ?? shop.searchUrl)(q));
     const raw = await shop.read(html, { q, fetchText: fetcher });
     const { offers, more } = rank(q, raw);
     const result: ShopResult = { shop: shop.id, url, offers, more, ms: Date.now() - t0 };

@@ -16,7 +16,7 @@
     "check-backup": "node test/backup.js",
     "check-discovery": "node test/discovery.js",
     "check-edit-menu": "node test/edit-menu.js",
-    "check": "npm run check-paths && npm run check-tool && npm run check-backend && npm run check-network && npm run check-db && npm run check-backup && npm run check-discovery && npm run check-edit-menu && npm run check-updater && npm run check-printing",
+    "check": "npm run check-paths && npm run check-tool && npm run check-backend && npm run check-network && npm run check-db && npm run check-backup && npm run check-discovery && npm run check-edit-menu && npm run check-updater && npm run check-printing && npm run check-order-folders && npm run check-markets",
     "build-parts": "cd ../backend && npx prisma generate && npm run build && cd ../frontend && npm run build && cd ../desktop && node scripts/ocr-assets.js",
     "predist": "npm run build-parts && node test/before-dist.js",
     "dist": "electron-builder --win",
@@ -25,7 +25,9 @@
     "release": "npm version patch --no-git-tag-version && npm run dist",
     "publish-release": "node scripts/publish.js",
     "publish-mac": "node scripts/publish-mac.js",
-    "check-printing": "node test/printing.js"
+    "check-printing": "node test/printing.js",
+    "check-order-folders": "node test/order-folders.js",
+    "check-markets": "node test/markets.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",

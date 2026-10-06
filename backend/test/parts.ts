@@ -13,7 +13,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { decodeEntities, parseHtml, query, queryAll, textOf } from "../src/modules/parts/html";
 import { clearCache, compact, matches, rank, searchShop, ShopError, type Fetcher } from "../src/modules/parts/search";
-import { extractJsonAfter, parsePrice, SHOPS, shopById } from "../src/modules/parts/shops";
+import { extractJsonAfter, parseCsv, parsePrice, readSheet, SHOPS, shopById } from "../src/modules/parts/shops";
+import { clearLogoCache, fetchLogo, imageType, logoFor } from "../src/modules/parts/logo";
 
 let fails = 0;
 const check = (ok: boolean, msg: string, extra?: unknown) => {
@@ -40,7 +41,7 @@ async function main() {
   // ---------------------------------------------------------------- цены и совпадение
   check(parsePrice("1280.00 руб.") === 1280, "цена с копейками");
   check(parsePrice(" 3 990 р. ") === 3990, "цена с пробелом");
-  check(parsePrice("1 370 ₽") === 1370, "цена с неразрывным пробелом");
+  check(parsePrice("1\u00a0370 ₽") === 1370, "цена с неразрывным пробелом");
   check(parsePrice("цены нет") === null && parsePrice("0") === null, "пустая и нулевая цена — нет цены");
   check(compact("IT5571VG-128 CXO") === "IT5571VG128CXO", "сжатие названия");
   check(matches("it5571vg", { name: "Мультиконтроллер IT5571VG CXO Bulk" }), "запрос без хвоста находит полное имя");
@@ -126,6 +127,56 @@ async function main() {
   check(extractJsonAfter('x payload: {"a":"} {","b":{"c":1}} rest', 'payload: {"a"') === '{"a":"} {","b":{"c":1}}', "JSON со скобками в строке");
   check((await read("moba", "nbzip.html", "x")).length === 0, "Moba: страница без данных — пусто, не падение");
 
+  // Vshop: Google-таблица, две таблицы рядом, заголовки разделов без цены.
+  check(JSON.stringify(parseCsv('a,"b,c","d ""e""",\r\n"x\ny",2')) === JSON.stringify([["a", "b,c", 'd "e"', ""], ["x\ny", "2"]]), "CSV: кавычки, запятая и перевод строки в ячейке");
+  const vs = readSheet(fx("vshop.csv"));
+  check(vs.length === 13, "Vshop: товары обеих таблиц, без заголовков разделов", vs.map((x) => x.model));
+  check(!vs.some((x) => /поколение|^Zen/.test(x.model)), "Vshop: «8 поколение», «Zen 3» — не товары");
+  const v10750 = vs.find((x) => x.model === "SRH8Q i7-10750H");
+  check(v10750?.stock === "out" && v10750.price === "17000" && v10750.socket === "BGA1440", "Vshop: 0 — нет в наличии", v10750);
+  check(vs.find((x) => x.model.startsWith("Q0GF"))?.stock === "in", "Vshop: «0/1» — есть б/у");
+  check(vs.some((x) => x.model === 'Ryzen 7 5800H 100-000000295, "tray"'), "Vshop: ячейка в кавычках, двойные пробелы схлопнуты", vs.filter((x) => /5800H/.test(x.model)));
+  const vsOffers = await read("vshop", "vshop.csv", "i5-8250U");
+  const v8250 = vsOffers.find((x) => x.name === "SR3LA i5-8250U");
+  check(v8250?.price === 7000 && v8250.stock === "in" && v8250.stockText === "New/old 27 · Kaby Lake-R · BGA1356" && v8250.url === "https://t.me/Vshop931", "Vshop: цена, наличие, ссылка на Telegram", v8250);
+  check(vsOffers.find((x) => x.name.startsWith("Ryzen 5 3500H"))?.price === 7500, "Vshop: цена с пробелом");
+  check(readSheet("нет,шапки\r\n1,2").length === 0, "Vshop: таблица без шапки «Модель» — пусто");
+  const vshop = shopById("vshop")!;
+  check(vshop.searchUrl("x").startsWith("https://docs.google.com/spreadsheets/d/") && vshop.fetchUrl!("x").endsWith("/export?format=csv&gid=0"), "Vshop: человеку — таблица, серверу — выгрузка CSV");
+  let fetched = "";
+  const vr = await searchShop("vshop", "i7-10750H", { fetcher: async (u) => { fetched = u; return fx("vshop.csv"); } });
+  check(fetched === vshop.fetchUrl!("") && vr.url === vshop.searchUrl("") && vr.offers[0]?.name === "SRH8Q i7-10750H" && vr.offers[0].exact, "Vshop: сервер качает CSV, чип ведёт на таблицу", { fetched, vr });
+
+  // Значки магазинов
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const ico = Buffer.from([0, 0, 1, 0, 1, 0, 16, 16]);
+  check(imageType("", png) === "image/png" && imageType("text/html", ico) === "image/x-icon", "значок узнаётся по байтам");
+  check(imageType("image/png", Buffer.from("<html>404</html>")) === null, "страница ошибки под видом картинки — не значок");
+  check(imageType("image/svg+xml", Buffer.from("<svg><script>")) === null, "SVG не берём");
+  check(imageType("", Buffer.alloc(400 * 1024, 0x89)) === null, "слишком большой — не берём");
+  const asked: string[] = [];
+  const web = (map: Record<string, { type: string; body: Buffer }>) => async (u: string) => {
+    asked.push(u);
+    const r = map[u];
+    return r ? { url: u, ...r } : null;
+  };
+  const l1 = await fetchLogo(shopById("boottec")!, web({
+    "https://www.boottec.ru/": { type: "text/html", body: Buffer.from('<head><link rel="apple-touch-icon" href="/a180.png" sizes="180x180"><link rel="icon" href="/i.svg" type="image/svg+xml"><link rel="shortcut icon" href="/fav32.png" sizes="32x32"></head>') },
+    "https://www.boottec.ru/fav32.png": { type: "image/png", body: png },
+  }));
+  check(l1?.type === "image/png" && asked.includes("https://www.boottec.ru/fav32.png") && !asked.some((u) => u.endsWith(".svg")), "значок из <link rel=icon>, 32 px раньше 180, SVG пропущен", asked);
+  asked.length = 0;
+  const l2 = await fetchLogo(shopById("moba")!, web({ "https://moba.ru/favicon.ico": { type: "image/vnd.microsoft.icon", body: ico } }));
+  check(l2?.type === "image/x-icon" && asked.at(-1) === "https://moba.ru/favicon.ico", "без <link> — /favicon.ico", asked);
+  check((await fetchLogo(shopById("vshop")!, web({}))) === null, "Vshop — буква вместо значка");
+  clearLogoCache();
+  let n = 0;
+  const slow = async (u: string) => { n++; await new Promise((r) => setTimeout(r, 30)); return u.endsWith("favicon.ico") ? { url: u, type: "image/x-icon", body: ico } : null; };
+  const [a, b] = await Promise.all([logoFor("aitech", slow), logoFor("aitech", slow)]);
+  await logoFor("aitech", slow);
+  check(!!a && a === b && n === 2, "значок качается один раз и запоминается", n);
+  check((await logoFor("evil", slow)) === null, "чужой код — без значка");
+
   // Чужая страница в любой читалке — пусто, а не падение.
   for (const s of SHOPS) {
     if (!s.read) continue;
@@ -138,7 +189,7 @@ async function main() {
     }
     check(ok, `${s.name}: пустая страница — пустой ответ`);
   }
-  check(SHOPS.every((s) => s.searchUrl("a b&c").includes("a%20b%26c")), "запрос в адресе закодирован у всех");
+  check(SHOPS.filter((s) => s.id !== "vshop").every((s) => s.searchUrl("a b&c").includes("a%20b%26c")), "запрос в адресе закодирован у всех (кроме таблицы Vshop — она одна на всё)");
   check(new Set(SHOPS.map((s) => s.id)).size === SHOPS.length, "у магазинов разные коды");
 
   // ---------------------------------------------------------------- searchShop: кэш и ошибки
@@ -163,6 +214,15 @@ async function main() {
   check(!!e2.error && /читалку/.test(e2.error), "испорченная страница — «читалку нужно поправить»", e2);
   const dns = await searchShop("dns", "IT5571", { fetcher: async () => { throw new Error("не должен ходить"); } });
   check(dns.linkOnly === true && dns.url === "https://www.dns-shop.ru/search/?q=IT5571", "DNS — только ссылка, в сеть не ходим", dns);
+  for (const [id, url] of [
+    ["ozon", "https://www.ozon.ru/search/?text=IT5571%20VG"],
+    ["wildberries", "https://www.wildberries.ru/catalog/0/search.aspx?search=IT5571%20VG"],
+    ["avito", "https://www.avito.ru/rossiya?q=IT5571%20VG"],
+    ["aliexpress", "https://www.aliexpress.com/wholesale?SearchText=IT5571%20VG"],
+  ]) {
+    const m = await searchShop(id, "IT5571 VG", { fetcher: async () => { throw new Error("не должен ходить"); } });
+    check(m.linkOnly === true && m.url === url && !m.error, `${id}: только ссылка на поиск`, m);
+  }
 
   console.log(fails ? `\nПровалов: ${fails}` : "\nВсё в порядке");
   process.exit(fails ? 1 : 0);

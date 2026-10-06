@@ -4,6 +4,7 @@ import { IconAgent, IconExternal } from "../components/icons";
 import { Banner, Button, Card, Checkbox, PageHeader, SectionLabel, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { partsApi, type PartShop } from "../lib/partsApi";
+import { ShopLogo } from "../components/ShopLogo";
 
 /**
  * Настройки → Агенты.
@@ -125,7 +126,9 @@ export default function Agents() {
                         disabled={!personal}
                         onChange={(on) => toggle(s.id, on)}
                         label={
-                          <span className="min-w-0 py-2">
+                          <span className="flex min-w-0 items-center gap-2.5 py-2">
+                          <ShopLogo id={s.id} name={s.name} size={28} />
+                          <span className="min-w-0">
                             <span className="block font-semibold text-ink">
                               {s.name} <span className="font-normal text-ink-dim">· {s.site}</span>
                             </span>
@@ -148,6 +151,7 @@ export default function Agents() {
                                     : p.message}
                               </span>
                             )}
+                          </span>
                           </span>
                         }
                       />

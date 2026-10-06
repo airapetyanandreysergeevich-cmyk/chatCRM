@@ -35,7 +35,7 @@ const SELF_NESTING_CLOSE: Record<string, string[]> = {
 };
 
 const NAMED: Record<string, string> = {
-  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", laquo: "«", raquo: "»",
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0", laquo: "«", raquo: "»",
   mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", ldquo: "“", rdquo: "”", times: "×",
   deg: "°", plusmn: "±", copy: "©", reg: "®", trade: "™", bull: "•", middot: "·", rub: "₽", euro: "€",
 };
@@ -270,7 +270,7 @@ export function textOf(n: HNode | null | undefined): string {
     if (/^(div|p|li|tr|td|h\d)$/.test(x.tag)) parts.push(" ");
   };
   rec(n);
-  return parts.join("").replace(/[\s ]+/g, " ").trim();
+  return parts.join("").replace(/[\s\u00a0]+/g, " ").trim();
 }
 
 export function attrOf(n: HNode | null | undefined, name: string): string {

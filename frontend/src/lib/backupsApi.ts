@@ -1,5 +1,7 @@
 import { api } from "./api";
 import type { PrintBridge } from "./printing";
+import type { OrderFolderBridge } from "./orderFolder";
+import type { MarketsBridge } from "./markets";
 
 /**
  * Резервные копии Основы.
@@ -61,6 +63,10 @@ declare global {
       };
       /** Есть у программы с версии 0.1.30 — печать через CRM. */
       printing?: PrintBridge;
+      /** Есть у программы с версии 0.1.44 — папка заказа на компьютере. */
+      orderFolder?: OrderFolderBridge;
+      /** Окно площадок для поиска запчастей — с версии 0.1.46. */
+      markets?: MarketsBridge;
     };
   }
 }

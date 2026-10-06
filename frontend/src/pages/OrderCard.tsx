@@ -6,7 +6,8 @@ import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
 import type { ReadyHint } from "../lib/sms";
 import { printingApi } from "../lib/printing";
-import { IconCamera, IconPlus, IconSearch } from "../components/icons";
+import { IconCamera, IconFolder, IconPlus, IconSearch } from "../components/icons";
+import { useOrderFolder } from "../components/OrderFolder";
 import { PartsSearch, type PickedOffer } from "../components/PartsSearch";
 import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
@@ -305,6 +306,7 @@ export default function OrderCard() {
   const [parts, setParts] = useState<OrderPart[]>([]);
   /** Окно поиска у поставщиков: что искать и какую строку заполнить найденным (-1 — новая). */
   const [suppliers, setSuppliers] = useState<{ q: string; row: number } | null>(null);
+  const folder = useOrderFolder();
   const [finish, setFinish] = useState<Finish>({ diagnosis: "", masterComment: "", recommendation: "", warrantyDays: "" });
   const [returnReason, setReturnReason] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -581,6 +583,12 @@ export default function OrderCard() {
           <Button variant="secondary" onClick={() => setLabelling({})}>
             Наклейки
           </Button>
+          {/* Только в программе FineCRM: в браузере и на телефоне папок на компьютере нет. */}
+          {folder.available && (
+            <Button variant="secondary" icon={<IconFolder />} onClick={() => folder.open(order)} disabled={folder.busy}>
+              Папка заказа
+            </Button>
+          )}
           {order.completedAt && (
             <Button variant="secondary" onClick={() => setPrinting({ doc: "act" })}>
               Акт работ
@@ -1007,6 +1015,7 @@ export default function OrderCard() {
             )}
           />
 
+          {folder.element}
           {suppliers && (
             <PartsSearch
               initialQuery={suppliers.q}

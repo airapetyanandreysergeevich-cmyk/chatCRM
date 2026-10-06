@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, ipcMain, nativeImage, net: electronNet, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, WebContentsView, clipboard, dialog, ipcMain, nativeImage, net: electronNet, session, shell } = require("electron");
 const { spawnSync } = require("child_process");
 const { attachEditMenu } = require("./editMenu");
 const fs = require("fs");
@@ -19,6 +19,8 @@ const network = require("./network");
 const discovery = require("./discovery");
 const { Updater, macFeed } = require("./updater");
 const printing = require("./printing");
+const orderFolders = require("./orderFolders");
+const markets = require("./markets");
 
 /**
  * Оболочка локальной версии.
@@ -701,6 +703,10 @@ function fromOwnWindow(e) {
 
 // Печать через CRM: этот компьютер — станция печати (см. printing.js).
 printing.register({ ipcMain, BrowserWindow, getWindow: () => win, userDataDir: userData() });
+// Папка заказа: общая папка заказов этого компьютера (см. orderFolders.js).
+orderFolders.register({ ipcMain, dialog, shell, getWindow: () => win, userDataDir: userData() });
+// Окно площадок (Ozon, Wildberries, Авито…) для поиска запчастей — см. markets.js.
+markets.register({ ipcMain, BrowserWindow, WebContentsView, session, shell, getWindow: () => win });
 
 ipcMain.handle("desktop:backups-status", (e) =>
   fromOwnWindow(e) ? { ok: true, here: true, ...backups.status() } : { ok: true, here: false }

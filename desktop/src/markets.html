@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Площадки — FineCRM</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 52px; overflow: hidden; background: #171A22; color: #E8ECF3;
+    font: 13px/1.2 "Segoe UI", system-ui, -apple-system, sans-serif; border-bottom: 1px solid #2B3243; }
+  .bar { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px; }
+  button { font: inherit; color: inherit; background: #222734; border: 1px solid #2B3243; border-radius: 8px;
+    height: 34px; padding: 0 11px; cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: #4A5264; }
+  button:disabled { opacity: .4; cursor: default; }
+  .nav { width: 34px; padding: 0; font-size: 16px; }
+  .tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  .tab.on { background: #2F8FE0; border-color: #2F8FE0; color: #fff; font-weight: 600; }
+  .q { color: #98A2B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; padding: 0 6px; }
+  .q b { color: #E8ECF3; }
+  .collect { background: #2F8FE0; border-color: #2F8FE0; color: #fff; font-weight: 700; }
+  .note { position: fixed; right: 10px; top: 56px; }
+  .msg { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #98A2B3; }
+  .msg.ok { color: #6FCF52; } .msg.error { color: #F2545B; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button class="nav" id="back" title="Назад">‹</button>
+  <button class="nav" id="fwd" title="Вперёд">›</button>
+  <button class="nav" id="reload" title="Обновить">↻</button>
+  <div class="tabs" id="tabs"></div>
+  <div class="q" id="q"></div>
+  <span class="msg" id="msg" aria-live="polite"></span>
+  <button class="collect" id="collect" title="Взять товары с этой страницы в окно поиска FineCRM">Показать списком в FineCRM</button>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let busy = false;
+  function render(s) {
+    if (!s) return;
+    const tabs = $("tabs");
+    tabs.textContent = "";
+    for (const t of s.tabs) {
+      const b = document.createElement("button");
+      b.className = "tab" + (t.id === s.shop ? " on" : "");
+      b.textContent = t.name;
+      b.onclick = () => window.markets.tab(t.id);
+      tabs.appendChild(b);
+    }
+    const q = $("q");
+    q.textContent = "";
+    if (s.query) { q.append("Ищем: "); const b = document.createElement("b"); b.textContent = s.query; q.appendChild(b); }
+    $("back").disabled = !s.canBack;
+    $("fwd").disabled = !s.canForward;
+  }
+  function say(text, tone) { const m = $("msg"); m.textContent = text || ""; m.className = "msg" + (tone ? " " + tone : ""); m.title = text || ""; }
+  $("back").onclick = () => window.markets.nav("back");
+  $("fwd").onclick = () => window.markets.nav("forward");
+  $("reload").onclick = () => window.markets.nav("reload");
+  $("collect").onclick = async () => {
+    if (busy) return;
+    busy = true; $("collect").disabled = true; say("Читаем страницу…");
+    try {
+      const r = await window.markets.collect();
+      if (r && r.ok) say(`Передано в FineCRM: ${r.count}`, "ok");
+      else say((r && r.error) || "Не получилось", "error");
+    } finally { busy = false; $("collect").disabled = false; }
+  };
+  window.markets.onState((s) => { render(s); say(""); });
+  window.markets.onNotice((n) => say(n.text, n.tone));
+  window.markets.state().then(render);
+</script>
+</body>
+</html>

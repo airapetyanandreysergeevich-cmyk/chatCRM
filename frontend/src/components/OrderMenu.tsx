@@ -8,6 +8,7 @@ import type { BoardCard } from "../lib/workshop";
 import { copyText } from "./CopyMenu";
 import {
   IconCamera,
+  IconFolder,
   IconChevronLeft,
   IconChevronRight,
   IconDelete,
@@ -25,6 +26,7 @@ import { IssueDialog } from "./IssueDialog";
 import { LabelDialog } from "./LabelDialog";
 import { Modal } from "./Modal";
 import { OrderEditModal } from "./OrderEditModal";
+import { useOrderFolder } from "./OrderFolder";
 import { OrderPeek } from "./OrderPeek";
 import { SmsModal } from "./OrderSms";
 import { PhotoShooter } from "./PhotoShooter";
@@ -109,6 +111,8 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
   const { can, me } = useAuth();
   const navigate = useNavigate();
   const myId = me?.kind === "tenant" ? me.user.id : null;
+  // Папка заказа на компьютере — только в программе FineCRM.
+  const folder = useOrderFolder();
   const [ref, setRef] = useState<Reference | null>(null);
   const [open, setOpen] = useState<Open | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
@@ -371,6 +375,8 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
                 return void copyText(o.number).then((ok) => say({ text: ok ? `Скопировано: ${o.number}` : "Не удалось скопировать", tone: ok ? undefined : "error" }));
               case "repeat":
                 return navigate("/orders/new", { state: { repeatFrom: o.id } });
+              case "folder":
+                return void folder.open(o.id);
             }
           }}
           perms={{
@@ -379,10 +385,12 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
             del: can("orders.delete"),
             issue: can("orders.issue") && open.o.completed && !open.o.issued,
             repeat: can("orders.create"),
+            folder: folder.available,
           }}
         />
       )}
       {dialogs}
+      {folder.element}
       {toast && (
         <div
           role="status"
@@ -409,7 +417,7 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
 // ---------------------------------------------------------------- само меню
 
 type Action =
-  | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "photo" | "issue" | "delete" | "urgent" | "copy" | "repeat" }
+  | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "photo" | "issue" | "delete" | "urgent" | "copy" | "repeat" | "folder" }
   | { kind: "print"; doc: "intake" | "act" }
   | { kind: "status"; status: OrderStatus }
   | { kind: "master"; masterId: string | null; name: string };
@@ -432,7 +440,7 @@ function OrderMenu({
   at: Open;
   reference: Reference | null;
   canStatus: boolean;
-  perms: { edit: boolean; work: boolean; del: boolean; issue: boolean; repeat: boolean };
+  perms: { edit: boolean; work: boolean; del: boolean; issue: boolean; repeat: boolean; folder: boolean };
   act: (a: Action) => void;
   onClose: () => void;
 }) {
@@ -638,6 +646,11 @@ function OrderMenu({
         <MenuItem big={big} icon={<CopyIcon />} onClick={() => act({ kind: "copy" })}>
           Копировать номер
         </MenuItem>
+        {perms.folder && (
+          <MenuItem big={big} icon={<IconFolder className={ico} />} onClick={() => act({ kind: "folder" })}>
+            Открыть папку заказа
+          </MenuItem>
+        )}
         {(perms.issue || perms.repeat) && <Sep />}
         {perms.issue && (
           <MenuItem big={big} icon={<IconOrders className={ico} />} onClick={() => act({ kind: "issue" })}>

@@ -7,6 +7,7 @@ import { authenticate, currentTenantId, requireTenant } from "../../middleware/a
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { SHOP_IDS, searchShop } from "./search";
 import { SHOPS } from "./shops";
+import { logoFor } from "./logo";
 
 /**
  * Агент поиска запчастей: Склад и карточка заказа ищут деталь по магазинам.
@@ -118,5 +119,31 @@ partsRouter.get(
       .parse(req.query);
     if (!takeQuota(tenantOf(req))) throw new AppError(429, "Слишком много поисков подряд — подождите минуту");
     res.json(await searchShop(p.shop, p.q, { fresh: p.fresh === "1" }));
+  })
+);
+
+/**
+ * Значок магазина — без входа: картинку браузер просит тегом <img>, а он не
+ * несёт токен. Отдать можно только значок магазина из нашего списка.
+ */
+export const partsLogoRouter = Router();
+partsLogoRouter.get(
+  "/:id",
+  ah(async (req, res) => {
+    const id = String(req.params.id);
+    if (!SHOP_IDS.includes(id)) {
+      res.status(404).end();
+      return;
+    }
+    const logo = await logoFor(id);
+    if (!logo) {
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.status(404).end();
+      return;
+    }
+    res.setHeader("Content-Type", logo.type);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(logo.body);
   })
 );

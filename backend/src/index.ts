@@ -30,7 +30,7 @@ import { filesRouter } from "./modules/files/files.routes";
 import { hintsRouter } from "./modules/hints/hints.routes";
 import { quickPicksRouter } from "./modules/quickpicks/quickpicks.routes";
 import { plateRouter } from "./modules/plate/plate.routes";
-import { partsRouter } from "./modules/parts/parts.routes";
+import { partsLogoRouter, partsRouter } from "./modules/parts/parts.routes";
 import { startPlateSync } from "./modules/plate/plate.sync";
 import { servicesRouter } from "./modules/services/services.routes";
 import { settingsRouter } from "./modules/settings/settings.routes";
@@ -137,6 +137,8 @@ app.use("/api/feedback", feedbackRouter);
 app.use("/api/hints", hintsRouter);
 app.use("/api/quick-picks", quickPicksRouter);
 app.use("/api/plate", plateRouter);
+// Значки магазинов — раньше общего маршрута: тот требует вход, а <img> токен не несёт.
+app.use("/api/parts/logo", partsLogoRouter);
 app.use("/api/parts", partsRouter);
 app.use("/api/services", servicesRouter);
 // Имя мастерской — раньше общих настроек: иначе их обработчик ответил бы

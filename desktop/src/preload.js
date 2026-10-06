@@ -44,4 +44,21 @@ contextBridge.exposeInMainWorld("finecrmDesktop", {
     printers: () => ipcRenderer.invoke("desktop:printers"),
     print: (job) => ipcRenderer.invoke("desktop:print", job),
   },
+  // Папка заказа: общая папка заказов этого компьютера (orderFolders.js).
+  orderFolder: {
+    info: () => ipcRenderer.invoke("desktop:order-folder-info"),
+    pickRoot: () => ipcRenderer.invoke("desktop:order-folder-pick"),
+    forgetRoot: () => ipcRenderer.invoke("desktop:order-folder-forget"),
+    open: (req) => ipcRenderer.invoke("desktop:order-folder-open", req),
+    ensure: (req) => ipcRenderer.invoke("desktop:order-folder-ensure", req),
+  },
+  // Окно площадок для поиска запчастей (markets.js).
+  markets: {
+    open: (req) => ipcRenderer.invoke("desktop:markets-open", req),
+    onOffers: (fn) => {
+      const h = (_e, data) => fn(data);
+      ipcRenderer.on("desktop:markets-offers", h);
+      return () => ipcRenderer.removeListener("desktop:markets-offers", h);
+    },
+  },
 });

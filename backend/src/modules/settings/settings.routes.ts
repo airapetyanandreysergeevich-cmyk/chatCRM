@@ -588,3 +588,58 @@ settingsRouter.put(
     res.json(await orderNumberState(tenantId));
   })
 );
+
+// ------------------------------------------------------------ папка заказа
+
+/**
+ * Папка заказа на компьютере: как называть папки и когда их заводить.
+ *
+ * Общее на мастерскую (Tenant.settings.orderFolder), чтобы папки на всех
+ * компьютерах назывались одинаково. Сам путь к общей папке — у каждого
+ * компьютера свой (D:\Заказы на Основе, \\ОСНОВА\Заказы у сотрудника), его
+ * хранит программа на этом компьютере, сервер о нём не знает.
+ */
+export const ORDER_FOLDER_TEMPLATES = ["number", "number_device", "number_customer", "number_device_customer"] as const;
+
+const orderFolderSchema = z.object({
+  template: z.enum(ORDER_FOLDER_TEMPLATES),
+  byYear: z.boolean(),
+  createOnIntake: z.boolean(),
+});
+type OrderFolderSettings = z.infer<typeof orderFolderSchema>;
+
+const ORDER_FOLDER_DEFAULT: OrderFolderSettings = { template: "number_device", byYear: false, createOnIntake: true };
+
+function readOrderFolder(settings: unknown): OrderFolderSettings {
+  const raw = (settings && typeof settings === "object" ? (settings as Record<string, unknown>).orderFolder : null) ?? {};
+  const parsed = orderFolderSchema.partial().safeParse(raw);
+  return { ...ORDER_FOLDER_DEFAULT, ...(parsed.success ? parsed.data : {}) };
+}
+
+/** Читают все: по этим правилам программа сотрудника называет папку. */
+settingsRouter.get(
+  "/order-folder",
+  ah(async (req, res) => {
+    const tenantId = tenantOf(req);
+    const t = await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } }));
+    res.json(readOrderFolder(t?.settings));
+  })
+);
+
+settingsRouter.put(
+  "/order-folder",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const next = orderFolderSchema.parse(req.body);
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const t = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const settings = (t?.settings && typeof t.settings === "object" ? t.settings : {}) as Record<string, unknown>;
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { settings: { ...settings, orderFolder: next } as Prisma.InputJsonObject },
+      });
+    });
+    res.json(next);
+  })
+);

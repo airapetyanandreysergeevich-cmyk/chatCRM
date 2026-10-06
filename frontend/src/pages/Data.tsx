@@ -6,6 +6,7 @@ import { RemoveDemoModal } from "../components/DemoBanner";
 import { MigrateCard } from "../components/MigrateCard";
 import { Modal } from "../components/Modal";
 import { OrderNumberCard } from "../components/OrderNumberCard";
+import { OrderFolderCard } from "../components/OrderFolderCard";
 import { IconDelete, IconDownload, IconUpload } from "../components/icons";
 import { Banner, Button, Checkbox, Field, Input, PageHeader, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
@@ -835,6 +836,7 @@ export default function Data() {
       />
       <BackupsCard />
       <OrderNumberCard />
+      <OrderFolderCard />
       <DemoCard />
       <MigrateCard />
       <ExportCard reference={reference} onWiped={() => void load()} />

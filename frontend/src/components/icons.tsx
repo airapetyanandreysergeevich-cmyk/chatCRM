@@ -510,3 +510,10 @@ export const IconExternal = (p: IconProps) => (
     <path d="M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10" />
   </Icon>
 );
+
+/** Папка заказа на компьютере. */
+export const IconFolder = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2.2h7.4a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+  </Icon>
+);

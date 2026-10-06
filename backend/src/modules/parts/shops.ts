@@ -44,6 +44,12 @@ export interface Shop {
   linkOnly?: boolean;
   /** Запрос, на который у магазина точно есть товары, — для «Проверить магазины». */
   probe: string;
+  /** Что скачивает сервер, если это не страница для человека (таблица — её выгрузка CSV). */
+  fetchUrl?: (q: string) => string;
+  /** Куда магазин может перенаправить скачивание (выгрузка таблиц Google — на googleusercontent.com). */
+  redirectHosts?: string[];
+  /** Откуда брать значок: адрес картинки; false — буква вместо значка. По умолчанию — значок сайта. */
+  logo?: string | false;
   /** Достать товары из ответа. Второй запрос (если нужен) делает сама читалка через fetchText. */
   read?: (html: string, ctx: ReadContext) => Promise<PartOffer[]> | PartOffer[];
 }
@@ -59,14 +65,14 @@ const enc = encodeURIComponent;
 /** «1 280.00 руб.», «3 990 р.», «650 ₽», «1&nbsp;370» → число. */
 export function parsePrice(text: string | null | undefined): number | null {
   if (!text) return null;
-  const m = /(\d[\d\s  ]*)(?:[.,](\d{1,2}))?/.exec(text);
+  const m = /(\d[\d\s\u00a0\u202f]*)(?:[.,](\d{1,2}))?/.exec(text);
   if (!m) return null;
-  const whole = Number(m[1].replace(/[\s  ]/g, ""));
+  const whole = Number(m[1].replace(/[\s\u00a0\u202f]/g, ""));
   if (!Number.isFinite(whole) || whole <= 0) return null;
   return whole + (m[2] ? Number(m[2].padEnd(2, "0")) / 100 : 0);
 }
 
-export const rub = (n: number) => `${Math.round(n).toLocaleString("ru-RU").replace(/ /g, " ")} ₽`;
+export const rub = (n: number) => `${Math.round(n).toLocaleString("ru-RU").replace(/[\u00a0\u202f]/g, " ")} ₽`;
 
 function abs(href: string, base: string): string {
   try {
@@ -327,6 +333,64 @@ export const SHOPS: Shop[] = [
       }));
     },
   },
+  // Маркетплейсы: только ссылкой. Их страницы рисуются скриптами и закрыты защитой
+  // от роботов; обходить её мы не станем — открываем их поиск в браузере.
+  {
+    id: "ozon",
+    name: "Ozon",
+    site: "ozon.ru",
+    about: "Маркетплейс. Только ссылка на поиск",
+    searchUrl: (q) => `https://www.ozon.ru/search/?text=${enc(q)}`,
+    linkOnly: true,
+    probe: "",
+  },
+  {
+    id: "wildberries",
+    name: "Wildberries",
+    site: "wildberries.ru",
+    about: "Маркетплейс. Только ссылка на поиск",
+    searchUrl: (q) => `https://www.wildberries.ru/catalog/0/search.aspx?search=${enc(q)}`,
+    linkOnly: true,
+    probe: "",
+  },
+  {
+    id: "avito",
+    name: "Авито",
+    site: "avito.ru",
+    about: "Объявления по всей России, в том числе б/у и снятое. Только ссылка на поиск",
+    searchUrl: (q) => `https://www.avito.ru/rossiya?q=${enc(q)}`,
+    linkOnly: true,
+    probe: "",
+  },
+  {
+    id: "aliexpress",
+    name: "AliExpress",
+    site: "aliexpress.com",
+    about: "Заказ из Китая, дольше, но дешевле. Только ссылка на поиск",
+    searchUrl: (q) => `https://www.aliexpress.com/wholesale?SearchText=${enc(q)}`,
+    linkOnly: true,
+    probe: "",
+  },
+  {
+    // Поставщик Андрея: прайс — Google-таблица, заказ — сообщением в Telegram.
+    id: "vshop",
+    name: "Vshop",
+    site: "@Vshop931",
+    about: "Процессоры для ноутбуков, прайс в Google-таблице. Заказ — сообщением @Vshop931 в Telegram",
+    searchUrl: () => VSHOP_SHEET,
+    fetchUrl: () => `${VSHOP_SHEET_BASE}/export?format=csv&gid=0`,
+    redirectHosts: ["googleusercontent.com"],
+    logo: false,
+    probe: "i7",
+    read: (csv) =>
+      readSheet(csv).map((r) => ({
+        name: r.model,
+        price: parsePrice(r.price),
+        stock: r.stock,
+        stockText: [r.newOld && `New/old ${r.newOld}`, r.gen, r.socket].filter(Boolean).join(" · ") || undefined,
+        url: "https://t.me/Vshop931",
+      })),
+  },
   {
     id: "dns",
     name: "DNS",
@@ -368,3 +432,85 @@ export function extractJsonAfter(text: string, marker: string): string | null {
 }
 
 export const shopById = (id: string) => SHOPS.find((s) => s.id === id);
+
+// ------------------------------------------------------------ Google-таблица Vshop
+
+const VSHOP_SHEET_BASE = "https://docs.google.com/spreadsheets/d/1T1O__26xh7jo-DqgBTF7BsnxMIAh8oIziUskkQ3e76c";
+const VSHOP_SHEET = `${VSHOP_SHEET_BASE}/edit?gid=0#gid=0`;
+
+/** CSV по правилам таблиц: запятые, кавычки, "" внутри кавычек, переводы строк внутри ячейки. */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else q = false;
+      } else cell += c;
+      continue;
+    }
+    if (c === '"') q = true;
+    else if (c === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else cell += c;
+  }
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+export interface SheetRow {
+  model: string;
+  price: string;
+  newOld: string;
+  gen: string;
+  socket: string;
+  stock: Stock;
+}
+
+/**
+ * Прайс Vshop: несколько таблиц рядом (Intel слева, AMD справа), у каждой шапка
+ * «Модель, Магазин, New/old, Поколение, Сокет». Строки без цены — заголовки
+ * разделов («8 поколение», «Zen 3»), их пропускаем. New/old — сколько есть новых
+ * и б/у («0/1»); все нули — нет в наличии.
+ */
+export function readSheet(csv: string): SheetRow[] {
+  const rows = parseCsv(csv);
+  const head = rows.findIndex((r) => r.some((c) => c.trim().toLowerCase() === "модель"));
+  if (head < 0) return [];
+  const starts = rows[head].map((c, i) => (c.trim().toLowerCase() === "модель" ? i : -1)).filter((i) => i >= 0);
+  const out: SheetRow[] = [];
+  for (const r of rows.slice(head + 1)) {
+    for (const c of starts) {
+      const model = (r[c] ?? "").replace(/\s+/g, " ").trim();
+      const price = (r[c + 1] ?? "").trim();
+      if (!model || !price || !/\d/.test(price)) continue;
+      const newOld = (r[c + 2] ?? "").trim();
+      const nums = newOld.match(/\d+/g)?.map(Number) ?? [];
+      out.push({
+        model,
+        price,
+        newOld,
+        gen: (r[c + 3] ?? "").trim(),
+        socket: (r[c + 4] ?? "").trim(),
+        stock: !nums.length ? "unknown" : nums.some((n) => n > 0) ? "in" : "out",
+      });
+    }
+  }
+  return out;
+}

@@ -28,6 +28,7 @@ import {
 import { ChipInput, Chips, hasPhrase, togglePhrase } from "../components/ChipInput";
 import { SuggestInput } from "../components/SuggestInput";
 import { ApiError } from "../lib/api";
+import { ensureOnIntake } from "../lib/orderFolder";
 import { useAuth } from "../lib/auth";
 import type { QuickPick, QuickPickField } from "../lib/quickPicks";
 import { plural } from "../lib/format";
@@ -368,6 +369,8 @@ export default function OrderNew() {
         prepayment: num(form.prepayment) ?? 0,
         assignedMasterId: form.assignedMasterId || undefined,
       });
+      // Папка заказа на компьютере — сразу, если так настроено; приём её не ждёт.
+      void ensureOnIntake({ number: created.number, device, customer: { name: customer.name } });
       if (photos.length && !(await uploadPhotos(created.id, photos.map((p) => p.file)))) return;
       navigate(`/orders/${created.id}`, { state: { printOffer: true } });
     } catch (err) {

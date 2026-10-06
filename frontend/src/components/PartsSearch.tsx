@@ -3,8 +3,10 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { money } from "../lib/orders";
 import { partsApi, STOCK_LABEL, type PartOffer, type PartShop, type ShopResult } from "../lib/partsApi";
+import { forgetMarket, marketOffers, marketsBridge, matches, watchMarkets } from "../lib/markets";
 import { IconExternal, IconSearch } from "./icons";
 import { Modal } from "./Modal";
+import { ShopLogo } from "./ShopLogo";
 import { Banner, Button, SearchInput, Spinner } from "./ui";
 
 const cx = (...p: Array<string | false | null | undefined>) => p.filter(Boolean).join(" ");
@@ -56,17 +58,22 @@ function StockBadge({ offer }: { offer: PartOffer }) {
 
 function OfferRow({
   offer,
+  shopId,
   shopName,
   onPick,
   pickLabel,
 }: {
   offer: PartOffer;
+  shopId: string;
   shopName: string;
   onPick?: (o: PickedOffer) => void;
   pickLabel: string;
 }) {
   return (
-    <div data-offer className="grid gap-x-3 gap-y-1 border-t border-line py-2.5 first:border-t-0 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+    <div data-offer className="grid grid-cols-[32px_1fr] gap-x-3 gap-y-1 border-t border-line py-2.5 first:border-t-0 sm:grid-cols-[32px_1fr_auto_auto] sm:items-center">
+      <span className="row-span-3 pt-0.5 sm:row-span-1 sm:pt-0">
+        <ShopLogo id={shopId} name={shopName} size={32} />
+      </span>
       <div className="min-w-0">
         <span className="mr-2 inline-block rounded-pill bg-surface-raised px-2 py-0.5 text-[11.5px] font-bold text-ink-soft">{shopName}</span>
         <a
@@ -119,6 +126,11 @@ export function PartsSearch({
   const [state, setState] = useState<Record<string, ShopState>>({});
   const [showSimilar, setShowSimilar] = useState(false);
   const run = useRef(0);
+  // Площадки в окне программы: что прислала кнопка «Показать списком».
+  const markets = marketsBridge();
+  const [, setMarketTick] = useState(0);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  useEffect(() => (markets ? watchMarkets(() => setMarketTick((n) => n + 1)) : undefined), [markets]);
 
   useEffect(() => {
     partsApi
@@ -174,7 +186,36 @@ export function PartsSearch({
     }
   }
 
-  const results = Object.entries(state).flatMap(([id, st]) => (st.status === "done" && !st.result.linkOnly ? [{ id, r: st.result }] : []));
+  const fromServer = Object.entries(state).flatMap(([id, st]) => (st.status === "done" && !st.result.linkOnly ? [{ id, r: st.result }] : []));
+  // Товары из окна площадок — как ответ ещё одного магазина; совпадение считаем тем же правилом.
+  const fromMarkets = asked
+    ? linkOnly.flatMap((s) => {
+        const m = marketOffers(s.id, asked);
+        if (!m) return [];
+        const r: ShopResult = {
+          shop: s.id,
+          url: m.url,
+          offers: m.offers.map((o) => ({ ...o, exact: matches(asked, o) })),
+          more: 0,
+          ms: 0,
+        };
+        return [{ id: s.id, r }];
+      })
+    : [];
+  const results = [...fromServer, ...fromMarkets];
+  const openMarket = async (s: PartShop) => {
+    if (!markets || !asked) return;
+    const urls: Record<string, string> = {};
+    for (const x of linkOnly) {
+      const u = searchUrlOf(x);
+      if (u) urls[x.id] = u;
+    }
+    if (!urls[s.id]) return;
+    setMarketError(null);
+    forgetMarket(s.id);
+    const r = await markets.open({ shop: s.id, query: asked, urls });
+    if (!r.ok) setMarketError(r.error ?? "Окно площадки не открылось");
+  };
   const exact = results
     .flatMap(({ id, r }) => r.offers.filter((o) => o.exact).map((o) => ({ o, id })))
     .sort((a, b) => byStockPrice(a.o, b.o));
@@ -257,6 +298,7 @@ export function PartsSearch({
                     : "border-line text-ink-muted";
               const body = (
                 <>
+                  <ShopLogo id={s.id} name={s.name} size={16} />
                   <b className="font-bold">{s.name}</b> · {label}
                   {url && <IconExternal className="h-3.5 w-3.5 shrink-0" />}
                 </>
@@ -279,7 +321,28 @@ export function PartsSearch({
                 </span>
               );
             })}
-            {linkOnly.map((s) => (
+            {markets
+              ? linkOnly.map((s) => {
+                  const got = asked ? marketOffers(s.id, asked) : null;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      data-shop={s.id}
+                      disabled={!searchUrlOf(s)}
+                      onClick={() => void openMarket(s)}
+                      title="Открыть площадку в окне программы"
+                      className={cx(
+                        "inline-flex items-center gap-1 rounded-pill border px-2.5 py-1 text-[12.5px] hover:border-line-strong hover:text-ink",
+                        got ? "border-state-done/50 text-ink" : "border-dashed border-line text-ink-muted"
+                      )}
+                    >
+                      <ShopLogo id={s.id} name={s.name} size={16} />
+                      <b className="font-bold">{s.name}</b> · {got ? `${got.offers.filter((o) => matches(asked ?? "", o)).length} из окна` : "открыть"}
+                    </button>
+                  );
+                })
+              : linkOnly.map((s) => (
               <a
                 key={s.id}
                 data-shop={s.id}
@@ -289,16 +352,24 @@ export function PartsSearch({
                 title="Этот магазин смотрим только на его сайте"
                 className="inline-flex items-center gap-1 rounded-pill border border-dashed border-line px-2.5 py-1 text-[12.5px] text-ink-muted hover:border-line-strong hover:text-ink"
               >
+                <ShopLogo id={s.id} name={s.name} size={16} />
                 <b className="font-bold">{s.name}</b> · открыть поиск
                 <IconExternal className="h-3.5 w-3.5 shrink-0" />
               </a>
             ))}
           </div>
+          {markets && linkOnly.length > 0 && (
+            <p className="-mt-2 text-[12.5px] leading-relaxed text-ink-dim" data-markets-hint>
+              {linkOnly.map((s) => s.name).join(", ")} открываются в окне программы: найдите нужное и нажмите там
+              «Показать списком в FineCRM» — товары появятся здесь{onPick ? `, с кнопкой «${pickLabel}»` : ""}.
+            </p>
+          )}
+          {marketError && <Banner tone="error">{marketError}</Banner>}
 
           {exact.length > 0 ? (
             <div data-exact>
               {exact.map(({ o, id }, i) => (
-                <OfferRow key={`${id}-${i}`} offer={o} shopName={nameOf(id)} onPick={onPick} pickLabel={pickLabel} />
+                <OfferRow key={`${id}-${i}`} offer={o} shopId={id} shopName={nameOf(id)} onPick={onPick} pickLabel={pickLabel} />
               ))}
             </div>
           ) : loading ? (
@@ -334,7 +405,7 @@ export function PartsSearch({
               {showSimilar && (
                 <div className="mt-2 opacity-90" data-similar>
                   {similar.map(({ o, id }, i) => (
-                    <OfferRow key={`s-${id}-${i}`} offer={o} shopName={nameOf(id)} onPick={onPick} pickLabel={pickLabel} />
+                    <OfferRow key={`s-${id}-${i}`} offer={o} shopId={id} shopName={nameOf(id)} onPick={onPick} pickLabel={pickLabel} />
                   ))}
                   {similarMore > 0 && (
                     <p className="pt-2 text-[12.5px] text-ink-dim">И ещё {similarMore} — на сайтах магазинов по ссылкам выше.</p>
