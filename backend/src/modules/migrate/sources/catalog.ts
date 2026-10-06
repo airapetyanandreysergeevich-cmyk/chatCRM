@@ -406,9 +406,11 @@ function convert(tables: Record<string, SqlTable>): Converted {
     const comment = cleanComment(o.kommentarij);
     if (comment.passcode) passcodes.set(number, comment.passcode);
     const sc = clean(o.AdressSC);
-    const colour = caps(o.DeviceColour);
+    // «Комментарий» старой программы — это заметки приёмщика и мастерской
+    // (артикулы, договорённости, «смс отправить в пятницу»), а не диагноз:
+    // он идёт в «Примечание приёмщика». Цвет не переносим — решение Андрея.
     const receptionNote = [
-      colour && `Цвет: ${colour}`,
+      comment.text,
       sc && sc !== ownSc && `Адрес СЦ: ${sc}`,
       master.all && master.all !== master.name && `Мастера: ${master.all}`,
       clean(o.wait_zakaz) && `Запчасть: ${clean(o.wait_zakaz).toLowerCase()}`,
@@ -435,7 +437,7 @@ function convert(tables: Record<string, SqlTable>): Converted {
       list(o.komplektonst),
       list(o.sostoyanie),
       receptionNote,
-      comment.text,
+      "", // «Диагноз» («Что оказалось не так»): в старой программе такого поля нет
       master.name,
       ru(readyAt.get(number) ?? (issued ? issued : null)),
       ru(issued),
