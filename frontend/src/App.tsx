@@ -9,6 +9,8 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Applications from "./pages/platform/Applications";
 import Boxes from "./pages/platform/Boxes";
+import Categories from "./pages/platform/Categories";
+import PlatformOverview from "./pages/platform/Overview";
 import FeedbackPage from "./pages/Feedback";
 import AgentsPage from "./pages/Agents";
 import PlatformFeedback from "./pages/platform/Feedback";
@@ -51,7 +53,7 @@ function Soon({ title }: { title: string }) {
 /** Куда попадает пользователь после входа — зависит от того, кто он. */
 function Home() {
   const { me } = useAuth();
-  if (me?.kind === "platform" && !me.impersonating) return <Navigate to="/platform/tenants" replace />;
+  if (me?.kind === "platform" && !me.impersonating) return <Navigate to="/platform/overview" replace />;
   return <Dashboard />;
 }
 
@@ -103,7 +105,9 @@ export default function App() {
           {/* Оповещения переехали в настройки. Старый адрес мог попасть
               в закладки и в ссылки из push — уводим на новый, а не в пустоту. */}
           <Route path="/notifications" element={<Navigate to="/settings/notifications" replace />} />
+          <Route path="/platform/overview" element={<PlatformOverview />} />
           <Route path="/platform/tenants" element={<Tenants />} />
+          <Route path="/platform/categories" element={<Categories />} />
           <Route path="/platform/applications" element={<Applications />} />
           <Route path="/platform/boxes" element={<Boxes />} />
           <Route path="/platform/feedback" element={<PlatformFeedback />} />

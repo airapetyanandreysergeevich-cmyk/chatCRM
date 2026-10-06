@@ -517,3 +517,27 @@ export const IconFolder = (p: IconProps) => (
     <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2.2h7.4a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
   </Icon>
 );
+
+/** Облачная мастерская: база у нас. */
+export const IconCloud = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7 18.5h10.2a4.3 4.3 0 0 0 .6-8.56A6 6 0 0 0 6.3 9.6 4.5 4.5 0 0 0 7 18.5z" />
+  </Icon>
+);
+
+/** Локальная мастерская: база на её компьютере. */
+export const IconComputer = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M8.5 20h7" />
+    <path d="M12 16v4" />
+  </Icon>
+);
+
+/** Категория клиента. */
+export const IconTag = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.5 11.6V5a1.5 1.5 0 0 1 1.5-1.5h6.6a1.5 1.5 0 0 1 1.06.44l7.4 7.4a1.5 1.5 0 0 1 0 2.12l-6.6 6.6a1.5 1.5 0 0 1-2.12 0l-7.4-7.4a1.5 1.5 0 0 1-.44-1.06z" />
+    <circle cx="8" cy="8" r="1.4" />
+  </Icon>
+);

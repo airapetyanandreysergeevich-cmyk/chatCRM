@@ -7,6 +7,7 @@ import { AppError, ah, badRequest, forbidden } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import { authenticate, currentTenantId, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
+import { countUsage, tenantSubject } from "../../lib/usage";
 import { loadDictionary } from "./plate.dictionary";
 import { brandFromHistory, cloudKnowledge, recordMiss } from "./plate.learn";
 import { parsePlate, type OcrResult, type PlateDictionary } from "./plate.parse";
@@ -88,6 +89,7 @@ plateRouter.post(
       waiting -= 1;
     }
 
+    void countUsage(tenantSubject(tenantOf(req)), { plateOcr: 1 });
     res.json(await parseFor(req, ocr));
   })
 );
@@ -115,7 +117,9 @@ plateRouter.post(
   "/parse",
   ah(async (req, res) => {
     await assertEnabled(req);
-    res.json(await parseFor(req, parseSchema.parse(req.body)));
+    const parsed = parseSchema.parse(req.body);
+    void countUsage(tenantSubject(tenantOf(req)), { plateOcr: 1 });
+    res.json(await parseFor(req, parsed));
   })
 );
 

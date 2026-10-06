@@ -83,9 +83,25 @@ model Tenant {
   /// собственник платформы: распознаватель — общий ресурс сервера.
   plateOcr Boolean @default(true)
 
+  /// Категория клиента платформы: цена и условия (см. ClientCategory).
+  categoryId String?
+  /// Своя цена в месяц, ₽. Пусто — цена категории.
+  price      Int?
+  /// Лимиты (сотрудники, хранилище, шильдики) выставлены вручную и не
+  /// меняются вместе с категорией.
+  customLimits Boolean @default(false)
+  /// До какого дня оплачено облако. Пусто — срок не задан.
+  paidUntil  DateTime?
+  /// Когда в мастерской последний раз кто-то работал — для «в сети»
+  /// у собственника. Пишется не чаще раза в минуту.
+  lastSeenAt DateTime?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  category ClientCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  payments ClientPayment[]
 
   branches            Branch[]
   roles               Role[]
@@ -183,16 +199,99 @@ model Box {
   note     String?
   isActive Boolean @default(true)
 
-  /// Когда Основа последний раз выходила на связь.
+  /// Когда Основа последний раз выходила на связь или отключалась.
   lastSeenAt DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  /// Категория клиента, своя цена и срок оплаты — как у облачной мастерской.
+  categoryId String?
+  price      Int?
+  paidUntil  DateTime?
+
+  category    ClientCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  payments    ClientPayment[]
   plateModels PlateBoxModel[]
 
   @@index([keyHash])
   @@index([email])
   @@index([previousName])
+}
+
+/**
+ * Категория клиентов платформы: «Свои ребята», «Обычные», «Партнёры».
+ *
+ * Условия категории — цена, пробный срок, лимиты — получают все её клиенты.
+ * Цену можно поправить отдельному клиенту (Tenant.price, Box.price), лимиты —
+ * тоже (Tenant.customLimits): тогда смена условий категории его не трогает.
+ */
+model ClientCategory {
+  id    String  @id @default(uuid())
+  name  String  @unique
+  /// Цвет метки: ключ палитры, как у цветов клиентов мастерской.
+  color String  @default("blue")
+  note  String?
+
+  /// Облачная мастерская, ₽ в месяц. 0 — бесплатно.
+  cloudPrice  Int @default(0)
+  /// Доступ из интернета к локальной мастерской, ₽ в месяц.
+  remotePrice Int @default(0)
+  /// Сколько дней новый клиент работает до первой оплаты.
+  trialDays   Int @default(14)
+
+  maxUsers     Int     @default(10)
+  maxStorageMb Int     @default(5000)
+  plateOcr     Boolean @default(true)
+  /// Показывать рекламу в бесплатной локальной версии. Пока ни на что не
+  /// влияет — заготовка под рекламу.
+  showAds      Boolean @default(true)
+
+  /// Сюда попадают новые клиенты. Такая категория одна.
+  isDefault Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenants Tenant[]
+  boxes   Box[]
+}
+
+/// Оплата клиента платформы, отмеченная собственником вручную.
+model ClientPayment {
+  id        String   @id @default(uuid())
+  tenantId  String?
+  boxId     String?
+  /// Имя клиента на момент оплаты: строка остаётся в истории и после удаления.
+  clientName String
+  amount    Int
+  months    Int?
+  /// До какого дня оплачено после этой оплаты.
+  paidUntil DateTime
+  /// Что было до неё — чтобы ошибочную оплату можно было убрать без следа.
+  prevPaidUntil DateTime?
+  note      String?
+  createdById String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  box    Box?    @relation(fields: [boxId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([tenantId])
+  @@index([boxId])
+}
+
+/// Расход ресурсов облака клиентом за месяц.
+model UsageMonth {
+  /// "t:<id мастерской>" или "b:<id Основы>".
+  subject       String
+  /// "2026-10"
+  month         String
+  plateOcr      Int    @default(0)
+  relayBytes    BigInt @default(0)
+  relayRequests Int    @default(0)
+
+  @@id([subject, month])
 }
 
 model PlatformSetting {

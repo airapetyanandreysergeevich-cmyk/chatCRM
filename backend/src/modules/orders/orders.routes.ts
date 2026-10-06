@@ -29,6 +29,7 @@ import { nextCustomerNumber } from "../../lib/customerNumber";
 import { takePayment } from "../../lib/payment";
 import { PERMISSIONS } from "../../lib/permissions";
 import { isAllowedUpload, putOrderFile, removeFile, signedUrl } from "../../lib/storage";
+import { assertStorageRoom } from "../../lib/usage";
 import {
   actorUserId,
   authenticate,
@@ -1382,6 +1383,7 @@ ordersRouter.post(
         throw badRequest(`Такой файл загрузить нельзя: ${f.originalname}`);
       }
     }
+    await assertStorageRoom(tenantId, files.reduce((a, f) => a + f.size, 0));
 
     // Права проверяем в короткой транзакции, а сами файлы льём уже снаружи:
     // десяток фотографий по мобильному интернету — это секунды, и держать

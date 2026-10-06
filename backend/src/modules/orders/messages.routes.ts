@@ -7,6 +7,7 @@ import { ah, badRequest, forbidden, notFound } from "../../lib/errors";
 import { notifyTenant } from "../../lib/notify";
 import { PERMISSIONS } from "../../lib/permissions";
 import { isAllowedUpload, putOrderFile, removeFile, signedUrl } from "../../lib/storage";
+import { assertStorageRoom } from "../../lib/usage";
 import { originalName } from "../../lib/uploadName";
 import {
   actorUserId,
@@ -134,6 +135,7 @@ messagesRouter.post(
 
     // Файлы — вне транзакции: десяток снимков по мобильному интернету это
     // секунды, держать ради них открытое соединение с базой незачем.
+    if (files.length) await assertStorageRoom(tenantId, files.reduce((a, f) => a + f.size, 0));
     const keys: Array<{ key: string; file: Express.Multer.File }> = [];
     try {
       for (const f of files) {

@@ -1,21 +1,47 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "../../components/Modal";
 import {
+  CategoryChip,
+  ClientModal,
+  FilterSelect,
+  KindMark,
+  PayText,
+  RowMenu,
+  Seen,
+  UsageBar,
+  norm,
+  usePref,
+  type ClientTarget,
+} from "../../components/platform/ClientBits";
+import { SortSelect } from "../../components/ListControls";
+import { IconStaff } from "../../components/icons";
+import {
+  Badge,
   Banner,
   Button,
-  Card,
-  Checkbox,
+  EmptyState,
   Field,
   Input,
+  List,
+  ListRow,
+  SearchInput,
   SectionLabel,
   Select,
   Spinner,
-  StatusChip,
   Textarea,
 } from "../../components/ui";
 import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { formatDate, plural } from "../../lib/format";
+import {
+  activityOf,
+  bytes,
+  platformApi,
+  type Activity,
+  type Category,
+  type PayState,
+  type TenantRow,
+} from "../../lib/platformApi";
 import {
   brandsFromText,
   brandsToText,
@@ -29,45 +55,62 @@ import {
   type PlateMiss,
 } from "../../lib/plateDictionary";
 
-interface TenantRow {
-  id: string;
-  name: string;
-  slug: string;
-  status: "ACTIVE" | "READONLY" | "SUSPENDED";
-  plan: string;
-  maxUsers: number;
-  /** Распознавание шильдиков камерой на бланке приёма. */
-  plateOcr: boolean;
-  contactPhone: string | null;
-  createdAt: string;
-  /** Не пусто — мастерская в архиве: вход закрыт, данные целы. */
-  archivedAt: string | null;
-  userCount: number;
-  orderCount: number;
-}
+/**
+ * Облачные мастерские — строками, с отбором и сортировкой.
+ *
+ * В строке то, что нужно собственнику облака: жива ли мастерская, в какой
+ * она категории, заплатила ли, сколько занимает места и людей. Заказов и
+ * прочего содержимого мастерской здесь нет — это её дело, не наше. Войти в
+ * мастерскую отсюда тоже нельзя.
+ */
 
-const STATUS_LABEL: Record<TenantRow["status"], { text: string; tone: "done" | "waiting" | "cancelled" }> = {
-  ACTIVE: { text: "Работает", tone: "done" },
-  READONLY: { text: "Только чтение", tone: "waiting" },
-  SUSPENDED: { text: "Приостановлена", tone: "cancelled" },
+const STATUS_BADGE: Record<TenantRow["status"], { text: string; tone: "warning" | "danger" } | null> = {
+  ACTIVE: null,
+  READONLY: { text: "только чтение", tone: "warning" },
+  SUSPENDED: { text: "приостановлена", tone: "danger" },
 };
 
+type StatusFilter = "work" | "readonly" | "suspended" | "archive" | "all";
+type PayFilter = "" | PayState | "debt";
+type ActFilter = "" | Activity | "quiet";
+type Sort = "seen" | "name" | "paid" | "storage" | "users" | "created";
+
+const SORTS: Array<{ value: Sort; label: string }> = [
+  { value: "seen", label: "по активности" },
+  { value: "paid", label: "по сроку оплаты" },
+  { value: "storage", label: "по занятому месту" },
+  { value: "users", label: "по сотрудникам" },
+  { value: "name", label: "по названию" },
+  { value: "created", label: "сначала новые" },
+];
+
+const MB = 1024 * 1024;
+
 export default function Tenants() {
-  const { applyToken, me } = useAuth();
-  // Распознаватель — общий ресурс сервера, поэтому включает его собственник.
+  const { me } = useAuth();
+  // Цены, лимиты и оплату меняет собственник; администратор только смотрит.
   const isOwner = me?.kind === "platform" && me.platformUser.role === "OWNER";
   const [rows, setRows] = useState<TenantRow[] | null>(null);
+  const [cats, setCats] = useState<Category[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [impersonate, setImpersonate] = useState<TenantRow | null>(null);
   const [removing, setRemoving] = useState<TenantRow | null>(null);
-  /** Ошибка действия — над списком, а не вместо него. */
+  const [open, setOpen] = useState<TenantRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dictionary, setDictionary] = useState(false);
 
+  const [q, setQ] = useState("");
+  const [status, setStatus] = usePref<StatusFilter>("platform.tenants.status", "work", ["work", "readonly", "suspended", "archive", "all"]);
+  const [cat, setCat] = useState("");
+  const [pay, setPay] = usePref<PayFilter>("platform.tenants.pay", "", ["", "paid", "soon", "overdue", "none", "free", "debt"]);
+  const [act, setAct] = usePref<ActFilter>("platform.tenants.act", "", ["", "online", "day", "week", "month", "long", "never", "quiet"]);
+  const [sort, setSort] = usePref<Sort>("platform.tenants.sort", "seen", ["seen", "name", "paid", "storage", "users", "created"]);
+
   const load = useCallback(async () => {
     try {
-      setRows(await api.get<TenantRow[]>("/platform/tenants"));
+      const [t, c] = await Promise.all([platformApi.tenants(), platformApi.categories()]);
+      setRows(t);
+      setCats(c);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить список");
     }
@@ -75,22 +118,51 @@ export default function Tenants() {
 
   useEffect(() => {
     void load();
+    // «В сети» меняется само: обновляем раз в минуту, чтобы список не врал.
+    const t = setInterval(() => void load(), 60_000);
+    return () => clearInterval(t);
   }, [load]);
 
-  async function togglePlateOcr(t: TenantRow, on: boolean) {
-    // Сразу на экране, не дожидаясь сервера; при отказе — вернуть как было.
-    setRows((rs) => rs?.map((r) => (r.id === t.id ? { ...r, plateOcr: on } : r)) ?? rs);
-    try {
-      await api.patch(`/platform/tenants/${t.id}`, { plateOcr: on });
-    } catch (err) {
-      setRows((rs) => rs?.map((r) => (r.id === t.id ? { ...r, plateOcr: !on } : r)) ?? rs);
-      setNotice(err instanceof ApiError ? err.message : "Не удалось переключить распознавание");
-    }
-  }
+  const catBy = useMemo(() => new Map(cats.map((c) => [c.id, c])), [cats]);
 
-  async function changeStatus(t: TenantRow, status: TenantRow["status"]) {
-    await api.patch(`/platform/tenants/${t.id}`, { status });
-    await load();
+  const shown = useMemo(() => {
+    if (!rows) return [];
+    const words = norm(q).split(/\s+/).filter(Boolean);
+    const list = rows.filter((t) => {
+      if (status === "archive" ? !t.archivedAt : status !== "all" && t.archivedAt) return false;
+      if (status === "work" && t.status !== "ACTIVE") return false;
+      if (status === "readonly" && t.status !== "READONLY") return false;
+      if (status === "suspended" && t.status !== "SUSPENDED") return false;
+      if (cat && (cat === "none" ? t.categoryId : t.categoryId !== cat)) return false;
+      if (pay === "debt" ? t.pay !== "overdue" && t.pay !== "soon" : pay && t.pay !== pay) return false;
+      const a = activityOf(t.online, t.lastSeenAt);
+      if (act === "quiet" ? !["month", "long", "never"].includes(a) : act && a !== act) return false;
+      if (words.length) {
+        const hay = norm([t.name, t.slug, t.contactName, t.contactPhone, t.contactEmail].filter(Boolean).join(" "));
+        if (!words.every((w) => hay.includes(w))) return false;
+      }
+      return true;
+    });
+    const seen = (t: TenantRow) => (t.online ? Date.now() + 1 : t.lastSeenAt ? new Date(t.lastSeenAt).getTime() : 0);
+    const paid = (t: TenantRow) => (t.pay === "free" ? Infinity : t.paidUntil ? new Date(t.paidUntil).getTime() : -Infinity);
+    const by: Record<Sort, (a: TenantRow, b: TenantRow) => number> = {
+      seen: (a, b) => seen(b) - seen(a),
+      name: (a, b) => a.name.localeCompare(b.name, "ru"),
+      paid: (a, b) => paid(a) - paid(b),
+      storage: (a, b) => b.storageBytes - a.storageBytes,
+      users: (a, b) => b.userCount - a.userCount,
+      created: (a, b) => b.createdAt.localeCompare(a.createdAt),
+    };
+    return [...list].sort((a, b) => by[sort](a, b) || a.name.localeCompare(b.name, "ru"));
+  }, [rows, q, status, cat, pay, act, sort]);
+
+  async function changeStatus(t: TenantRow, next: TenantRow["status"]) {
+    try {
+      await api.patch(`/platform/tenants/${t.id}`, { status: next });
+      await load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Не удалось сменить состояние");
+    }
   }
 
   /**
@@ -98,21 +170,42 @@ export default function Tenants() {
    * там, откуда нет пути назад, а это отдельное окно.
    */
   async function archive(t: TenantRow, toArchive: boolean) {
-    await api.post(`/platform/tenants/${t.id}/${toArchive ? "archive" : "restore"}`, {});
-    await load();
+    try {
+      await api.post(`/platform/tenants/${t.id}/${toArchive ? "archive" : "restore"}`, {});
+      await load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Не удалось");
+    }
   }
 
   if (error) return <Banner tone="error">{error}</Banner>;
   if (!rows) return <Spinner />;
+
+  const live = rows.filter((r) => !r.archivedAt);
+  const online = live.filter((r) => r.online).length;
+  const used = live.reduce((a, r) => a + r.storageBytes, 0);
+  const filtered = !!(q || cat || pay || act || status !== "work");
+
+  const target = (t: TenantRow): ClientTarget => ({
+    kind: "cloud",
+    id: t.id,
+    name: t.name,
+    categoryId: t.categoryId,
+    ownPrice: t.ownPrice,
+    price: t.price,
+    paidUntil: t.paidUntil,
+    limits: { maxUsers: t.maxUsers, maxStorageMb: t.maxStorageMb, plateOcr: t.plateOcr, customLimits: t.customLimits },
+  });
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <SectionLabel>Платформа</SectionLabel>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight">Мастерские</h1>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight">Облачные мастерские</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            {rows.length ? plural(rows.length, "мастерская", "мастерские", "мастерских") : "Пока ни одной"}
+            {live.length ? plural(live.length, "мастерская", "мастерские", "мастерских") : "Пока ни одной"}
+            {live.length > 0 && ` · ${online} в сети · фото ${bytes(used)}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -125,93 +218,134 @@ export default function Tenants() {
 
       {notice && <Banner tone="error">{notice}</Banner>}
 
+      {rows.length > 0 && (
+        <div className="space-y-2.5">
+          <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название, код, контакт" aria-label="Поиск мастерской" />
+          <div className="flex flex-wrap gap-2">
+            <FilterSelect label="Состояние" value={status} onChange={(v) => setStatus(v as StatusFilter)}>
+              <option value="work">работают</option>
+              <option value="readonly">только чтение</option>
+              <option value="suspended">приостановлены</option>
+              <option value="archive">в архиве</option>
+              <option value="all">все</option>
+            </FilterSelect>
+            <FilterSelect label="Категория" value={cat} onChange={setCat}>
+              <option value="">все</option>
+              {cats.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+              <option value="none">без категории</option>
+            </FilterSelect>
+            <FilterSelect label="Оплата" value={pay} onChange={(v) => setPay(v as PayFilter)}>
+              <option value="">любая</option>
+              <option value="debt">пора платить</option>
+              <option value="overdue">просрочено</option>
+              <option value="soon">меньше недели</option>
+              <option value="paid">оплачено</option>
+              <option value="none">срок не задан</option>
+              <option value="free">бесплатно</option>
+            </FilterSelect>
+            <FilterSelect label="Активность" value={act} onChange={(v) => setAct(v as ActFilter)}>
+              <option value="">любая</option>
+              <option value="online">в сети</option>
+              <option value="day">сегодня</option>
+              <option value="week">за неделю</option>
+              <option value="quiet">давно не заходили</option>
+              <option value="never">не заходили</option>
+            </FilterSelect>
+            <SortSelect value={sort} options={SORTS} onChange={setSort} />
+          </div>
+        </div>
+      )}
+
       {rows.length === 0 ? (
-        <Card>
-          <p className="text-ink-muted">
-            Заведите первую мастерскую — владелец получит логин и сможет сразу принимать технику.
-          </p>
-        </Card>
+        <EmptyState title="Пока ни одной">
+          Заведите первую мастерскую — владелец получит логин и сможет сразу принимать технику.
+        </EmptyState>
+      ) : shown.length === 0 ? (
+        <EmptyState title="Никого не нашлось">
+          {filtered ? "Под выбранный отбор никто не подходит — ослабьте фильтры." : "Список пуст."}
+        </EmptyState>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {rows.map((t) => (
-            <Card key={t.id} className={t.archivedAt ? "opacity-70" : undefined}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-[17px] font-bold leading-tight">{t.name}</h2>
-                  <p className="mt-1 font-mono text-[13px] text-ink-muted">{t.slug}</p>
-                </div>
-                <StatusChip tone={t.archivedAt ? "cancelled" : STATUS_LABEL[t.status].tone}>
-                  {t.archivedAt ? "В архиве" : STATUS_LABEL[t.status].text}
-                </StatusChip>
-              </div>
-
-              <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4 text-sm">
-                <div>
-                  <dt className="text-ink-muted">Сотрудники</dt>
-                  <dd className="font-bold">
-                    {t.userCount} <span className="font-normal text-ink-muted">из {t.maxUsers}</span>
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-ink-muted">Заказы</dt>
-                  <dd className="font-bold">{t.orderCount}</dd>
-                </div>
-                <div>
-                  <dt className="text-ink-muted">Подключена</dt>
-                  <dd className="font-bold">{formatDate(t.createdAt)}</dd>
-                </div>
-              </dl>
-
-              <div className="mt-4 border-t border-line pt-3">
-                <Checkbox
-                  checked={t.plateOcr}
-                  disabled={!isOwner || !!t.archivedAt}
-                  onChange={(on) => void togglePlateOcr(t, on)}
-                  label="Распознавание шильдиков камерой"
+        <List>
+          {shown.map((t) => {
+            const badge = STATUS_BADGE[t.status];
+            return (
+              <div key={t.id} role="button" tabIndex={0} onClick={() => setOpen(t)} onKeyDown={(e) => e.key === "Enter" && setOpen(t)} className="cursor-pointer">
+                <ListRow
+                  className={t.archivedAt ? "opacity-60" : undefined}
+                  glyph={<KindMark kind="cloud" online={t.online} />}
+                  title={
+                    <>
+                      <span className="truncate">{t.name}</span>
+                      <CategoryChip category={t.categoryId ? catBy.get(t.categoryId) : null} />
+                      {t.archivedAt ? <Badge tone="danger">в архиве</Badge> : badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
+                    </>
+                  }
+                  subtitle={
+                    <>
+                      <span className="font-mono text-[12.5px]">{t.slug}</span>
+                      {t.contactName && <span> · {t.contactName}</span>}
+                      {t.contactPhone && <span> · {t.contactPhone}</span>}
+                      <span className="text-ink-dim"> · с {formatDate(t.createdAt)}</span>
+                    </>
+                  }
+                  meta={
+                    <>
+                      <span className="lg:w-[118px]">
+                        <Seen online={t.online} at={t.lastSeenAt} />
+                      </span>
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap lg:w-[64px]" title="Сотрудники: есть / можно">
+                        <IconStaff className="h-3.5 w-3.5" />
+                        <b className="text-ink-soft">{t.userCount}</b>/{t.maxUsers}
+                      </span>
+                      <span className="w-[150px]" title="Фотографии в облаке">
+                        <UsageBar used={t.storageBytes} limit={t.maxStorageMb * MB} />
+                      </span>
+                      <span className="whitespace-nowrap lg:w-[86px]" title="Снимков шильдиков за месяц">
+                        {t.plateOcr ? `шильдики ${t.plateOcrMonth}` : "шильдики выкл"}
+                      </span>
+                      <span className="lg:w-[150px] lg:text-right">
+                        <PayText pay={t.pay} paidUntil={t.paidUntil} price={t.price} />
+                      </span>
+                    </>
+                  }
+                  actions={
+                    <RowMenu
+                      items={
+                        t.archivedAt
+                          ? [
+                              { label: "Вернуть из архива", onClick: () => void archive(t, false) },
+                              isOwner && { label: "Удалить насовсем…", onClick: () => setRemoving(t), danger: true },
+                            ]
+                          : [
+                              { label: "Условия и оплата", onClick: () => setOpen(t) },
+                              t.status === "ACTIVE"
+                                ? { label: "Перевести в чтение", onClick: () => void changeStatus(t, "READONLY") }
+                                : { label: "Вернуть в работу", onClick: () => void changeStatus(t, "ACTIVE") },
+                              t.status !== "SUSPENDED" && { label: "Приостановить", onClick: () => void changeStatus(t, "SUSPENDED") },
+                              { label: "В архив", onClick: () => void archive(t, true), danger: true },
+                            ]
+                      }
+                    />
+                  }
                 />
               </div>
+            );
+          })}
+        </List>
+      )}
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                {t.archivedAt ? (
-                  <>
-                    <Button variant="secondary" className="px-4 text-sm" onClick={() => void archive(t, false)}>
-                      Вернуть из архива
-                    </Button>
-                    <Button variant="danger" className="px-4 text-sm" onClick={() => setRemoving(t)}>
-                      Удалить насовсем
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button variant="secondary" className="px-4 text-sm" onClick={() => setImpersonate(t)}>
-                      Войти как владелец
-                    </Button>
-                    {t.status === "ACTIVE" ? (
-                      <Button
-                        variant="secondary"
-                        className="px-4 text-sm"
-                        onClick={() => void changeStatus(t, "READONLY")}
-                      >
-                        Перевести в чтение
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        className="px-4 text-sm"
-                        onClick={() => void changeStatus(t, "ACTIVE")}
-                      >
-                        Вернуть в работу
-                      </Button>
-                    )}
-                    <Button variant="ghost" className="px-4 text-sm" onClick={() => void archive(t, true)}>
-                      В архив
-                    </Button>
-                  </>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
+      {open && (
+        <ClientModal
+          target={target(rows.find((r) => r.id === open.id) ?? open)}
+          categories={cats}
+          canEdit={isOwner}
+          onClose={() => setOpen(null)}
+          onChanged={() => void load()}
+        />
       )}
 
       {dictionary && <DictionaryModal canEdit={isOwner} onClose={() => setDictionary(false)} />}
@@ -233,17 +367,6 @@ export default function Tenants() {
           onDone={() => {
             setRemoving(null);
             void load();
-          }}
-        />
-      )}
-
-      {impersonate && (
-        <ImpersonateModal
-          tenant={impersonate}
-          onClose={() => setImpersonate(null)}
-          onDone={async (token) => {
-            setImpersonate(null);
-            await applyToken(token);
           }}
         />
       )}
@@ -382,10 +505,9 @@ function RemoveTenantModal({
     <Modal title="Удалить мастерскую насовсем" onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
         <Banner tone="error">
-          Будут стёрты все заказы, клиенты, фотографии, склад, касса и сотрудники мастерской «{tenant.name}»:
-          {" "}
-          {tenant.orderCount} заказов, {tenant.userCount} сотрудников. Восстановить это будет нечем — резервная
-          копия платформы тоже перестанет их содержать со следующей выгрузки.
+          Будут стёрты все заказы, клиенты, фотографии, склад, касса и сотрудники мастерской «{tenant.name}».
+          Восстановить это будет нечем — резервная копия платформы тоже перестанет их содержать со следующей
+          выгрузки.
         </Banner>
 
         <Field
@@ -399,56 +521,6 @@ function RemoveTenantModal({
         <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
           <Button type="submit" variant="danger" disabled={busy || !matches} className="sm:flex-1">
             {busy ? "Удаляю…" : "Удалить насовсем"}
-          </Button>
-          <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
-            Отмена
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function ImpersonateModal({
-  tenant,
-  onClose,
-  onDone,
-}: {
-  tenant: TenantRow;
-  onClose: () => void;
-  onDone: (token: string) => void;
-}) {
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState<ApiError | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const data = await api.post<{ accessToken: string }>(`/platform/tenants/${tenant.id}/impersonate`, { reason });
-      onDone(data.accessToken);
-    } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal title={`Войти в «${tenant.name}»`} onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4">
-        <Banner>
-          Вход будет записан в журнал и виден владельцу мастерской: кто зашёл, когда и по какой причине.
-        </Banner>
-        {error && <Banner tone="error">{error.message}</Banner>}
-        <Field label="Причина входа" error={error?.field("reason")} hint="Например: разбираем обращение в поддержку №128">
-          <Input value={reason} onChange={(e) => setReason(e.target.value)} invalid={!!error?.field("reason")} />
-        </Field>
-        <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
-          <Button type="submit" disabled={busy} className="sm:flex-1">
-            {busy ? "Входим…" : "Войти"}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
             Отмена

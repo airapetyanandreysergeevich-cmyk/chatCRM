@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Modal } from "../../components/Modal";
+import { SortSelect } from "../../components/ListControls";
+import {
+  CategoryChip,
+  ClientModal,
+  FilterSelect,
+  KindMark,
+  PayText,
+  RowMenu,
+  Seen,
+  norm,
+  usePref,
+} from "../../components/platform/ClientBits";
 import {
   Badge,
   Banner,
@@ -9,43 +21,38 @@ import {
   Input,
   List,
   ListRow,
+  SearchInput,
   SectionLabel,
   Spinner,
-  StatusGlyph,
 } from "../../components/ui";
 import { ApiError, api } from "../../lib/api";
-import { formatDateTime } from "../../lib/format";
+import { useAuth } from "../../lib/auth";
+import { formatDate, plural } from "../../lib/format";
+import {
+  activityOf,
+  bytes,
+  platformApi,
+  type Activity,
+  type BoxRow,
+  type Category,
+  type PayState,
+} from "../../lib/platformApi";
 
 /**
- * Коробочные мастерские: кому открыт доступ к своей Основе из интернета.
+ * Локальные мастерские: программа и база у них на компьютере, а у нас —
+ * только доступ к ней из интернета.
  *
- * Мастерская работает у себя, на своём компьютере, и её база никуда не
- * уезжает. Здесь выдаётся только право подключиться к нашему серверу — одной
- * фразой, в которой и адрес, и ключ, и код мастерской. Выключатель рядом —
- * это и есть рубильник услуги: выключили, и адрес перестал работать, а
- * программа в мастерской продолжает работать по локальной сети как ни в чём
- * не бывало.
+ * Мастерская работает у себя, и её база никуда не уезжает. Здесь выдаётся
+ * только право подключиться к нашему серверу — одной фразой, в которой и
+ * адрес, и ключ, и код мастерской. «Выключить» — это и есть рубильник
+ * услуги: адрес перестаёт работать, а программа в мастерской продолжает
+ * работать по локальной сети как ни в чём не бывало.
  *
  * Фраза показывается один раз, при выдаче: у нас хранится только отпечаток
  * ключа. Потерялась — выпускаем новую, прежняя сразу перестаёт действовать.
  */
 
-interface Box {
-  id: string;
-  code: string;
-  /** Имя, которое выбрал владелец: логины сотрудников — nikita@<имя>. Пусто — не выбрано. */
-  name: string | null;
-  /** Прежнее имя, пока оно ещё держится за мастерской после смены. */
-  previousName: string | null;
-  /** Почта того, кто запросил доступ: она же имя мастерской в списке. */
-  email: string;
-  keyHint: string;
-  note: string | null;
-  isActive: boolean;
-  online: boolean;
-  lastSeenAt: string | null;
-  createdAt: string;
-}
+type Box = BoxRow;
 
 const addressOf = (code: string) => `${window.location.origin}/b/${code}/`;
 
@@ -57,18 +64,44 @@ interface Issued {
   address: string;
 }
 
+type StateFilter = "" | "online" | "offline" | "off";
+type PayFilter = "" | PayState | "debt";
+type ActFilter = "" | Activity | "quiet";
+type Sort = "seen" | "name" | "paid" | "traffic" | "created";
+
+const SORTS: Array<{ value: Sort; label: string }> = [
+  { value: "seen", label: "по активности" },
+  { value: "paid", label: "по сроку оплаты" },
+  { value: "traffic", label: "по трафику" },
+  { value: "name", label: "по названию" },
+  { value: "created", label: "сначала новые" },
+];
+
 export default function Boxes() {
+  const { me } = useAuth();
+  const isOwner = me?.kind === "platform" && me.platformUser.role === "OWNER";
   const [rows, setRows] = useState<Box[] | null>(null);
+  const [cats, setCats] = useState<Category[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [issued, setIssued] = useState<Issued | null>(null);
   const [confirmKey, setConfirmKey] = useState<Box | null>(null);
   const [confirmDrop, setConfirmDrop] = useState<Box | null>(null);
   const [confirmFree, setConfirmFree] = useState<Box | null>(null);
+  const [open, setOpen] = useState<Box | null>(null);
+
+  const [q, setQ] = useState("");
+  const [state, setState] = usePref<StateFilter>("platform.boxes.state", "", ["", "online", "offline", "off"]);
+  const [cat, setCat] = useState("");
+  const [pay, setPay] = usePref<PayFilter>("platform.boxes.pay", "", ["", "paid", "soon", "overdue", "none", "free", "debt"]);
+  const [act, setAct] = usePref<ActFilter>("platform.boxes.act", "", ["", "online", "day", "week", "month", "long", "never", "quiet"]);
+  const [sort, setSort] = usePref<Sort>("platform.boxes.sort", "seen", ["seen", "name", "paid", "traffic", "created"]);
 
   const load = useCallback(async () => {
     try {
-      setRows(await api.get<Box[]>("/platform/boxes"));
+      const [b, c] = await Promise.all([platformApi.boxes(), platformApi.categories()]);
+      setRows(b);
+      setCats(c);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить список");
     }
@@ -81,6 +114,38 @@ export default function Boxes() {
     const t = setInterval(() => void load(), 30_000);
     return () => clearInterval(t);
   }, [load]);
+
+  const catBy = useMemo(() => new Map(cats.map((c) => [c.id, c])), [cats]);
+
+  const shown = useMemo(() => {
+    if (!rows) return [];
+    const words = norm(q).split(/\s+/).filter(Boolean);
+    const list = rows.filter((b) => {
+      if (state === "online" && !b.online) return false;
+      if (state === "offline" && (b.online || !b.isActive)) return false;
+      if (state === "off" && b.isActive) return false;
+      if (cat && (cat === "none" ? b.categoryId : b.categoryId !== cat)) return false;
+      if (pay === "debt" ? b.pay !== "overdue" && b.pay !== "soon" : pay && b.pay !== pay) return false;
+      const a = activityOf(b.online, b.lastSeenAt);
+      if (act === "quiet" ? !["month", "long", "never"].includes(a) : act && a !== act) return false;
+      if (words.length) {
+        const hay = norm([b.name, b.email, b.code, b.note].filter(Boolean).join(" "));
+        if (!words.every((w) => hay.includes(w))) return false;
+      }
+      return true;
+    });
+    const seen = (b: Box) => (b.online ? Date.now() + 1 : b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : 0);
+    const paid = (b: Box) => (b.pay === "free" ? Infinity : b.paidUntil ? new Date(b.paidUntil).getTime() : -Infinity);
+    const title = (b: Box) => b.name ?? b.email;
+    const by: Record<Sort, (a: Box, b: Box) => number> = {
+      seen: (a, b) => seen(b) - seen(a),
+      name: (a, b) => title(a).localeCompare(title(b), "ru"),
+      paid: (a, b) => paid(a) - paid(b),
+      traffic: (a, b) => b.trafficBytes - a.trafficBytes,
+      created: (a, b) => b.createdAt.localeCompare(a.createdAt),
+    };
+    return [...list].sort((a, b) => by[sort](a, b) || title(a).localeCompare(title(b), "ru"));
+  }, [rows, q, state, cat, pay, act, sort]);
 
   async function toggle(box: Box) {
     await api.patch(`/platform/boxes/${box.id}`, { isActive: !box.isActive });
@@ -104,8 +169,8 @@ export default function Boxes() {
   /**
    * Удалить доступ совсем.
    *
-   * Выключатель рядом — это пауза: мастерская отвалилась, но запись осталась,
-   * и включить обратно можно одним нажатием. Удаление — насовсем: освобождает
+   * «Выключить» — это пауза: мастерская отвалилась, но запись осталась, и
+   * включить обратно можно одним нажатием. Удаление — насовсем: освобождает
    * и код, и имя мастерской, а ей придётся выдавать доступ заново.
    */
   async function drop(box: Box) {
@@ -117,109 +182,158 @@ export default function Boxes() {
   if (error) return <Banner tone="error">{error}</Banner>;
   if (!rows) return <Spinner />;
 
+  const online = rows.filter((r) => r.online).length;
+  const traffic = rows.reduce((a, r) => a + r.trafficBytes, 0);
+  const filtered = !!(q || cat || pay || act || state);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <SectionLabel>Платформа</SectionLabel>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight">Коробочные мастерские</h1>
+          <h1 className="mt-1 text-2xl font-extrabold tracking-tight">Локальные мастерские</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            Доступ к своей Основе из интернета: {rows.filter((r) => r.online).length} на связи из {rows.length}
+            {rows.length
+              ? `${plural(rows.length, "мастерская", "мастерские", "мастерских")} с доступом из интернета · ${online} на связи · трафик за месяц ${bytes(traffic)}`
+              : "Доступ из интернета пока никому не открыт"}
           </p>
         </div>
         <Button onClick={() => setCreating(true)}>Открыть доступ</Button>
       </div>
 
+      {rows.length > 0 && (
+        <div className="space-y-2.5">
+          <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Имя, почта, код, заметка" aria-label="Поиск мастерской" />
+          <div className="flex flex-wrap gap-2">
+            <FilterSelect label="Связь" value={state} onChange={(v) => setState(v as StateFilter)}>
+              <option value="">все</option>
+              <option value="online">на связи</option>
+              <option value="offline">не на связи</option>
+              <option value="off">доступ выключен</option>
+            </FilterSelect>
+            <FilterSelect label="Категория" value={cat} onChange={setCat}>
+              <option value="">все</option>
+              {cats.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+              <option value="none">без категории</option>
+            </FilterSelect>
+            <FilterSelect label="Оплата" value={pay} onChange={(v) => setPay(v as PayFilter)}>
+              <option value="">любая</option>
+              <option value="debt">пора платить</option>
+              <option value="overdue">просрочено</option>
+              <option value="soon">меньше недели</option>
+              <option value="paid">оплачено</option>
+              <option value="none">срок не задан</option>
+              <option value="free">бесплатно</option>
+            </FilterSelect>
+            <FilterSelect label="Активность" value={act} onChange={(v) => setAct(v as ActFilter)}>
+              <option value="">любая</option>
+              <option value="online">на связи</option>
+              <option value="day">сегодня</option>
+              <option value="week">за неделю</option>
+              <option value="quiet">давно не было</option>
+              <option value="never">не подключалась</option>
+            </FilterSelect>
+            <SortSelect value={sort} options={SORTS} onChange={setSort} />
+          </div>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <EmptyState title="Пока никому не открыт">
-          Мастерская с коробочной версией работает у себя по локальной сети. Чтобы сотрудники могли
-          заходить и снаружи, выдайте доступ на почту владельца — он получит фразу подключения и
-          вставит её в программе, в разделе «Настройки → Доступ из интернета».
+          Локальная мастерская работает у себя по локальной сети. Чтобы сотрудники могли заходить и снаружи,
+          выдайте доступ на почту владельца — он получит фразу подключения и вставит её в программе, в разделе
+          «Настройки → Доступ из интернета».
+        </EmptyState>
+      ) : shown.length === 0 ? (
+        <EmptyState title="Никого не нашлось">
+          {filtered ? "Под выбранный отбор никто не подходит — ослабьте фильтры." : "Список пуст."}
         </EmptyState>
       ) : (
         <List>
-          {rows.map((b) => (
-            <ListRow
-              key={b.id}
-              glyph={
-                <StatusGlyph
-                  tone={b.online ? "done" : b.isActive ? "neutral" : "cancelled"}
-                  title={b.online ? "На связи" : b.isActive ? "Нет связи" : "Доступ выключен"}
-                />
-              }
-              title={
-                <>
-                  <span className={b.isActive ? "truncate" : "truncate text-ink-muted line-through"}>{b.email}</span>
-                  {b.online && <Badge tone="brand">на связи</Badge>}
-                  {!b.isActive && <Badge tone="danger">выключен</Badge>}
-                </>
-              }
-              subtitle={
-                <>
-                  <a
-                    href={addressOf(b.code)}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="font-mono text-[12.5px] text-brand-ink hover:underline"
-                  >
-                    /b/{b.code}/
-                  </a>
-                  {b.name ? (
-                    <span className="text-ink-dim">
-                      {" · логины "}
-                      <span className="font-mono font-semibold text-ink-soft">@{b.name}</span>
-                      {b.previousName && ` (прежнее @${b.previousName})`}
-                    </span>
-                  ) : (
-                    <span className="text-ink-dim"> · имя не выбрано</span>
-                  )}
-                  <span className="text-ink-dim"> · ключ …{b.keyHint}</span>
-                  {b.note && <span className="text-ink-dim"> · {b.note}</span>}
-                </>
-              }
-              meta={
-                <span className="whitespace-nowrap lg:w-[190px] lg:text-right">
-                  {b.online ? "сейчас" : `была ${formatDateTime(b.lastSeenAt)}`}
-                </span>
-              }
-              actions={
-                <div className="flex flex-wrap gap-1.5 sm:min-w-[230px] sm:justify-end">
-                  <Button
-                    variant="secondary"
-                    className="min-h-[34px] px-3 text-[13px]"
-                    onClick={() => setConfirmKey(b)}
-                  >
-                    Новая фраза
-                  </Button>
-                  <Button
-                    variant={b.isActive ? "danger" : "secondary"}
-                    className="min-h-[34px] px-3 text-[13px]"
-                    onClick={() => void toggle(b)}
-                  >
-                    {b.isActive ? "Выключить" : "Включить"}
-                  </Button>
-                  {b.name && (
-                    <Button
-                      variant="secondary"
-                      className="min-h-[34px] px-3 text-[13px]"
-                      onClick={() => setConfirmFree(b)}
+          {shown.map((b) => (
+            <div key={b.id} role="button" tabIndex={0} onClick={() => setOpen(b)} onKeyDown={(e) => e.key === "Enter" && setOpen(b)} className="cursor-pointer">
+              <ListRow
+                className={b.isActive ? undefined : "opacity-60"}
+                glyph={<KindMark kind="local" online={b.online} />}
+                title={
+                  <>
+                    <span className={b.isActive ? "truncate" : "truncate line-through"}>{b.name ? `@${b.name}` : b.email}</span>
+                    <CategoryChip category={b.categoryId ? catBy.get(b.categoryId) : null} />
+                    {!b.isActive && <Badge tone="danger">выключен</Badge>}
+                  </>
+                }
+                subtitle={
+                  <>
+                    {b.name && <span>{b.email} · </span>}
+                    <a
+                      href={addressOf(b.code)}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-mono text-[12.5px] text-brand-ink hover:underline"
                     >
-                      Освободить имя
-                    </Button>
-                  )}
-                  <Button
-                    variant="secondary"
-                    className="min-h-[34px] px-3 text-[13px]"
-                    onClick={() => setConfirmDrop(b)}
-                  >
-                    Удалить
-                  </Button>
-                </div>
-              }
-            />
+                      /b/{b.code}/
+                    </a>
+                    {!b.name && <span className="text-ink-dim"> · имя не выбрано</span>}
+                    {b.previousName && <span className="text-ink-dim"> · прежнее @{b.previousName}</span>}
+                    <span className="text-ink-dim"> · ключ …{b.keyHint}</span>
+                    {b.note && <span className="text-ink-dim"> · {b.note}</span>}
+                    <span className="text-ink-dim"> · с {formatDate(b.createdAt)}</span>
+                  </>
+                }
+                meta={
+                  <>
+                    <span className="lg:w-[118px]">
+                      <Seen online={b.online} at={b.lastSeenAt} />
+                    </span>
+                    <span className="whitespace-nowrap lg:w-[130px]" title="Трафик доступа из интернета за месяц">
+                      {bytes(b.trafficBytes)} · {b.trafficRequests} запр.
+                    </span>
+                    <span className="lg:w-[150px] lg:text-right">
+                      <PayText pay={b.pay} paidUntil={b.paidUntil} price={b.price} />
+                    </span>
+                  </>
+                }
+                actions={
+                  <RowMenu
+                    items={[
+                      { label: "Условия и оплата", onClick: () => setOpen(b) },
+                      { label: "Новая фраза…", onClick: () => setConfirmKey(b) },
+                      { label: b.isActive ? "Выключить доступ" : "Включить доступ", onClick: () => void toggle(b), danger: b.isActive },
+                      !!b.name && { label: "Освободить имя…", onClick: () => setConfirmFree(b) },
+                      { label: "Удалить…", onClick: () => setConfirmDrop(b), danger: true },
+                    ]}
+                  />
+                }
+              />
+            </div>
           ))}
         </List>
+      )}
+
+      {open && (
+        <ClientModal
+          target={(() => {
+            const b = rows.find((r) => r.id === open.id) ?? open;
+            return {
+              kind: "local" as const,
+              id: b.id,
+              name: b.name ? `@${b.name} · ${b.email}` : b.email,
+              categoryId: b.categoryId,
+              ownPrice: b.ownPrice,
+              price: b.price,
+              paidUntil: b.paidUntil,
+            };
+          })()}
+          categories={cats}
+          canEdit={isOwner}
+          onClose={() => setOpen(null)}
+          onChanged={() => void load()}
+        />
       )}
 
       {creating && (
@@ -281,7 +395,7 @@ export default function Boxes() {
               программа продолжит работать по локальной сети.
             </Banner>
             <p className="text-[13.5px] text-ink-muted">
-              Если нужно просто приостановить услугу, лучше «Выключить»: запись останется, и доступ
+              Если нужно просто приостановить услугу, лучше «Выключить доступ»: запись останется, и доступ
               вернётся одним нажатием.
             </p>
             <div className="flex flex-col gap-2 sm:flex-row-reverse">

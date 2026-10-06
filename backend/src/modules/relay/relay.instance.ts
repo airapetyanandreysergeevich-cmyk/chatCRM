@@ -2,7 +2,7 @@ import type { Server as HttpServer } from "http";
 import { env } from "../../lib/env";
 import { createRelayAgent, type AgentState } from "./relay.agent";
 import { createRelayHub } from "./relay.hub";
-import { authenticateBox, markSeen } from "./boxes.service";
+import { authenticateBox, markSeen, recordTraffic } from "./boxes.service";
 import { readRemoteAccess, saveRemoteAccess } from "./remoteAccess";
 
 /**
@@ -28,6 +28,12 @@ export function startRelayHub(server: HttpServer) {
   });
   hub.attach(server, env.relayPath);
   console.log(`[туннель] принимаем Основы на ${env.relayPath}`);
+  // Счёт трафика — в базу раз в пять минут, а не на каждый кадр.
+  const flush = () => {
+    const rows = hub?.drainTraffic() ?? [];
+    if (rows.length) void recordTraffic(rows);
+  };
+  setInterval(flush, 5 * 60_000).unref();
   return hub;
 }
 

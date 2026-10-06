@@ -96,6 +96,18 @@ export function createRelayHub(opts: RelayOptions) {
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const log = opts.log ?? (() => {});
   const byCode = new Map<string, Connection>();
+  /**
+   * Сколько прошло через доступ из интернета с прошлого сбора — для панели
+   * собственника. Только объём и число запросов: что именно открывали в
+   * мастерской, облако не запоминает.
+   */
+  const traffic = new Map<string, { bytes: number; requests: number }>();
+  const count = (code: string, bytes: number, requests = 0) => {
+    const t = traffic.get(code) ?? { bytes: 0, requests: 0 };
+    t.bytes += bytes;
+    t.requests += requests;
+    traffic.set(code, t);
+  };
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
 
   function drop(conn: Connection, why: string) {
@@ -107,6 +119,9 @@ export function createRelayHub(opts: RelayOptions) {
     }
     conn.pending.clear();
     log(`Основа ${conn.code} отключилась: ${why}`);
+    // «Была в сети» — время ухода, а не прихода: иначе Основа, проработавшая
+    // неделю без перерыва, выглядела бы пропавшей неделю назад.
+    opts.onSeen?.(conn.code);
   }
 
   function onControl(conn: Connection, raw: string) {
@@ -162,6 +177,7 @@ export function createRelayHub(opts: RelayOptions) {
     if (!p) return;
 
     if (frame.kind === FRAME.DATA) {
+      count(conn.code, frame.payload.length);
       if (p.html) p.html.push(frame.payload);
       else p.res.write(frame.payload);
       return;
@@ -170,6 +186,7 @@ export function createRelayHub(opts: RelayOptions) {
     clearTimeout(p.timer);
     conn.pending.delete(frame.id);
     conn.served += 1;
+    count(conn.code, 0, 1);
 
     if (frame.kind === FRAME.ABORT) {
       p.res.destroy();
@@ -290,7 +307,10 @@ export function createRelayHub(opts: RelayOptions) {
 
     conn.ws.send(encodeControl({ t: "req", id, method: req.method ?? "GET", url: rest, headers }));
 
-    req.on("data", (chunk: Buffer) => conn.ws.send(encodeFrame(id, FRAME.DATA, chunk)));
+    req.on("data", (chunk: Buffer) => {
+      count(conn.code, chunk.length);
+      conn.ws.send(encodeFrame(id, FRAME.DATA, chunk));
+    });
     req.on("end", () => conn.ws.send(encodeFrame(id, FRAME.END)));
     req.on("error", () => conn.ws.send(encodeFrame(id, FRAME.ABORT)));
     res.on("close", () => {
@@ -388,6 +408,12 @@ export function createRelayHub(opts: RelayOptions) {
     handleRequest,
     request,
     online: (code: string) => byCode.has(code),
+    /** Забрать накопленный счёт трафика и начать новый. */
+    drainTraffic() {
+      const out = [...traffic.entries()].map(([code, t]) => ({ code, ...t }));
+      traffic.clear();
+      return out;
+    },
     /** Отключить мастерскую: ключ отозвали, доступ выключили, код сменили. */
     disconnect(code: string, why: string) {
       const conn = byCode.get(code);

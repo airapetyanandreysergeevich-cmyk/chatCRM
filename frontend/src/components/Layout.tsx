@@ -8,6 +8,7 @@ import { labelsApi } from "../lib/labels";
 import { useBarcodeScanner } from "../lib/scanner";
 import { BrandMark, BrandRow } from "./Brand";
 import { DemoBanner } from "./DemoBanner";
+import { StorageBanner } from "./StorageBanner";
 import { InstallAppBanner } from "./InstallApp";
 import {
   IconAdmins,
@@ -28,8 +29,9 @@ import {
   IconSettings,
   IconStaff,
   IconStock,
-  IconBox,
-  IconWorkshops,
+  IconCloud,
+  IconComputer,
+  IconTag,
 } from "./icons";
 
 interface NavItem {
@@ -52,6 +54,7 @@ export default function Layout() {
   const { me, can, logout, applyToken } = useAuth();
   const [pending, setPending] = useState(0);
   const [feedback, setFeedback] = useState(0);
+  const [due, setDue] = useState(0);
   const [unread, setUnread] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
@@ -106,11 +109,12 @@ export default function Layout() {
     let alive = true;
     const load = () =>
       api
-        .get<{ pendingApplications: number; newFeedback: number }>("/platform/summary")
+        .get<{ pendingApplications: number; newFeedback: number; due?: number }>("/platform/summary")
         .then((s) => {
           if (!alive) return;
           setPending(s.pendingApplications);
           setFeedback(s.newFeedback);
+          setDue(s.due ?? 0);
         })
         .catch(() => undefined);
     void load();
@@ -188,12 +192,15 @@ export default function Layout() {
   });
 
   const platformNav: NavItem[] = [
-    { to: "/platform/tenants", label: "Мастерские", icon: <IconWorkshops /> },
+    // Значок на «Обзоре» — сколько клиентов пора продлить.
+    { to: "/platform/overview", label: "Обзор", icon: <IconStats />, badge: due },
+    { to: "/platform/tenants", label: "Облачные", icon: <IconCloud /> },
+    // Локальные мастерские с доступом из интернета — отдельной строкой:
+    // база у них своя, а у нас только услуга, которую включают и выключают.
+    { to: "/platform/boxes", label: "Локальные", icon: <IconComputer /> },
+    { to: "/platform/categories", label: "Категории", icon: <IconTag /> },
     { to: "/platform/applications", label: "Заявки", icon: <IconApplications />, badge: pending },
     { to: "/platform/feedback", label: "Замечания", icon: <IconFeedback />, badge: feedback },
-    // Коробочные мастерские с доступом из интернета — отдельной строкой:
-    // это услуга, которую включают и выключают, а не свойство арендатора.
-    { to: "/platform/boxes", label: "Коробки", icon: <IconBox /> },
     { to: "/platform/admins", label: "Администраторы", icon: <IconAdmins /> },
     { to: "/platform/audit", label: "Журнал", icon: <IconJournal /> },
     { to: "/settings/notifications", label: "Оповещения", icon: <IconBell /> },
@@ -266,6 +273,7 @@ export default function Layout() {
   return (
     <div className="min-h-full bg-bg">
       <DemoBanner />
+      <StorageBanner />
       <InstallAppBanner />
       {impersonating && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-state-waiting/30 bg-state-waiting/10 px-5 py-2.5 text-[13px] font-medium text-state-waiting">

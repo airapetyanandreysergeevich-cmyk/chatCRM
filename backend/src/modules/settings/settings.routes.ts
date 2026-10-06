@@ -12,6 +12,7 @@ import {
   type OrderNumberFormat,
 } from "../../lib/orderNumber";
 import { PERMISSIONS } from "../../lib/permissions";
+import { storageInfo } from "../../lib/usage";
 import {
   actorUserId,
   authenticate,
@@ -641,5 +642,16 @@ settingsRouter.put(
       });
     });
     res.json(next);
+  })
+);
+
+/**
+ * Место под фотографии в облаке: сколько занято и сколько можно. Владелец
+ * видит предупреждение заранее, с 90%. В локальной версии — null: диск свой.
+ */
+settingsRouter.get(
+  "/storage",
+  ah(async (req, res) => {
+    res.json(await storageInfo(tenantOf(req)));
   })
 );

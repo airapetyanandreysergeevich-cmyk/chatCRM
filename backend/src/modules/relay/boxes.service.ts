@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { prisma } from "../../lib/db";
+import { boxSubject, countUsage } from "../../lib/usage";
 import { nameProblem, normalizeName } from "../../lib/login";
 
 /**
@@ -158,4 +159,16 @@ export async function claimName(boxId: string, rawName: string): Promise<{ ok: t
 /** Отметка «была на связи» — редкая запись, раз в подключение. */
 export async function markSeen(code: string): Promise<void> {
   await prisma.box.updateMany({ where: { code }, data: { lastSeenAt: new Date() } }).catch(() => undefined);
+}
+
+/** Трафик доступа из интернета — в счётчик месяца каждой Основы. */
+export async function recordTraffic(rows: Array<{ code: string; bytes: number; requests: number }>): Promise<void> {
+  const boxes = await prisma.box
+    .findMany({ where: { code: { in: rows.map((r) => r.code) } }, select: { id: true, code: true } })
+    .catch(() => []);
+  const idBy = new Map(boxes.map((b) => [b.code, b.id]));
+  for (const r of rows) {
+    const id = idBy.get(r.code);
+    if (id) await countUsage(boxSubject(id), { relayBytes: r.bytes, relayRequests: r.requests });
+  }
 }

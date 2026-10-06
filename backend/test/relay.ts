@@ -236,6 +236,12 @@ const waitFor = async (cond: () => boolean, ms = 5000) => {
   const asset = await ask(cloud.port, `/b/${CODE}/assets/app.js`);
   check(asset.status === 200 && asset.body.toString() === "console.log(1)", "файлы приложения доходят как есть");
 
+  // Счёт трафика для панели собственника: объём и число запросов, по коду.
+  const traffic = hub.drainTraffic();
+  const mine = traffic.find((t) => t.code === CODE);
+  check(!!mine && mine.requests >= 2 && mine.bytes > "console.log(1)".length, "трафик мастерской посчитан: запросы и байты");
+  check(hub.drainTraffic().length === 0, "собранный счёт обнуляется — в базу не попадёт дважды");
+
   const login = await ask(cloud.port, `/b/${CODE}/api/auth/login`, { method: "POST" });
   const cookies = (login.headers["set-cookie"] ?? []) as string[];
   check(cookies.length === 2 && cookies.every((c) => c.includes(`Path=/b/${CODE}/`)), "оба печенья остались в своей мастерской");

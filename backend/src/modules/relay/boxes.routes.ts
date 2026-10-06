@@ -5,6 +5,8 @@ import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { encodeInvite, publicAddress } from "./invite";
 import { fingerprint, freeCode, newKey, normalizeCode } from "./boxes.service";
 import { relayHub } from "./relay.instance";
+import { payStateOf, startBox, usageThisMonth } from "../platform/clients";
+import { boxSubject } from "../../lib/usage";
 
 /**
  * Панель собственника: кому открыт доступ из интернета.
@@ -61,14 +63,24 @@ const view = (
   online: boolean
 ) => ({ ...box, online });
 
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 boxesRouter.get(
   "/",
   ah(async (_req, res) => {
-    const boxes = await prisma.box.findMany({ orderBy: { createdAt: "desc" } });
+    const [boxes, cats, usage] = await Promise.all([
+      prisma.box.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.clientCategory.findMany({ select: { id: true, remotePrice: true } }),
+      usageThisMonth(),
+    ]);
+    const priceBy = new Map(cats.map((c) => [c.id, c.remotePrice]));
     const hub = relayHub();
     res.json(
-      boxes.map((b) =>
-        view(
+      boxes.map((b) => {
+        const price = b.price ?? (b.categoryId ? priceBy.get(b.categoryId) ?? 0 : 0);
+        const u = usage.get(boxSubject(b.id));
+        return {
+          ...view(
           {
             id: b.id,
             code: b.code,
@@ -84,8 +96,17 @@ boxesRouter.get(
             createdAt: b.createdAt,
           },
           hub?.online(b.code) ?? false
-        )
-      )
+          ),
+          categoryId: b.categoryId,
+          ownPrice: b.price,
+          price,
+          paidUntil: b.paidUntil,
+          // Выключенному доступу платить не за что.
+          pay: b.isActive ? payStateOf(b.paidUntil, price) : "free",
+          trafficBytes: u?.relayBytes ?? 0,
+          trafficRequests: u?.relayRequests ?? 0,
+        };
+      })
     );
   })
 );
@@ -113,6 +134,7 @@ boxesRouter.post(
         keyHint: key.slice(-4),
       },
     });
+    await startBox(box.id);
     // Ключ целиком — единственный раз в жизни. Дальше только его хвост.
     const url = relayUrlFor(req);
     res.status(201).json({
@@ -159,6 +181,10 @@ boxesRouter.patch(
         // Освободить имя: мастерская закрылась или имя заняли по ошибке.
         // Задать чужое имя отсюда нельзя — его выбирает владелец мастерской.
         name: z.null().optional(),
+        categoryId: z.string().optional(),
+        /** Своя цена, ₽ в месяц; null — цена категории. */
+        price: z.number().int().min(0).max(1_000_000).nullable().optional(),
+        paidUntil: dateSchema.nullable().optional(),
       })
       .parse(req.body);
     const box = await prisma.box.findUnique({ where: { id: req.params.id } });
@@ -167,6 +193,8 @@ boxesRouter.patch(
     const code = body.code ? normalizeCode(body.code) : undefined;
     if (code && code !== box.code && (await prisma.box.findUnique({ where: { code } })))
       throw conflict("Такой код уже занят");
+    if (body.categoryId && !(await prisma.clientCategory.findUnique({ where: { id: body.categoryId } })))
+      throw badRequest("Такой категории нет");
 
     const next = await prisma.box.update({
       where: { id: box.id },
@@ -176,6 +204,11 @@ boxesRouter.patch(
         ...(body.note !== undefined ? { note: body.note || null } : {}),
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
         ...(body.name === null ? { name: null, previousName: null, previousNameUntil: null } : {}),
+        ...(body.categoryId ? { categoryId: body.categoryId } : {}),
+        ...(body.price !== undefined ? { price: body.price } : {}),
+        ...(body.paidUntil !== undefined
+          ? { paidUntil: body.paidUntil ? new Date(`${body.paidUntil}T23:59:59+03:00`) : null }
+          : {}),
       },
     });
     // Выключили или переименовали код — прежнее соединение больше не годится.
@@ -196,6 +229,7 @@ boxesRouter.delete(
     const box = await prisma.box.findUnique({ where: { id: req.params.id } });
     if (!box) throw notFound("Мастерская не найдена");
     await prisma.box.delete({ where: { id: box.id } });
+    await prisma.usageMonth.deleteMany({ where: { subject: boxSubject(box.id) } });
     relayHub()?.disconnect(box.code, "доступ удалён");
     res.json({ ok: true });
   })

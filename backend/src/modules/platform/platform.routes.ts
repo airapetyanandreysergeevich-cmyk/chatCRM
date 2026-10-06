@@ -12,6 +12,8 @@ import { isEmailTaken } from "../auth/auth.service";
 import { createTenant } from "../../services/tenant";
 import { removeTenantForever } from "../../services/tenant-remove";
 import { boxesRouter } from "../relay/boxes.routes";
+import { clientsRouter, dueCount, isOnline, payStateOf, spreadLimits, startTenant, storageByTenant, usageThisMonth } from "./clients";
+import { tenantSubject } from "../../lib/usage";
 import { dictionaryProblem, dictionarySchema, loadDictionary, saveDictionary } from "../plate/plate.dictionary";
 import { brandsByRules, BUILTIN, buildDictionary, modelKeys } from "../plate/plate.parse";
 import { platformKnowledge } from "../plate/plate.learn";
@@ -64,6 +66,8 @@ platformRouter.use(authenticate, requirePlatform);
 // Коробочные мастерские и их доступ из интернета — отдельным файлом: к
 // арендаторам они отношения не имеют, у них своя база на своём компьютере.
 platformRouter.use("/boxes", boxesRouter);
+// Обзор, категории клиентов и оплата — тоже отдельно.
+platformRouter.use("/clients", clientsRouter);
 
 // ---------- мастерские ----------
 
@@ -72,34 +76,49 @@ platformRouter.get(
   ah(async (_req, res) => {
     // Архивные отдаём вместе с остальными: прятать их от собственника
     // значит прятать и кнопку «восстановить».
-    const tenants = await prisma.tenant.findMany({ orderBy: { createdAt: "desc" } });
-    // Счётчики читаются в режиме платформы — единственное место, где это оправдано.
-    const stats = await withPlatform(async (tx) => {
-      const users = await tx.user.groupBy({ by: ["tenantId"], _count: { _all: true }, where: { deletedAt: null } });
-      const orders = await tx.order.groupBy({ by: ["tenantId"], _count: { _all: true }, where: { deletedAt: null } });
-      return { users, orders };
-    });
-    const userBy = new Map(stats.users.map((s) => [s.tenantId, s._count._all]));
-    const orderBy = new Map(stats.orders.map((s) => [s.tenantId, s._count._all]));
+    const [tenants, cats, storage, usage, users] = await Promise.all([
+      prisma.tenant.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.clientCategory.findMany({ select: { id: true, cloudPrice: true } }),
+      storageByTenant(),
+      usageThisMonth(),
+      // Сотрудников считаем в режиме платформы — это число, а не люди.
+      // Заказы мастерской собственнику не показываем вовсе: это её дело.
+      withPlatform((tx) => tx.user.groupBy({ by: ["tenantId"], _count: { _all: true }, where: { deletedAt: null } })),
+    ]);
+    const userBy = new Map(users.map((s) => [s.tenantId, s._count._all]));
+    const priceBy = new Map(cats.map((c) => [c.id, c.cloudPrice]));
 
     res.json(
-      tenants.map((t) => ({
-        id: t.id,
-        name: t.name,
-        slug: t.slug,
-        status: t.status,
-        plan: t.plan,
-        maxUsers: t.maxUsers,
-        plateOcr: t.plateOcr,
-        timezone: t.timezone,
-        contactName: t.contactName,
-        contactPhone: t.contactPhone,
-        contactEmail: t.contactEmail,
-        createdAt: t.createdAt,
-        archivedAt: t.deletedAt,
-        userCount: userBy.get(t.id) ?? 0,
-        orderCount: orderBy.get(t.id) ?? 0,
-      }))
+      tenants.map((t) => {
+        const categoryPrice = t.categoryId ? priceBy.get(t.categoryId) ?? 0 : 0;
+        const price = t.price ?? categoryPrice;
+        return {
+          id: t.id,
+          name: t.name,
+          slug: t.slug,
+          status: t.status,
+          maxUsers: t.maxUsers,
+          maxStorageMb: t.maxStorageMb,
+          plateOcr: t.plateOcr,
+          customLimits: t.customLimits,
+          timezone: t.timezone,
+          contactName: t.contactName,
+          contactPhone: t.contactPhone,
+          contactEmail: t.contactEmail,
+          createdAt: t.createdAt,
+          archivedAt: t.deletedAt,
+          categoryId: t.categoryId,
+          ownPrice: t.price,
+          price,
+          paidUntil: t.paidUntil,
+          pay: payStateOf(t.paidUntil, price),
+          lastSeenAt: t.lastSeenAt,
+          online: isOnline(t.lastSeenAt),
+          userCount: userBy.get(t.id) ?? 0,
+          storageBytes: storage.get(t.id) ?? 0,
+          plateOcrMonth: usage.get(tenantSubject(t.id))?.plateOcr ?? 0,
+        };
+      })
     );
   })
 );
@@ -139,6 +158,7 @@ platformRouter.post(
       ownerFullName: body.ownerFullName,
       timezone: body.timezone,
     });
+    await startTenant(tenant.id);
 
     if (body.contactPhone) {
       await prisma.tenant.update({
@@ -177,6 +197,14 @@ const updateTenantSchema = z.object({
   contactEmail: z.string().email().optional().or(z.literal("")),
   plan: z.string().optional(),
   plateOcr: z.boolean().optional(),
+  maxStorageMb: z.number().int().min(0).max(10_000_000).optional(),
+  categoryId: z.string().optional(),
+  /** Своя цена, ₽ в месяц; null — цена категории. */
+  price: z.number().int().min(0).max(1_000_000).nullable().optional(),
+  /** false — вернуть лимиты категории. */
+  customLimits: z.boolean().optional(),
+  /** «2026-12-31» или null — срок не задан. Обычно ставится оплатой. */
+  paidUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 platformRouter.patch(
@@ -188,16 +216,36 @@ platformRouter.patch(
     if (body.plateOcr !== undefined && auth.role !== "OWNER") {
       throw forbidden("Распознавание шильдиков включает и выключает только собственник");
     }
+    const money = body.price !== undefined || body.paidUntil !== undefined || body.categoryId !== undefined;
+    const limits = body.maxUsers !== undefined || body.maxStorageMb !== undefined || body.customLimits !== undefined;
+    if ((money || limits) && auth.role !== "OWNER") throw forbidden("Условия и оплату меняет только собственник");
+    if (body.categoryId && !(await prisma.clientCategory.findUnique({ where: { id: body.categoryId } }))) {
+      throw badRequest("Такой категории нет");
+    }
 
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
     if (!tenant || tenant.deletedAt) throw notFound("Мастерская не найдена");
 
+    // Лимит поправили руками — дальше он свой, категория его не перепишет.
+    // Явное customLimits: false — вернуть лимиты категории.
+    const handLimits = body.maxUsers !== undefined || body.maxStorageMb !== undefined || body.plateOcr !== undefined;
+    const customLimits = body.customLimits ?? (handLimits ? true : undefined);
+    const { paidUntil, ...rest } = body;
     const updated = await prisma.tenant.update({
       where: { id: tenant.id },
-      data: { ...body, contactEmail: body.contactEmail === "" ? null : body.contactEmail },
+      data: {
+        ...rest,
+        ...(customLimits !== undefined ? { customLimits } : {}),
+        ...(paidUntil !== undefined ? { paidUntil: paidUntil ? new Date(`${paidUntil}T23:59:59+03:00`) : null } : {}),
+        contactEmail: body.contactEmail === "" ? null : body.contactEmail,
+      },
     });
+    // Новая категория или «как в категории» — подтягиваем её лимиты.
+    if ((body.categoryId !== undefined || body.customLimits === false) && !updated.customLimits && updated.categoryId) {
+      await spreadLimits(updated.categoryId);
+    }
     await logPlatform(req, "TENANT_UPDATE", tenant.id, body);
-    res.json(updated);
+    res.json(await prisma.tenant.findUnique({ where: { id: tenant.id } }));
   })
 );
 
@@ -376,6 +424,7 @@ platformRouter.delete(
     // след останется единственным свидетельством того, что она была.
     await logPlatform(req, "TENANT_DELETE", tenant.id, { name: tenant.name, slug: tenant.slug });
     const removed = await removeTenantForever(tenant.id);
+    await prisma.usageMonth.deleteMany({ where: { subject: tenantSubject(tenant.id) } });
     await logPlatform(req, "TENANT_DELETE_DONE", null, {
       name: tenant.name,
       slug: tenant.slug,
@@ -572,12 +621,13 @@ platformRouter.get(
 platformRouter.get(
   "/summary",
   ah(async (_req, res) => {
-    const [pendingApplications, tenants, newFeedback] = await Promise.all([
+    const [pendingApplications, tenants, newFeedback, due] = await Promise.all([
       prisma.tenantApplication.count({ where: { status: "PENDING" } }),
       prisma.tenant.count({ where: { deletedAt: null } }),
       withPlatform((tx) => tx.feedback.count({ where: { handledAt: null } })),
+      dueCount(),
     ]);
-    res.json({ pendingApplications, tenants, newFeedback });
+    res.json({ pendingApplications, tenants, newFeedback, due });
   })
 );
 
@@ -635,6 +685,7 @@ platformRouter.post(
       ownerPasswordHash: application.passwordHash,
       timezone: body.timezone,
     });
+    await startTenant(tenant.id);
 
     await prisma.tenant.update({
       where: { id: tenant.id },

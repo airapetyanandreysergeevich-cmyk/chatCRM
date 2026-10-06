@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { verifyAccessToken, type TokenPayload } from "../lib/jwt";
 import { ALL_PERMISSIONS } from "../lib/permissions";
+import { touchTenant } from "../lib/usage";
 
 declare global {
   namespace Express {
@@ -17,6 +18,9 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
   }
   try {
     req.auth = verifyAccessToken(header.slice(7));
+    // «Мастерская в сети» у собственника платформы. Вход собственника в
+    // мастерскую (kind: platform) работой мастерской не считается.
+    if (req.auth.kind === "tenant") touchTenant(req.auth.tenantId);
     next();
   } catch {
     res.status(401).json({ error: "Токен недействителен" });

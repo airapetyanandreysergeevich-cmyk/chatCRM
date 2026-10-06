@@ -33,7 +33,7 @@ const check = (ok: boolean, msg: string) => {
  * К ним ходит только платформенный слой, и попади они под политику — перестал
  * бы работать вход: сессия ищется до того, как известно, чья она.
  */
-const PLATFORM_TABLES = new Set(["Session", "TenantApplication", "Impersonation", "PlatformAuditLog"]);
+const PLATFORM_TABLES = new Set(["Session", "TenantApplication", "Impersonation", "PlatformAuditLog", "ClientPayment"]);
 
 // 1. Все модели с tenantId — по самой схеме, а не по нашим представлениям о ней.
 const schema = read("prisma/schema.prisma");
