@@ -198,9 +198,10 @@ export const SHOPS: Shop[] = [
           article: article || undefined,
           price,
           priceNote: opt ? `опт ${rub(opt)}` : undefined,
-          // Без цены магазин показывает то, чего нет в продаже.
-          stock: price ? "in" : "out",
-          stockText: price ? undefined : "цены нет",
+          // Наличие — только надпись «Доступно N» над карточкой. Цену магазин
+          // показывает и у того, чего нет: на странице товара вместо «В
+          // корзину» у такого — «Сообщить о поступлении». Без цены — тоже нет.
+          ...aitechStock(textOf(query(c, ".available_quantity__catalog")), price),
         };
       }),
   },
@@ -513,4 +514,11 @@ export function readSheet(csv: string): SheetRow[] {
     }
   }
   return out;
+}
+
+/** Aitech: «Доступно 5» — в наличии, нет надписи — нет в наличии. */
+function aitechStock(available: string, price: number | null): { stock: Stock; stockText?: string } {
+  const n = available.match(/(\d+)/);
+  if (n && Number(n[1]) > 0) return { stock: "in", stockText: `${n[1]} шт.` };
+  return { stock: "out", stockText: price ? undefined : "цены нет" };
 }

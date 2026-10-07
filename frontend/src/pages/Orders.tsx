@@ -37,6 +37,8 @@ import { SearchFixedHint } from "../components/SearchFixedHint";
 import { listPref, remember } from "../lib/listPrefs";
 import { COLOR_FILTER_VALUES, type ColorFilterValue } from "../components/ListControls";
 import {
+  recallFilters,
+  rememberFilters,
   ActiveFilters,
   FilterButton,
   OrderFiltersModal,
@@ -80,14 +82,16 @@ const deviceTitle = (o: Order) =>
   [o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") || "Техника не указана";
 
 export default function Orders() {
-  const { can } = useAuth();
+  const { can, me } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState<Order[] | null>(null);
   const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
   // Группа берётся из адреса: со сводки сюда приходят по ссылке
   // «3 просрочено», и фильтр должен уже стоять, а не сбрасываться.
   const [params, setParams] = useSearchParams();
-  const group = params.get("group") ?? "";
+  // Стадии через запятую. ?group= — старые ссылки со сводки: одна стадия.
+  const stagesParam = params.get("stages") ?? params.get("group") ?? "";
+  const stages = stagesParam ? stagesParam.split(",").filter(Boolean) : [];
   // ?search= — со сканера наклейки (Layout): несколько заказов с такими цифрами или ни одного.
   const [search, setSearch] = useState(() => params.get("search") ?? "");
   const urlSearch = params.get("search");
@@ -120,20 +124,42 @@ export default function Orders() {
   // Типы техники — в адресе через запятую, как и остальные фильтры.
   const kindsParam = params.get("kind") ?? "";
   const kinds = kindsParam ? kindsParam.split(",").filter(Boolean) : [];
+  const kindsNotParam = params.get("kindNot") ?? "";
+  const kindsNot = kindsNotParam ? kindsNotParam.split(",").filter(Boolean) : [];
   const deviceKinds = useDeviceKinds();
   const kindLabel = (key: string) => deviceKinds?.find((k) => k.key === key)?.label ?? key.charAt(0).toUpperCase() + key.slice(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   // Аутсорс: «1» — все такие клиенты, иначе id одного (в адресе, как остальные фильтры).
   const outsource = params.get("outsource") ?? "";
   const outsourceClients = useOutsourceClients();
-  const filters: OrderFilterState = { group, kinds, color, sort, outsource };
+  const filters: OrderFilterState = { stages, kinds, kindsNot, color, sort, outsource };
+  const memoryKey = `finecrm.orders.filters.${me?.kind === "tenant" ? me.user.id : "platform"}`;
+
+  /**
+   * Фильтры запоминаются на устройстве, у каждого сотрудника свои: вышел,
+   * вернулся — список тот же. Адрес с фильтрами (ссылка со сводки
+   * «Ремонт») главнее памяти и её не перезаписывает: запоминается только
+   * выбранное руками.
+   */
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (restored) return;
+    setRestored(true);
+    const own = ["group", "stages", "kind", "kindNot", "color", "sort", "outsource", "search", "page"].some((k) => params.has(k));
+    if (own) return;
+    const saved = recallFilters(memoryKey);
+    if (saved) applyFilters(saved, { save: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Всё выбранное в окне — одним переходом: по отдельности сеттеры затирали бы друг друга. */
-  const applyFilters = (next: OrderFilterState) => {
+  const applyFilters = (next: OrderFilterState, opts: { save?: boolean } = {}) => {
     const p = new URLSearchParams(params);
     const put = (key: string, v: string) => (v ? p.set(key, v) : p.delete(key));
-    put("group", next.group);
+    p.delete("group");
+    put("stages", next.stages.join(","));
     put("kind", next.kinds.join(","));
+    put("kindNot", next.kindsNot.join(","));
     put("color", next.color);
     put("outsource", next.outsource);
     put("sort", next.sort === "default" ? "" : next.sort);
@@ -141,6 +167,7 @@ export default function Orders() {
     setParams(p, { replace: true });
     remember("finecrm.orders.sort", next.sort === "default" ? "" : next.sort);
     remember("finecrm.orders.color", next.color);
+    if (opts.save !== false) rememberFilters(memoryKey, next);
     setFiltersOpen(false);
   };
 
@@ -163,13 +190,13 @@ export default function Orders() {
     if (!quiet) setRows(null);
     try {
       const query: Record<string, string> = { page: String(page) };
-      if (group === "DEBT") query.debt = "1";
-      else if (group) query.group = group;
+      if (stages.length) query.groups = stages.join(",");
       if (search.trim()) query.search = search.trim();
       if (sort !== "default") query.sort = sort;
       if (search.trim() && !exact && fixLayoutEnabled()) query.layout = "1";
       if (color) query.color = color;
       if (kindsParam) query.kind = kindsParam;
+      if (kindsNotParam) query.kindNot = kindsNotParam;
       if (outsource) query.outsource = outsource;
       const data = await ordersApi.list(query);
       setRows(data.rows);
@@ -179,13 +206,15 @@ export default function Orders() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [group, search, page, sort, color, exact, kindsParam, outsource]);
+  }, [stagesParam, search, page, sort, color, exact, kindsParam, kindsNotParam, outsource]);
 
   useEffect(() => {
+    // Сначала — вспомнить фильтры, потом грузить: иначе список мигнул бы без них.
+    if (!restored) return;
     // Небольшая задержка, чтобы не дёргать сервер на каждую букву в поиске.
     const t = setTimeout(() => void load(), search ? 350 : 0);
     return () => clearTimeout(t);
-  }, [load, search]);
+  }, [load, search, restored]);
 
   const om = useOrderMenu({ onChanged: () => load(true) });
 
@@ -250,7 +279,7 @@ export default function Orders() {
 
       <SearchFixedHint fixed={searchFixed} onExact={() => setExact(true)} />
 
-      {group === "DEBT" && rows && rows.length > 0 && (
+      {stages.length === 1 && stages[0] === "DEBT" && rows && rows.length > 0 && (
         <p className="flex flex-wrap items-center gap-2 text-[14px] text-ink-muted">
           {plural(pageInfo.total, "заказ", "заказа", "заказов")} с задолженностью
           {debtTotal !== null && <DebtBadge amount={debtTotal} short />}

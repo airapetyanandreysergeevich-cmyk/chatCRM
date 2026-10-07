@@ -45,6 +45,13 @@ export const NOTIFICATION_EVENTS = [
     defaultRoles: [] as string[],
   },
   {
+    code: "order.approval",
+    title: "Ответ клиента на согласование",
+    hint: "Клиент ответил на SMS с согласованием ремонта. Уходит назначенному мастеру; отметьте роли, которым тоже нужно.",
+    hasDirectTarget: true,
+    defaultRoles: ["Приёмщик", "Управляющий"],
+  },
+  {
     code: "purchase.requested",
     title: "Заявка на закупку",
     hint: "Мастер попросил купить деталь — заявка ждёт согласования.",

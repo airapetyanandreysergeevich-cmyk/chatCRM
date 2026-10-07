@@ -37,11 +37,15 @@ export interface PrintForms {
   requisites: string | null;
   intake: DocTexts;
   act: DocTexts;
+  /** Заголовок квитанции при приёме по гарантии. */
+  warrantyTitle: string;
   /** Строка внизу листа. Пусто — строки нет. */
   footer: string | null;
   /** «М.П.» у подписи мастерской — для тех, кто ставит печать. */
   stamp: boolean;
 }
+
+export const DEFAULT_WARRANTY_TITLE = "Акт приема оборудования в ремонт по гарантии";
 
 export const DEFAULT_TEXTS: { intake: DocTexts; act: DocTexts } = {
   intake: {
@@ -72,6 +76,7 @@ export const DEFAULT_TEXTS: { intake: DocTexts; act: DocTexts } = {
 /** Как хранится на сервере: только то, что поменяли. */
 interface StoredDoc {
   title?: string | null;
+  warrantyTitle?: string | null;
   terms?: string | null;
   warranty?: string | null;
   signClient?: string | null;
@@ -123,6 +128,7 @@ export function resolveForms({ print, fallback }: PrintResponse): PrintForms {
     requisites: "requisites" in p ? clean(p.requisites) : clean(fallback.requisites),
     intake: docOf(p.intake, "intake"),
     act: docOf(p.act, "act"),
+    warrantyTitle: clean(p.intake?.warrantyTitle) ?? DEFAULT_WARRANTY_TITLE,
     footer: clean(p.footer),
     stamp: p.stamp === true,
   };
@@ -149,7 +155,7 @@ export function toStored(f: PrintForms): StoredPrint {
     logo: f.logo,
     name: clean(f.name),
     requisites: clean(f.requisites),
-    intake: doc(f.intake, "intake"),
+    intake: { ...doc(f.intake, "intake"), warrantyTitle: diff(f.warrantyTitle, DEFAULT_WARRANTY_TITLE) },
     act: doc(f.act, "act"),
     footer: clean(f.footer),
     stamp: f.stamp,

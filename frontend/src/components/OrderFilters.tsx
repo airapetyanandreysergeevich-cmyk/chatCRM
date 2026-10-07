@@ -29,17 +29,37 @@ export interface SortOption {
 }
 
 export interface OrderFilterState {
-  group: string;
+  /** Выбранные стадии. Пусто — все (фильтра нет). */
+  stages: string[];
+  /** Только эти типы техники. */
   kinds: string[];
+  /** Все типы, кроме этих: «Все» нажали и сняли лишние. */
+  kindsNot: string[];
   color: ColorFilterValue;
   sort: string;
   /** Аутсорс: "" — все заказы, "1" — все клиенты-аутсорс, иначе id одного из них. */
   outsource: string;
 }
 
-/** Сколько фильтров выбрано: стадия, каждый тип техники, метка, аутсорс. Сортировка — не фильтр. */
+/** Сколько фильтров выбрано: каждая стадия, каждый тип техники, метка, аутсорс. Сортировка — не фильтр. */
 export const filterCount = (f: OrderFilterState) =>
-  (f.group ? 1 : 0) + f.kinds.length + (f.color ? 1 : 0) + (f.outsource ? 1 : 0);
+  f.stages.length + f.kinds.length + f.kindsNot.length + (f.color ? 1 : 0) + (f.outsource ? 1 : 0);
+
+export const EMPTY_FILTERS: OrderFilterState = { stages: [], kinds: [], kindsNot: [], color: "", sort: "default", outsource: "" };
+
+/**
+ * Выбор из набора с кнопкой «Все».
+ *
+ * Андрей: «при нажатии на кнопку Все выделялись все пункты, и можно было
+ * отключать определённые». Поэтому без фильтра подсвечено всё, нажатие на
+ * пункт его снимает, «Все» — выделяет всё или, если и так всё, снимает всё,
+ * чтобы выбрать один-два. Ничего не выбрано — это то же, что всё.
+ */
+export function toggleInSet(all: string[], selected: string[], key: string): string[] {
+  const current = selected.length ? selected : all;
+  const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+  return next.length === 0 || all.every((k) => next.includes(k)) ? [] : all.filter((k) => next.includes(k));
+}
 
 export interface OutsourceClient {
   id: string;
@@ -120,11 +140,11 @@ export function ActiveFilters({
   outsource: OutsourceClient[] | null;
   onChange: (next: OrderFilterState) => void;
 }) {
-  const stage = stages.find((s) => s.value === value.group && s.value);
+  const picked = stages.filter((s) => s.value && value.stages.includes(s.value));
   const color = value.color === "none" ? "Без метки" : customerColor(value.color)?.label;
   const sort = value.sort !== "default" ? sorts.find((s) => s.value === value.sort)?.label : null;
   const partner = value.outsource && value.outsource !== "1" ? outsource?.find((c) => c.id === value.outsource) : null;
-  if (!stage && !value.kinds.length && !value.color && !sort && !value.outsource) return null;
+  if (!picked.length && !value.kinds.length && !value.kindsNot.length && !value.color && !sort && !value.outsource) return null;
 
   const Chip = ({ label, cls, onRemove }: { label: string; cls?: string | null; onRemove: () => void }) => (
     <button type="button" onClick={onRemove} className={chip(true, cls) + " pr-2.5"} title="Снять">
@@ -135,9 +155,14 @@ export function ActiveFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {stage && <Chip label={stage.label} cls={stage.pill} onRemove={() => onChange({ ...value, group: "" })} />}
+      {picked.map((s) => (
+        <Chip key={s.value} label={s.label} cls={s.pill} onRemove={() => onChange({ ...value, stages: value.stages.filter((x) => x !== s.value) })} />
+      ))}
       {value.kinds.map((k) => (
         <Chip key={k} label={kindLabel(k)} onRemove={() => onChange({ ...value, kinds: value.kinds.filter((x) => x !== k) })} />
+      ))}
+      {value.kindsNot.map((k) => (
+        <Chip key={"not" + k} label={`Кроме: ${kindLabel(k)}`} onRemove={() => onChange({ ...value, kindsNot: value.kindsNot.filter((x) => x !== k) })} />
       ))}
       {value.color && (
         <Chip label={`Метка: ${color ?? value.color}`} onRemove={() => onChange({ ...value, color: "" })} />
@@ -180,43 +205,71 @@ export function OrderFiltersModal({
   const shown = allKinds
     ? kindList
     : kindList.filter((k, i) => i < KINDS_FIRST || draft.kinds.includes(k.key));
+  const stageKeys = stages.filter((s) => s.value).map((s) => s.value);
+  const stageOn = (key: string) => !draft.stages.length || draft.stages.includes(key);
+  const allKeys = kindList.map((k) => k.key);
+  // Тип выбран: «только эти» — он в списке; «все, кроме» — его нет среди снятых.
+  const kindOn = (key: string) => (draft.kinds.length ? draft.kinds.includes(key) : !draft.kindsNot.includes(key));
+  const kindsAll = !draft.kinds.length && !draft.kindsNot.length;
   const toggleKind = (key: string) =>
-    setDraft((d) => ({ ...d, kinds: d.kinds.includes(key) ? d.kinds.filter((k) => k !== key) : [...d.kinds, key] }));
+    setDraft((d) => {
+      const on = allKeys.filter((k) => (d.kinds.length ? d.kinds.includes(k) : !d.kindsNot.includes(k)));
+      const flipped = on.includes(key) ? on.filter((k) => k !== key) : [...on, key];
+      const next = allKeys.filter((k) => flipped.includes(k));
+      if (!next.length || next.length === allKeys.length) return { ...d, kinds: [], kindsNot: [] };
+      // Короче записать: «только эти» или «все, кроме». «Кроме» не потеряет
+      // типы, которых сегодня ещё нет, — новый тип попадёт в список сам.
+      const off = allKeys.filter((k) => !next.includes(k));
+      return next.length <= off.length ? { ...d, kinds: next, kindsNot: [] } : { ...d, kinds: [], kindsNot: off };
+    });
 
   return (
     <Modal title="Фильтры и сортировка" onClose={onClose}>
       <div className="space-y-5">
         <Section title="Стадия">
-          {stages.map((s) => (
-            <button
-              key={s.value || "all"}
-              type="button"
-              aria-pressed={draft.group === s.value}
-              onClick={() => setDraft((d) => ({ ...d, group: s.value }))}
-              className={chip(draft.group === s.value, s.pill)}
-            >
-              {s.label}
-            </button>
-          ))}
+          {stages.map((s) =>
+            s.value ? (
+              <button
+                key={s.value}
+                type="button"
+                aria-pressed={stageOn(s.value)}
+                onClick={() => setDraft((d) => ({ ...d, stages: toggleInSet(stageKeys, d.stages, s.value) }))}
+                className={chip(stageOn(s.value), s.pill)}
+              >
+                {s.label}
+              </button>
+            ) : (
+              <button
+                key="all"
+                type="button"
+                aria-pressed={!draft.stages.length}
+                // Всё выделено — снять всё, чтобы выбрать одну-две; иначе выделить всё.
+                onClick={() => setDraft((d) => ({ ...d, stages: d.stages.length ? [] : ["__none__"] }))}
+                className={chip(!draft.stages.length)}
+              >
+                {s.label}
+              </button>
+            )
+          )}
         </Section>
 
         <Section title="Тип техники">
           <button
             type="button"
-            aria-pressed={draft.kinds.length === 0}
-            onClick={() => setDraft((d) => ({ ...d, kinds: [] }))}
-            className={chip(draft.kinds.length === 0)}
+            aria-pressed={kindsAll}
+            onClick={() => setDraft((d) => (kindsAll ? { ...d, kinds: ["__none__"], kindsNot: [] } : { ...d, kinds: [], kindsNot: [] }))}
+            className={chip(kindsAll)}
           >
-            Любой
+            Все
           </button>
           {kinds === null && <span className="self-center text-[13px] text-ink-dim">загружаем…</span>}
           {shown.map((k) => (
             <button
               key={k.key}
               type="button"
-              aria-pressed={draft.kinds.includes(k.key)}
+              aria-pressed={kindOn(k.key)}
               onClick={() => toggleKind(k.key)}
-              className={chip(draft.kinds.includes(k.key))}
+              className={chip(kindOn(k.key))}
             >
               {k.label}
               <span className="text-[11.5px] font-medium opacity-70">{k.count}</span>
@@ -302,13 +355,13 @@ export function OrderFiltersModal({
         {/* На телефоне кнопки прилипают к низу листа: длинный список типов
             не должен прятать «Показать». */}
         <div className="sticky -bottom-5 -mx-5 -mb-5 flex flex-col gap-2 border-t border-line bg-surface px-5 pb-5 pt-4 sm:static sm:mx-0 sm:mb-0 sm:flex-row-reverse sm:px-0 sm:pb-0">
-          <Button type="button" onClick={() => onApply(draft)} className="sm:flex-1">
+          <Button type="button" onClick={() => onApply(cleanFilters(draft))} className="sm:flex-1">
             Показать
           </Button>
           <Button
             type="button"
             variant="secondary"
-            onClick={() => setDraft({ group: "", kinds: [], color: "", sort: "default", outsource: "" })}
+            onClick={() => setDraft(EMPTY_FILTERS)}
             className="sm:flex-1"
           >
             Сбросить всё
@@ -329,4 +382,42 @@ export function useDeviceKinds(): DeviceKindOption[] | null {
       .catch(() => setKinds([]));
   }, []);
   return kinds;
+}
+
+/**
+ * «Ничего не выбрано» (после «Все», снявшего всё) — внутренняя пометка окна.
+ * Наружу уходит как «все»: показать пустой список никто не просил.
+ */
+export function cleanFilters(f: OrderFilterState): OrderFilterState {
+  const real = (list: string[]) => list.filter((k) => k !== "__none__");
+  return { ...f, stages: real(f.stages), kinds: real(f.kinds), kindsNot: real(f.kindsNot) };
+}
+
+/** Запомненные фильтры сотрудника на этом устройстве. Хранилище недоступно — просто не помним. */
+export function recallFilters(key: string): OrderFilterState | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<OrderFilterState>;
+    const list = (x: unknown) => (Array.isArray(x) ? x.filter((k): k is string => typeof k === "string" && !!k).slice(0, 40) : []);
+    return {
+      stages: list(v.stages),
+      kinds: list(v.kinds),
+      kindsNot: list(v.kindsNot),
+      color: (typeof v.color === "string" ? v.color : "") as OrderFilterState["color"],
+      sort: typeof v.sort === "string" && v.sort ? v.sort : "default",
+      outsource: typeof v.outsource === "string" ? v.outsource : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function rememberFilters(key: string, f: OrderFilterState) {
+  try {
+    if (filterCount(f) === 0 && f.sort === "default") localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(f));
+  } catch {
+    /* не запомнили — не беда */
+  }
 }

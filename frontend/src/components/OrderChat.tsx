@@ -206,6 +206,16 @@ export function OrderChat({
                 {newDay && (
                   <div className="py-1 text-center text-[12px] font-semibold text-ink-dim">{dayLabel(m.createdAt)}</div>
                 )}
+                {m.system && !m.deleted ? (
+                  // Запись программы — по центру, без автора: это не чьи-то слова, а событие заказа.
+                  <div id={`message-${m.id}`} data-system className="flex scroll-mt-16 justify-center">
+                    <p className="max-w-[92%] rounded-[12px] border border-dashed border-line px-3 py-1.5 text-center text-[13px] leading-snug text-ink-muted sm:max-w-[80%]">
+                      <span className="mr-1.5 font-semibold text-ink-soft">FineCRM</span>
+                      <span className="mr-1.5 text-ink-dim">{timeLabel(m.createdAt)}</span>
+                      {m.text}
+                    </p>
+                  </div>
+                ) : (
                 <div id={`message-${m.id}`} className={"flex scroll-mt-16 " + (mine ? "justify-end" : "justify-start")}>
                   <div
                     className={
@@ -268,6 +278,7 @@ export function OrderChat({
                     )}
                   </div>
                 </div>
+                )}
               </Fragment>
             );
           })

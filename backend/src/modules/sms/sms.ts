@@ -1,76 +1,107 @@
 import type { Prisma, SmsStatus } from "@prisma/client";
 import { withTenant } from "../../lib/db";
-import * as gateway from "../../lib/semysms";
 
 /**
  * SMS клиентам: настройки мастерской, шаблоны, отправка и статусы. Отправляет
- * либо свой телефон с приложением «FineCRM SMS» (provider "phone",
- * sms.phone.ts), либо SemySMS. Маршруты — в sms.routes.ts, предложение
- * «отправить SMS» после «Готов к выдаче» — readyHint() из orders.routes.ts.
+ * свой телефон с приложением «FineCRM SMS» (sms.phone.ts): сообщение ждёт в
+ * очереди, телефон забирает его сам. Маршруты — в sms.routes.ts, предложение
+ * «отправить SMS» после «Готов к выдаче» — readyHint() из orders.routes.ts,
+ * согласование по SMS — sms.approval.ts.
  *
- * Сеть — всегда вне транзакции (claude/grabli.md, «Сеть внутри транзакции»):
- * сначала запись «в очереди», потом запрос к SemySMS, потом итог отдельной
- * короткой транзакцией.
+ * SemySMS был вторым способом отправки — убран 07.10.2026 по решению Андрея.
+ * Старые подключения через него считаются «свой телефон».
  */
 
-/** Строка подключения в "Integration". Имя историческое: в ней все настройки SMS, не только SemySMS. */
+/** Строка подключения в "Integration". Имя историческое (когда-то был SemySMS): в ней все настройки SMS. */
 export const KIND = "semysms";
-export const PROVIDERS = ["phone", "semysms"] as const;
-export type Provider = (typeof PROVIDERS)[number];
 export const ON_READY = ["ask", "auto", "off"] as const;
 export type OnReady = (typeof ON_READY)[number];
 
 export const DEFAULT_TEMPLATES = {
   ready: "Здравствуйте! Ваш {техника} (заказ {номер}) готов к выдаче. {мастерская}",
+  // Короче — дешевле: каждые 67 знаков по-русски — ещё одна платная SMS.
+  approval: "{мастерская}: заказ {номер}, {работы} — {стоимость}. Делаем? Ответьте ДА или НЕТ",
+  approvalYes: "Спасибо! Приступаем к ремонту. {мастерская}",
+  approvalNo: "Поняли, ремонт делать не будем. Технику можно забрать. {мастерская}",
 };
 export type TemplateKey = keyof typeof DEFAULT_TEMPLATES;
 
 /** Подстановки шаблона — те же подсказки показывает интерфейс. */
-export const PLACEHOLDERS = ["{клиент}", "{номер}", "{техника}", "{сумма}", "{мастерская}"] as const;
+export const PLACEHOLDERS = ["{клиент}", "{номер}", "{техника}", "{сумма}", "{стоимость}", "{работы}", "{мастерская}"] as const;
+
+export type ApprovalConfig = {
+  enabled: boolean;
+  /** Заказ перевели в статус согласования: спросить мастера, отправить сразу или ничего. */
+  onWaiting: OnReady;
+  /** Статус «на согласовании». Пусто — первый статус «Согласования» со словом «соглас». */
+  statusId: string | null;
+  /** Куда перевести заказ, если клиент согласился. Пусто — первый статус «Ремонта». */
+  yesStatusId: string | null;
+  /** Ответить клиенту, когда он согласился / отказался. */
+  replyYes: boolean;
+  replyNo: boolean;
+};
 
 export interface SmsConfig {
-  /** Чем отправлять: свой телефон с приложением FineCRM SMS или SemySMS. */
-  provider: Provider;
-  /** Код телефона в SemySMS или "active" — любой включённый. */
-  device: string;
-  deviceName: string | null;
   onReady: OnReady;
-  templates: { ready: string | null };
+  templates: Record<TemplateKey, string | null>;
+  approval: ApprovalConfig;
 }
 
 export interface SmsSettings extends SmsConfig {
   enabled: boolean;
-  token: string | null;
 }
+
+const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
+const id = (v: unknown) => (typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v) ? v : null);
 
 function readConfig(raw: unknown): SmsConfig {
   const c = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const t = (c.templates && typeof c.templates === "object" ? c.templates : {}) as Record<string, unknown>;
+  const a = (c.approval && typeof c.approval === "object" ? c.approval : {}) as Record<string, unknown>;
   return {
-    provider: PROVIDERS.includes(c.provider as Provider) ? (c.provider as Provider) : "phone",
-    device: typeof c.device === "string" && c.device.trim() ? c.device.trim() : "active",
-    deviceName: typeof c.deviceName === "string" && c.deviceName.trim() ? c.deviceName.trim() : null,
     onReady: ON_READY.includes(c.onReady as OnReady) ? (c.onReady as OnReady) : "ask",
-    templates: { ready: typeof t.ready === "string" && t.ready.trim() ? t.ready : null },
+    templates: {
+      ready: str(t.ready),
+      approval: str(t.approval),
+      approvalYes: str(t.approvalYes),
+      approvalNo: str(t.approvalNo),
+    },
+    approval: {
+      enabled: a.enabled === true,
+      onWaiting: ON_READY.includes(a.onWaiting as OnReady) ? (a.onWaiting as OnReady) : "ask",
+      statusId: id(a.statusId),
+      yesStatusId: id(a.yesStatusId),
+      replyYes: a.replyYes !== false,
+      replyNo: a.replyNo !== false,
+    },
   };
 }
 
 export async function loadSettings(tx: Prisma.TransactionClient): Promise<SmsSettings> {
   const row = await tx.integration.findFirst({ where: { kind: KIND } });
-  const config = readConfig(row?.config);
-  // Подключали SemySMS до того, как появился выбор, — так и остаётся.
-  const raw = (row?.config ?? {}) as Record<string, unknown>;
-  if (!raw.provider && row?.secret) config.provider = "semysms";
-  return { enabled: !!row?.enabled, token: row?.secret ?? null, ...config };
+  return { enabled: !!row?.enabled, ...readConfig(row?.config) };
 }
 
-/** Готово ли к отправке: включено и, для SemySMS, есть ключ. Свой телефон проверяется при отправке. */
-export const ready = (s: SmsSettings) => s.enabled && (s.provider === "phone" || !!s.token);
+/** Готово ли к отправке. Есть ли живой телефон — проверяется при отправке. */
+export const ready = (s: SmsSettings) => s.enabled;
 
-/** Ключ в интерфейсе — только последние четыре знака. */
-export const tokenHint = (token: string | null) => (token ? `•••• ${token.slice(-4)}` : null);
+/** Согласование по SMS включено (и сами SMS тоже). */
+export const approvalOn = (s: SmsSettings) => s.enabled && s.approval.enabled;
 
 export const templateOf = (s: SmsSettings, key: TemplateKey) => s.templates[key] ?? DEFAULT_TEMPLATES[key];
+
+/**
+ * Номер в международном виде для SIM-карты: 89211234567 → +79211234567.
+ * По нему же сверяется, кто ответил на согласование.
+ */
+export function normalizePhone(raw: string | null | undefined): string | null {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  if (digits.length === 11 && digits[0] === "8") return "+7" + digits.slice(1);
+  if (digits.length === 10 && digits[0] === "9") return "+7" + digits;
+  if (digits.length >= 10 && digits.length <= 15) return "+" + digits;
+  return null;
+}
 
 const rub = (n: number) => `${Math.round(n).toLocaleString("ru-RU").replace(/ /g, " ")} ₽`;
 
@@ -83,8 +114,12 @@ export async function orderFacts(tx: Prisma.TransactionClient, tenantId: string,
       number: true,
       total: true,
       assignedMasterId: true,
+      estimatedCost: true,
+      status: { select: { id: true, group: true } },
       customer: { select: { id: true, name: true, phone: true } },
       device: { select: { kind: true, brand: true, model: true } },
+      works: { select: { name: true }, orderBy: { createdAt: "asc" } },
+      parts: { select: { name: true }, orderBy: { createdAt: "asc" } },
     },
   });
   if (!order) return null;
@@ -103,6 +138,13 @@ export async function orderFacts(tx: Prisma.TransactionClient, tenantId: string,
   const device = [kind ? kind.charAt(0).toLocaleLowerCase("ru-RU") + kind.slice(1) : "", order.device?.brand, order.device?.model]
     .filter(Boolean)
     .join(" ") || "техника";
+  // «Что делаем» для согласования: работы и запчасти через запятую, коротко —
+  // SMS платная за каждые 70 знаков.
+  const names = [...order.works.map((w) => w.name), ...order.parts.map((p) => p.name)].map((n) => n.trim()).filter(Boolean);
+  let works = names.join(", ");
+  if (works.length > 90) works = works.slice(0, 88).replace(/[,\s]+[^,]*$/, "") + "…";
+  // Стоимость — сумма работ и запчастей; пока их нет — предварительная оценка с приёма.
+  const cost = Number(order.total ?? 0) > 0 ? Number(order.total) : Number(order.estimatedCost ?? 0);
   return {
     order,
     values: {
@@ -110,9 +152,13 @@ export async function orderFacts(tx: Prisma.TransactionClient, tenantId: string,
       "{номер}": order.number,
       "{техника}": device,
       "{сумма}": rub(due),
+      "{стоимость}": cost > 0 ? rub(cost) : "по договорённости",
+      "{работы}": works || "по результатам диагностики",
       "{мастерская}": workshop,
     } as Record<string, string>,
-    phone: gateway.gatewayPhone(order.customer?.phone),
+    phone: normalizePhone(order.customer?.phone),
+    cost,
+    hasWorks: names.length > 0,
   };
 }
 
@@ -142,7 +188,6 @@ export interface SmsView {
  */
 export async function sendSms(
   tenantId: string,
-  settings: SmsSettings,
   msg: { orderId?: string | null; customerId?: string | null; phone: string; text: string; kind: string; userId?: string | null }
 ) {
   const row = await withTenant(tenantId, (tx) =>
@@ -161,24 +206,14 @@ export async function sendSms(
   const fail = (error: string) =>
     withTenant(tenantId, (tx) => tx.smsMessage.update({ where: { id: row.id }, data: { status: "FAILED", error } }));
 
-  // Свой телефон: сообщение ждёт в очереди, телефон заберёт его сам (sms.phone.ts).
+  // Сообщение ждёт в очереди, телефон заберёт его сам (sms.phone.ts).
   // Если ни один телефон давно не выходил на связь — говорим сразу, а не через полчаса.
-  if (settings.provider === "phone") {
-    const alive = await withTenant(tenantId, (tx) =>
-      tx.smsPhone.count({
-        where: { revokedAt: null, tokenHash: { not: null }, lastSeenAt: { gte: new Date(Date.now() - PHONE_GRACE_MS) } },
-      })
-    );
-    return alive ? row : fail("Телефон-шлюз не на связи — проверьте, что он включён и приложение FineCRM SMS запущено");
-  }
-
-  if (!settings.token) return fail("Не указан токен SemySMS");
-  try {
-    const providerId = await gateway.send(settings.token, settings.device, msg.phone, msg.text);
-    return await withTenant(tenantId, (tx) => tx.smsMessage.update({ where: { id: row.id }, data: { providerId } }));
-  } catch (err) {
-    return fail(err instanceof gateway.SmsGatewayError ? err.message : "Не удалось отправить SMS");
-  }
+  const alive = await withTenant(tenantId, (tx) =>
+    tx.smsPhone.count({
+      where: { revokedAt: null, tokenHash: { not: null }, lastSeenAt: { gte: new Date(Date.now() - PHONE_GRACE_MS) } },
+    })
+  );
+  return alive ? row : fail("Телефон-шлюз не на связи — проверьте, что он включён и приложение FineCRM SMS запущено");
 }
 
 /** Телефон «есть», если выходил на связь за это время: короткий обрыв сети — не повод отказывать. */
@@ -203,58 +238,7 @@ export async function expirePhoneQueue(tx: Prisma.TransactionClient, where: Pris
   });
 }
 
-/** Как часто спрашивать SemySMS о статусах одного и того же сообщения. */
-const CHECK_EVERY_MS = 20_000;
-/** Старше — уже не спрашиваем: телефон за трое суток либо отправил, либо нет. */
-const CHECK_WITHIN_MS = 3 * 24 * 60 * 60 * 1000;
-
-/** Освежить статусы неокончательных сообщений. Ошибка шлюза статусы не трогает. */
-export async function refreshStatuses(tenantId: string, settings: SmsSettings, where: Prisma.SmsMessageWhereInput) {
+/** Освежить статусы: то, что телефон не забрал или о чём не отчитался, — в «не отправлена». */
+export async function refreshStatuses(tenantId: string, where: Prisma.SmsMessageWhereInput) {
   await withTenant(tenantId, (tx) => expirePhoneQueue(tx, where));
-  if (!settings.token) return;
-  const now = Date.now();
-  const pending = await withTenant(tenantId, (tx) =>
-    tx.smsMessage.findMany({
-      where: {
-        ...where,
-        status: { in: ["QUEUED", "SENT"] },
-        providerId: { not: null },
-        createdAt: { gte: new Date(now - CHECK_WITHIN_MS) },
-        OR: [{ checkedAt: null }, { checkedAt: { lt: new Date(now - CHECK_EVERY_MS) } }],
-      },
-      select: { id: true, providerId: true, status: true, createdAt: true },
-      take: 50,
-    })
-  );
-  if (!pending.length) return;
-  let states: gateway.GatewayStatus[];
-  try {
-    const since = new Date(Math.min(...pending.map((p) => p.createdAt.getTime())));
-    states = await gateway.outbox(settings.token, pending.map((p) => p.providerId!), since);
-  } catch {
-    return;
-  }
-  const byId = new Map(states.map((s) => [s.id, s]));
-  await withTenant(tenantId, async (tx) => {
-    for (const p of pending) {
-      const s = byId.get(p.providerId!);
-      const status: SmsStatus = !s
-        ? p.status
-        : s.failed
-          ? "FAILED"
-          : s.delivered
-            ? "DELIVERED"
-            : s.sent
-              ? "SENT"
-              : "QUEUED";
-      await tx.smsMessage.update({
-        where: { id: p.id },
-        data: {
-          checkedAt: new Date(),
-          status,
-          ...(status === "FAILED" && p.status !== "FAILED" ? { error: "Телефон-шлюз не отправил SMS" } : {}),
-        },
-      });
-    }
-  });
 }

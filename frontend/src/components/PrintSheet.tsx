@@ -164,7 +164,8 @@ export function PrintSheet({
   const works = order.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price }));
   const parts = order.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price }));
   const texts = doc === "intake" ? forms.intake : forms.act;
-  const title = texts.title;
+  // Приняли по гарантии — у квитанции свой заголовок («Акт приема … по гарантии»).
+  const title = doc === "intake" && order.kind === "WARRANTY" ? forms.warrantyTitle : texts.title;
 
   // Лист A4. Ширина в миллиметрах, чтобы на экране было видно, как ляжет.
   // В предпросмотре настроек лист не ужимается под окно: его уменьшают
@@ -199,6 +200,13 @@ export function PrintSheet({
                 акт печатают у стойки, когда клиент уже пришёл. */}
             от {formatDate(doc === "act" ? (order.issuedAt ?? new Date().toISOString()) : order.acceptedAt)}
           </p>
+          {/* По гарантии — к какому ремонту: по нему и решают, гарантийный ли случай. */}
+          {order.kind === "WARRANTY" && order.previousRepair && (
+            <p className="mt-0.5 text-[11px] text-black/70">
+              по гарантии к заказу {order.previousRepair.number}
+              {order.previousRepair.issuedAt ? ` от ${formatDate(order.previousRepair.issuedAt)}` : ""}
+            </p>
+          )}
         </div>
       </header>
 

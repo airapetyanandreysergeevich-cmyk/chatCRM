@@ -37,6 +37,7 @@ import java.util.List;
 public class MainActivity extends Activity {
     private static final int REQ_SMS = 1;
     private static final int REQ_NOTIFY = 2;
+    private static final int REQ_RECEIVE = 3;
 
     private static final int INK = Color.parseColor("#161A22");
     private static final int MUTED = Color.parseColor("#5B6475");
@@ -195,7 +196,7 @@ public class MainActivity extends Activity {
         check(sms, "Разрешение на отправку SMS", "Разрешить", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.SEND_SMS}, REQ_SMS);
+                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS}, REQ_SMS);
             }
         });
         if (!sms) {
@@ -208,6 +209,13 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        check(granted(Manifest.permission.RECEIVE_SMS), "Ответы клиентов на согласование", "Разрешить", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.RECEIVE_SMS}, REQ_RECEIVE);
+            }
+        });
+        text("В FineCRM уходят только ответы клиентов, которых мастерская спросила о ремонте. Остальные SMS остаются на телефоне.", 13, MUTED, false);
         if (Build.VERSION.SDK_INT >= 33) {
             check(granted(Manifest.permission.POST_NOTIFICATIONS), "Значок «на связи» в шторке", "Разрешить", new View.OnClickListener() {
                 @Override
@@ -305,7 +313,7 @@ public class MainActivity extends Activity {
                         say("Подключено к «" + Store.workshop(MainActivity.this) + "»", OK);
                         GatewayService.start(MainActivity.this);
                         if (!granted(Manifest.permission.SEND_SMS) && Build.VERSION.SDK_INT >= 23) {
-                            requestPermissions(new String[] {Manifest.permission.SEND_SMS}, REQ_SMS);
+                            requestPermissions(new String[] {Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS}, REQ_SMS);
                         }
                     }
                 });

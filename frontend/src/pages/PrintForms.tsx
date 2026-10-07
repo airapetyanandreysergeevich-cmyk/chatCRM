@@ -7,7 +7,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LOGO_TYPES, prepareLogo } from "../lib/branding";
 import type { Order } from "../lib/orders";
-import { DEFAULT_TEXTS, printFormsApi, TEXT_LEADING, TEXT_SIZE, type DocTexts, type PrintForms } from "../lib/printForms";
+import { DEFAULT_TEXTS, DEFAULT_WARRANTY_TITLE, printFormsApi, TEXT_LEADING, TEXT_SIZE, type DocTexts, type PrintForms } from "../lib/printForms";
 
 /**
  * «Настройки → Бланки»: квитанция и акт так, как их увидит клиент.
@@ -230,9 +230,12 @@ function DocCard({
   bodyLabel,
   bodyHint,
   staffHint,
+  extraTitle,
 }: {
   title: string;
   kind: Doc;
+  /** Второй заголовок — квитанция при приёме по гарантии. */
+  extraTitle?: { value: string; fallback: string; onChange: (v: string) => void };
   texts: DocTexts;
   onChange: (next: DocTexts) => void;
   onFocus: () => void;
@@ -252,6 +255,15 @@ function DocCard({
           <FieldHead label="Заголовок" onReset={reset("title")} />
           <Input value={texts.title} maxLength={80} disabled={disabled} onChange={(e) => set("title")(e.target.value)} />
         </div>
+        {extraTitle && (
+          <div>
+            <FieldHead
+              label="Заголовок при приёме по гарантии"
+              onReset={extraTitle.value !== extraTitle.fallback ? () => extraTitle.onChange(extraTitle.fallback) : undefined}
+            />
+            <Input value={extraTitle.value} maxLength={80} disabled={disabled} onChange={(e) => extraTitle.onChange(e.target.value)} />
+          </div>
+        )}
         <div>
           <FieldHead label={bodyLabel} onReset={reset("body")} count={texts.body.length} max={TEXT_MAX} />
           <Textarea
@@ -503,6 +515,7 @@ export default function PrintFormsPage() {
             disabled={!mayEdit}
             onFocus={() => setDoc("intake")}
             onChange={(intake) => patch({ intake })}
+            extraTitle={{ value: draft.warrantyTitle, fallback: DEFAULT_WARRANTY_TITLE, onChange: (warrantyTitle) => patch({ warrantyTitle }) }}
             bodyLabel="Условия приёма"
             bodyHint="Под этим клиент расписывается при сдаче техники. Абзацы — через Enter."
             staffHint="Под строкой — только эта надпись: расписывается тот, кто принимает технику."

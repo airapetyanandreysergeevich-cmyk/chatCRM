@@ -53,7 +53,7 @@ const SECTIONS: Section[] = [
   {
     to: "/settings/integrations",
     title: "Интеграции",
-    text: "SMS клиентам через SemySMS: «ваш заказ готов» с SIM-карты телефона мастерской.",
+    text: "SMS клиентам с телефона мастерской: «ваш заказ готов» и согласование ремонта — клиент отвечает «да» или «нет».",
     icon: <IconSms />,
     need: "settings.manage",
   },

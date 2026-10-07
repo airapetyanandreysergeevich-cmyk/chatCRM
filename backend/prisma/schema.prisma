@@ -139,6 +139,7 @@ model Tenant {
   printJobs           PrintJob[]
   integrations        Integration[]
   smsMessages         SmsMessage[]
+  smsApprovals        SmsApproval[]
   smsPhones           SmsPhone[]
   sessions            Session[]
   application         TenantApplication[]
@@ -939,6 +940,8 @@ model OrderMessage {
   orderId   String
   authorId  String?
   text      String    @default("")
+  /// Запись самой программы, а не сотрудника: «Клиент согласился по SMS».
+  system    Boolean   @default(false)
   createdAt DateTime  @default(now())
   deletedAt DateTime?
 
@@ -1412,6 +1415,36 @@ model SmsMessage {
 
   @@index([tenantId, orderId])
   @@index([tenantId, status])
+}
+
+/// Согласование по SMS: вопрос клиенту и его ответ.
+///
+/// Ответ приходит на телефон-шлюз. Телефон пересылает только SMS с номеров,
+/// от которых ждут ответа (список ему даёт сервер), — личные сообщения
+/// с телефона никуда не уходят.
+model SmsApproval {
+  id        String    @id @default(uuid())
+  tenantId  String
+  orderId   String
+  /// Вопрос — обычная SMS в истории отправленных.
+  smsId     String?
+  /// Номер клиента как его отправляли: +79211234567.
+  phone     String
+  /// PENDING — ждём ответа, YES / NO — ответил, UNCLEAR — ответ непонятен,
+  /// CANCELLED — спросили заново или отменили, EXPIRED — не ответил за 3 дня.
+  status    String    @default("PENDING")
+  replyText String?
+  repliedAt DateTime?
+  /// Кто решил за клиента: непонятный ответ или клиент ответил по телефону.
+  decidedById String?
+  createdById String?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, orderId])
+  @@index([tenantId, phone, status])
 }
 
 /// Свой телефон-шлюз: приложение «FineCRM SMS» на Android. Подключается по

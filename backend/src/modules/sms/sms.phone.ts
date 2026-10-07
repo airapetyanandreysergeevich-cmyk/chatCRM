@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withPlatform, withTenant } from "../../lib/db";
 import { ah, badRequest, notFound } from "../../lib/errors";
 import { PHONE_ONLINE_MS, expirePhoneQueue } from "./sms";
+import { handleIncoming, watchList } from "./sms.approval";
 
 /**
  * Свой телефон-шлюз: приложение «FineCRM SMS» на Android (android/sms-gateway).
@@ -84,6 +85,10 @@ export async function listPhones(tenantId: string): Promise<PhoneView[]> {
       if (info.smsPermission === false) problems.push("нет разрешения на отправку SMS");
       if (info.batteryOptimized === true) problems.push("включена экономия батареи — Android может усыпить приложение");
       if (info.simReady === false) problems.push("SIM-карта не готова");
+      // Согласование по SMS: ответы клиентов принимает приложение 1.2 с разрешением читать SMS.
+      const version = typeof info.appVersion === "string" ? info.appVersion : "";
+      if (version && /^1\.[01]$/.test(version)) problems.push("старая версия приложения — ответы клиентов на согласование не приходят, обновите до 1.2");
+      else if (info.receivePermission === false) problems.push("нет разрешения читать SMS — ответы клиентов на согласование не придут");
       return {
         id: p.id,
         name: p.name,
@@ -241,8 +246,12 @@ smsPhoneRouter.get(
         });
         return claimed.count === 1 ? next : null;
       });
-      if (job) return res.json({ job });
-      if (gone || Date.now() >= deadline) return res.json({ job: null });
+      // Вместе с заданием — номера, от которых ждём ответа на согласование.
+      // Приложение пересылает входящие только с них: личные SMS остаются на телефоне.
+      if (job || gone || Date.now() >= deadline) {
+        const watch = await withTenant(auth.tenantId, (tx) => watchList(tx));
+        return res.json({ job: job ?? null, watch });
+      }
       await sleep(1500);
     }
   })
@@ -292,5 +301,27 @@ smsPhoneRouter.post(
     if (!auth) return;
     await revokePhone(auth.tenantId, auth.phoneId);
     res.json({ ok: true });
+  })
+);
+
+/**
+ * Входящая SMS с номера из списка «ждём ответа». Номер не ждали — молча
+ * принимаем и ничего не храним: старое приложение или опоздавший ответ.
+ */
+smsPhoneRouter.post(
+  "/incoming",
+  ah(async (req, res) => {
+    const auth = await requirePhone(req, res);
+    if (!auth) return;
+    const body = z
+      .object({
+        from: z.string().trim().min(3).max(40),
+        text: z.string().max(2000),
+        at: z.number().optional(),
+      })
+      .parse(req.body);
+    await withTenant(auth.tenantId, (tx) => tx.smsPhone.update({ where: { id: auth.phoneId }, data: { lastSeenAt: new Date() } }));
+    const r = await handleIncoming(auth.tenantId, body.from, body.text);
+    res.json({ ok: true, matched: r.matched });
   })
 );

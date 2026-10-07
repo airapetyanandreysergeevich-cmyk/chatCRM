@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { debtFields, debtList, debtMap } from "../../lib/debt";
-import { readyHint } from "../sms/sms.routes";
+import { approvalHint, readyHint } from "../sms/sms.routes";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { originalName } from "../../lib/uploadName";
@@ -162,10 +162,17 @@ ordersRouter.get(
         color: colorFilterField,
         /** Только с задолженностью: выданы, а оплачены не полностью. */
         debt: z.enum(["1", "0"]).optional(),
+        /**
+         * Несколько стадий сразу, через запятую: «WAITING,IN_PROGRESS». DEBT —
+         * задолженность. Заказ попадает в список, если подходит хоть под одну.
+         */
+        groups: z.string().max(120).optional(),
         /** Аутсорс: «1» — заказы всех клиентов-аутсорс, иначе id одного такого клиента. */
         outsource: z.union([z.literal("1"), z.string().uuid()]).optional(),
         /** Типы техники через запятую, как их отдаёт /summary/kinds (без регистра). */
         kind: z.string().max(600).optional(),
+        /** Все типы, кроме этих (через запятую): «Все» в окне и снятые лишние. */
+        kindNot: z.string().max(600).optional(),
         /** Исправлять раскладку: «yjen,er» → «ноутбук». Включается на устройстве. */
         layout: z.string().optional(),
         ...pageFields,
@@ -183,15 +190,31 @@ ordersRouter.get(
     // выглядела бы навигация, а не забытый фильтр.
     // «Задолженность»: долги считаются по кассе (lib/debt.ts), поэтому сначала
     // находим такие заказы, а дальше это обычный фильтр по номерам.
-    const kinds = [...new Set((q.kind ?? "").split(",").map((k) => k.trim().replace(/\s+/g, " ")).filter(Boolean))].slice(0, 20);
-    const owedAll = q.debt === "1" ? await withTenant(tenantOf(req), (tx) => debtList(tx, tenantOf(req))) : null;
+    const kindList = (raw?: string) =>
+      [...new Set((raw ?? "").split(",").map((k) => k.trim().replace(/\s+/g, " ")).filter(Boolean))].slice(0, 40);
+    const kinds = kindList(q.kind);
+    const kindsNot = kindList(q.kindNot);
+    const GROUPS = ["NEW", "IN_PROGRESS", "WAITING", "DONE", "CLOSED", "CANCELLED"] as const;
+    type Group = (typeof GROUPS)[number];
+    const asked = (q.groups ?? "").split(",").map((g) => g.trim().toUpperCase()).filter(Boolean);
+    const stageList: Group[] = [
+      ...new Set([...(q.group ? [q.group] : []), ...asked.filter((g): g is Group => (GROUPS as readonly string[]).includes(g))]),
+    ];
+    const wantDebt = q.debt === "1" || asked.includes("DEBT");
+    // Только «Задолженность» — у неё свой порядок и итог над списком.
+    const debtOnly = wantDebt && !stageList.length;
+    const owedAll = wantDebt ? await withTenant(tenantOf(req), (tx) => debtList(tx, tenantOf(req))) : null;
+    // Стадии и задолженность — «или»: «Ремонт» и «Задолженность» вместе дают и то, и другое.
+    const stageWhere: Prisma.OrderWhereInput[] = [
+      ...(stageList.length ? [{ status: { group: { in: stageList } } }] : []),
+      ...(owedAll ? [{ id: { in: [...owedAll.keys()] } }] : []),
+    ];
 
     const base = {
       deletedAt: null,
-      ...(owedAll ? { id: { in: [...owedAll.keys()] } } : {}),
+      ...(stageWhere.length ? { AND: [stageWhere.length === 1 ? stageWhere[0] : { OR: stageWhere }] } : {}),
       ...(onlyMine && me ? { assignedMasterId: me } : {}),
       ...(q.statusId ? { statusId: q.statusId } : {}),
-      ...(q.group ? { status: { group: q.group } } : {}),
       // Метка и аутсорс — оба условия на клиента, поэтому одним «customer».
       ...(q.color || q.outsource === "1"
         ? {
@@ -210,6 +233,10 @@ ordersRouter.get(
       // регистра, несколько типов — любой из них.
       ...(kinds.length
         ? { OR: kinds.map((k) => ({ device: { is: { kind: { equals: k, mode: "insensitive" as const } } } })) }
+        : {}),
+      // «Кроме»: заказы без техники или без типа остаются в списке.
+      ...(kindsNot.length
+        ? { NOT: kindsNot.map((k) => ({ device: { is: { kind: { equals: k, mode: "insensitive" as const } } } })) }
         : {}),
     } satisfies Prisma.OrderWhereInput;
 
@@ -231,13 +258,15 @@ ordersRouter.get(
       words = fixed.words;
       searchFixed = fixed.fixed;
     }
-    const where: Prisma.OrderWhereInput = words.length ? { ...base, AND: words.map(wordWhere) } : base;
+    const where: Prisma.OrderWhereInput = words.length
+      ? { ...base, AND: [...(("AND" in base && base.AND) || []), ...words.map(wordWhere)] }
+      : base;
 
     const [rows, total] = await withTenant(tenantOf(req), async (tx) => {
       const count = tx.order.count({ where });
 
       // Должники по умолчанию: сначала просрочившие обещанный срок, потом по сумме долга.
-      if (owedAll && sort === "default") {
+      if (owedAll && debtOnly && sort === "default") {
         const all = await tx.order.findMany({ where, select: { id: true }, take: MAX_SCAN });
         const now = Date.now();
         const ids = pageIds(all, (o) => {
@@ -251,7 +280,7 @@ ordersRouter.get(
       const byBase: Partial<Record<OrderSort, Prisma.OrderOrderByWithRelationInput[]>> = {
         // У выданных срочность уже ничего не значит: сверху — отданные последними.
         default:
-          q.group === "CLOSED"
+          stageList.length === 1 && stageList[0] === "CLOSED" && !wantDebt
             ? [{ issuedAt: { sort: "desc", nulls: "last" } }, { acceptedAt: "desc" }]
             : [{ isUrgent: "desc" }, { acceptedAt: "desc" }],
         new: [{ acceptedAt: "desc" }],
@@ -303,7 +332,7 @@ ordersRouter.get(
     const found = words.length ? await matchedMessages(tenantOf(req), rows, words) : new Map();
     // Итог над списком должников: сколько всего должны по найденному.
     let debtTotal: number | undefined;
-    if (owedAll && money) {
+    if (owedAll && debtOnly && money) {
       const matched = await withTenant(tenantOf(req), (tx) => tx.order.findMany({ where, select: { id: true }, take: MAX_SCAN }));
       debtTotal = Math.round(matched.reduce((sum, o) => sum + (owedAll.get(o.id)?.due ?? 0), 0) * 100) / 100;
     }
@@ -970,9 +999,12 @@ ordersRouter.post(
 
     // Стал «Готов к выдаче» — предложить SMS клиенту (или отправить, если так настроено).
     const sms = result?.becameReady ? await readyHint(req, req.params.id).catch(() => null) : null;
+    // Перевели «на согласование» — предложить спросить клиента по SMS (если включено).
+    const approval = result ? await approvalHint(req, req.params.id, statusId).catch(() => null) : null;
     res.json({
       ok: true,
       ...(sms ? { sms } : {}),
+      ...(approval ? { approval } : {}),
       // Готов, а диагноз не записан — не мешаем, но говорим: его не будет в истории техники.
       ...(result?.becameReady && result.noDiagnosis
         ? { warn: "Диагноз не заполнен — в истории техники и при гарантийном возврате не будет видно, что было не так" }

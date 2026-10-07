@@ -67,6 +67,7 @@ const view = async (m: {
   text: string;
   createdAt: Date;
   deletedAt: Date | null;
+  system: boolean;
   author: { id: string; fullName: string } | null;
   attachments: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; objectKey: string }>;
 }) => ({
@@ -74,6 +75,8 @@ const view = async (m: {
   text: m.deletedAt ? "" : m.text,
   createdAt: m.createdAt,
   deleted: !!m.deletedAt,
+  // Запись программы: «Клиент согласился по SMS». Показывается без автора.
+  system: m.system,
   author: m.author,
   attachments: m.deletedAt
     ? []
@@ -87,6 +90,7 @@ const messageSelect = {
   text: true,
   createdAt: true,
   deletedAt: true,
+  system: true,
   author: { select: { id: true, fullName: true } },
   attachments: {
     orderBy: { createdAt: "asc" as const },

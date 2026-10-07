@@ -31,7 +31,7 @@ import { ApiError } from "../lib/api";
 import { ensureOnIntake } from "../lib/orderFolder";
 import { useAuth } from "../lib/auth";
 import type { QuickPick, QuickPickField } from "../lib/quickPicks";
-import { plural } from "../lib/format";
+import { formatDate, plural } from "../lib/format";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
 import { masterLabel, ordersApi, type CustomerHit, type Reference } from "../lib/orders";
@@ -242,13 +242,22 @@ export default function OrderNew() {
    * снимается — обновление страницы не подставит второй раз.
    */
   const location = useLocation();
-  const repeatFrom = (location.state as { repeatFrom?: string } | null)?.repeatFrom ?? null;
+  const repeatState = location.state as { repeatFrom?: string; warranty?: boolean } | null;
+  const repeatFrom = repeatState?.repeatFrom ?? null;
+  // «Принять по гарантии» из выданного заказа: тот же клиент и техника, тип
+  // обращения «по гарантии», ссылка на прошлый заказ. Номер — новый, как всегда.
+  const [warrantyFrom] = useState(() => (repeatState?.warranty ? repeatFrom : null));
+  const [warranty, setWarranty] = useState<{ id: string; number: string; issuedAt: string | null; warrantyUntil: string | null } | null>(null);
   useEffect(() => {
     if (!repeatFrom) return;
     navigate(location.pathname, { replace: true, state: null });
     void (async () => {
       try {
         const o = await ordersApi.get(repeatFrom);
+        if (warrantyFrom === o.id) {
+          setWarranty({ id: o.id, number: o.number, issuedAt: o.issuedAt, warrantyUntil: o.warrantyUntil });
+          setForm((f) => ({ ...f, kind: "WARRANTY" }));
+        }
         const c = o.customer;
         if (c.name) {
           const hits = c.phone ? await ordersApi.suggestCustomers({ phone: c.phone }).catch(() => []) : [];
@@ -368,6 +377,8 @@ export default function OrderNew() {
         approvedLimit: num(form.approvedLimit),
         prepayment: num(form.prepayment) ?? 0,
         assignedMasterId: form.assignedMasterId || undefined,
+        // По гарантии — со ссылкой на прошлый ремонт: в карточке будет видно, что тогда делали.
+        ...(warranty && form.kind === "WARRANTY" ? { parentOrderId: warranty.id } : {}),
       });
       // Папка заказа на компьютере — сразу, если так настроено; приём её не ждёт.
       void ensureOnIntake({ number: created.number, device, customer: { name: customer.name } });
@@ -391,7 +402,7 @@ export default function OrderNew() {
     <form onSubmit={submit} className="space-y-5">
       <PageHeader
         eyebrow="Мастерская"
-        title="Приём техники"
+        title={warranty && form.kind === "WARRANTY" ? "Приём по гарантии" : "Приём техники"}
         subtitle="Всё, что зафиксировано здесь, потом решает споры: комплектность, дефекты и слова клиента."
         actions={
           <>
@@ -406,6 +417,28 @@ export default function OrderNew() {
       />
 
       {error && <Banner tone="error">{error.message}</Banner>}
+      {warranty && form.kind === "WARRANTY" && (
+        <div data-warranty className="flex flex-wrap items-center justify-between gap-2 rounded-panel border border-state-waiting/40 bg-state-waiting/10 px-4 py-3 text-[14px]">
+          <span>
+            <span className="font-semibold">По гарантии</span> к заказу{" "}
+            <button type="button" onClick={() => setPeek(warranty.id)} className="font-mono font-semibold text-brand-ink hover:underline">
+              {warranty.number}
+            </button>
+            {warranty.issuedAt ? `, выдан ${formatDate(warranty.issuedAt)}` : ""}
+            {warranty.warrantyUntil ? (
+              new Date(warranty.warrantyUntil).getTime() < Date.now() ? (
+                <span className="font-semibold text-state-off"> · гарантия закончилась {formatDate(warranty.warrantyUntil)}</span>
+              ) : (
+                <span className="text-ink-muted"> · гарантия до {formatDate(warranty.warrantyUntil)}</span>
+              )
+            ) : null}
+            . Новый заказ получит свой номер, квитанция — «Акт приема оборудования в ремонт по гарантии».
+          </span>
+          <button type="button" onClick={() => setForm((f) => ({ ...f, kind: "REPAIR" }))} className="text-[12.5px] font-semibold text-brand-ink hover:underline">
+            принять как обычный ремонт
+          </button>
+        </div>
+      )}
       {stuck && (
         <Banner tone="error">
           Заказ принят, но {stuck.files.length === 1 ? "один снимок не загрузился" : `не загрузились снимки: ${stuck.files.length}`}{" "}

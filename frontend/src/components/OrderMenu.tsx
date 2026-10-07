@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { masterLabel, ordersApi, type Order, type OrderStatus, type Reference, type StatusGroup } from "../lib/orders";
-import { smsApi, type ReadyHint } from "../lib/sms";
+import { smsApi, type ApprovalHint, type ReadyHint, type SmsKind } from "../lib/sms";
 import type { BoardCard } from "../lib/workshop";
 import { copyText } from "./CopyMenu";
 import {
@@ -21,6 +21,7 @@ import {
   IconSms,
   IconStatusProgress,
   IconUrgent,
+  IconWarranty,
 } from "./icons";
 import { IssueDialog } from "./IssueDialog";
 import { LabelDialog } from "./LabelDialog";
@@ -86,7 +87,7 @@ type Dialog =
   | { kind: "print"; o: MenuOrder; doc: "intake" | "act" }
   | { kind: "labels"; order: Order }
   | { kind: "edit"; order: Order }
-  | { kind: "sms"; o: MenuOrder; sms: "free" | "ready" }
+  | { kind: "sms"; o: MenuOrder; sms: SmsKind }
   | { kind: "photo"; o: MenuOrder }
   | { kind: "issue"; o: MenuOrder }
   | { kind: "delete"; o: MenuOrder };
@@ -147,11 +148,14 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
     async (o: MenuOrder, to: OrderStatus, opts: { note?: (reloaded: unknown) => string | null } = {}) => {
       if (to.id === o.status.id) return;
       try {
-        const res = (await ordersApi.setStatus(o.id, to.id)) as { sms?: ReadyHint; warn?: string } | undefined;
+        const res = (await ordersApi.setStatus(o.id, to.id)) as { sms?: ReadyHint; approval?: ApprovalHint; warn?: string } | undefined;
         const reloaded = await changed.current();
         const sms = res?.sms;
+        const approval = res?.approval;
         const extra = [
           sms && "auto" in sms ? "SMS клиенту отправляется" : null,
+          approval && "auto" in approval ? "клиенту ушло согласование по SMS" : null,
+          approval && "failed" in approval ? `согласование не отправлено: ${approval.failed}` : null,
           // «Готов» без диагноза: не мешаем, но говорим.
           res?.warn ? "диагноз не заполнен" : null,
           opts.note?.(reloaded) ?? null,
@@ -171,6 +175,7 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
           },
         });
         if (sms && "offer" in sms) setDialog({ kind: "sms", o: { ...o, status: to }, sms: "ready" });
+        if (approval && "offer" in approval) setDialog({ kind: "sms", o: { ...o, status: to }, sms: "approval" });
       } catch (err) {
         await changed.current();
         fail(err, "Не удалось сменить статус");
@@ -288,7 +293,12 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
         <OrderEditModal order={dialog.order} reference={ref} onClose={() => setDialog(null)} onSaved={() => done(`${dialog.order.number} — изменения сохранены`)} />
       )}
       {dialog.kind === "sms" && (
-        <SmsModal orderId={dialog.o.id} kind={dialog.sms} onClose={() => setDialog(null)} onSent={() => done(`${dialog.o.number} — SMS клиенту отправлена`)} />
+        <SmsModal
+          orderId={dialog.o.id}
+          kind={dialog.sms}
+          onClose={() => setDialog(null)}
+          onSent={() => done(dialog.sms === "approval" ? `${dialog.o.number} — клиенту ушёл вопрос, ответ придёт в заказ` : `${dialog.o.number} — SMS клиенту отправлена`)}
+        />
       )}
       {dialog.kind === "photo" && (
         <PhotoShooter
@@ -342,6 +352,10 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
                 return setDialog({ kind: "print", o, doc: a.doc });
               case "sms":
                 return setDialog({ kind: "sms", o, sms: "free" });
+              case "approve":
+                return setDialog({ kind: "sms", o, sms: "approval" });
+              case "warranty":
+                return navigate("/orders/new", { state: { repeatFrom: o.id, warranty: true } });
               case "labels":
                 return void withOrder(o.id, (order) => setDialog({ kind: "labels", order }));
               case "edit":
@@ -417,7 +431,7 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
 // ---------------------------------------------------------------- само меню
 
 type Action =
-  | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "photo" | "issue" | "delete" | "urgent" | "copy" | "repeat" | "folder" }
+  | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "approve" | "photo" | "issue" | "delete" | "urgent" | "copy" | "repeat" | "warranty" | "folder" }
   | { kind: "print"; doc: "intake" | "act" }
   | { kind: "status"; status: OrderStatus }
   | { kind: "master"; masterId: string | null; name: string };
@@ -448,15 +462,20 @@ function OrderMenu({
   const [view, setView] = useState<"main" | "status" | "master">("main");
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: at.x, top: at.y, ready: at.sheet });
-  const [sms, setSms] = useState<boolean | null>(null);
+  const [sms, setSms] = useState<{ send: boolean; ask: boolean } | null>(null);
 
   // SMS — только если подключены, есть право и телефон: спрашиваем сервер при открытии.
+  // «Согласовать по SMS» — ещё и если согласование включено, а заказ в «Согласовании».
   useEffect(() => {
     let live = true;
     smsApi
       .order(o.id)
-      .then((d) => live && setSms(d.enabled && d.canSend && d.hasPhone))
-      .catch(() => live && setSms(false));
+      .then((d) => {
+        const send = d.enabled && d.canSend && d.hasPhone;
+        const waiting = d.approval.last?.status === "PENDING" || d.approval.last?.status === "UNCLEAR";
+        if (live) setSms({ send, ask: send && d.approval.canAsk && !waiting });
+      })
+      .catch(() => live && setSms({ send: false, ask: false }));
     return () => {
       live = false;
     };
@@ -625,7 +644,12 @@ function OrderMenu({
             Акт работ…
           </MenuItem>
         )}
-        {sms && (
+        {sms?.ask && (
+          <MenuItem big={big} icon={<IconSms className={ico} />} onClick={() => act({ kind: "approve" })}>
+            Согласовать по SMS…
+          </MenuItem>
+        )}
+        {sms?.send && (
           <MenuItem big={big} icon={<IconSms className={ico} />} onClick={() => act({ kind: "sms" })}>
             SMS клиенту…
           </MenuItem>
@@ -655,6 +679,11 @@ function OrderMenu({
         {perms.issue && (
           <MenuItem big={big} icon={<IconOrders className={ico} />} onClick={() => act({ kind: "issue" })}>
             Выдать клиенту…
+          </MenuItem>
+        )}
+        {perms.repeat && o.issued && (
+          <MenuItem big={big} icon={<IconWarranty className={ico} />} onClick={() => act({ kind: "warranty" })}>
+            Принять по гарантии…
           </MenuItem>
         )}
         {perms.repeat && (

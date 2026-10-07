@@ -3,26 +3,28 @@ import { Link } from "react-router-dom";
 import qrcode from "qrcode-generator";
 import { Modal } from "../components/Modal";
 import { Panel } from "../components/Panel";
-import { Banner, Button, Field, Input, PageHeader, Spinner, Textarea } from "../components/ui";
+import { Banner, Button, Field, Input, PageHeader, Select, Spinner, Textarea } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { BASE } from "../lib/basePath";
 import { formatDateTime } from "../lib/format";
 import {
   SMS_APP_URL,
+  forgetSmsStatus,
   smsApi,
   smsCounter,
-  type GatewayDevice,
+  type ApprovalConfig,
   type OnReady,
   type PairCode,
-  type Provider,
   type SmsPhone,
   type SmsSettings,
+  type TemplateKey,
 } from "../lib/sms";
+import { ordersApi, type OrderStatus } from "../lib/orders";
 
 /**
  * «Настройки → Интеграции»: внешние сервисы мастерской. Пока одна панель —
- * SMS клиентам: со своего телефона (приложение «FineCRM SMS») или через
- * SemySMS. Выключили SMS — панель сворачивается в строку.
+ * SMS клиентам со своего телефона (приложение «FineCRM SMS») и согласование
+ * по SMS. Выключили SMS — панель сворачивается в строку.
  */
 
 const ON_READY: Array<{ id: OnReady; label: string; hint: string }> = [
@@ -31,13 +33,10 @@ const ON_READY: Array<{ id: OnReady; label: string; hint: string }> = [
   { id: "off", label: "Не предлагать", hint: "только кнопкой «SMS» в заказе" },
 ];
 
-const PROVIDERS: Array<{ id: Provider; label: string; hint: string }> = [
-  {
-    id: "phone",
-    label: "Свой телефон",
-    hint: "Android с приложением FineCRM SMS. Без сторонних сервисов, платите только оператору за SIM-карту",
-  },
-  { id: "semysms", label: "SemySMS", hint: "Их приложение на телефоне и их сервис — нужен токен из личного кабинета" },
+const ON_WAITING: Array<{ id: OnReady; label: string; hint: string }> = [
+  { id: "ask", label: "Спрашивать", hint: "окно с готовым вопросом клиенту, можно поправить" },
+  { id: "auto", label: "Отправлять сразу", hint: "вопрос уходит клиенту сам" },
+  { id: "off", label: "Не предлагать", hint: "только из меню заказа и карточки" },
 ];
 
 export function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
@@ -95,14 +94,10 @@ const box = (on: boolean) =>
 function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSettings) => void }) {
   const [enabled, setEnabled] = useState(saved.enabled);
   const [expanded, setExpanded] = useState(saved.enabled);
-  const [provider, setProvider] = useState<Provider>(saved.provider);
-  const [replacing, setReplacing] = useState(!saved.hasToken);
-  const [token, setToken] = useState("");
-  const [device, setDevice] = useState(saved.device);
-  const [deviceName, setDeviceName] = useState<string | null>(saved.deviceName);
   const [onReady, setOnReady] = useState<OnReady>(saved.onReady);
-  const [ready, setReady] = useState(saved.templates.ready);
-  const [devices, setDevices] = useState<GatewayDevice[] | null>(null);
+  const [templates, setTemplates] = useState<Record<TemplateKey, string>>(saved.templates);
+  const [approval, setApproval] = useState<ApprovalConfig>(saved.approval);
+  const [statuses, setStatuses] = useState<OrderStatus[]>([]);
   const [phones, setPhones] = useState<SmsPhone[] | null>(null);
   const [pairing, setPairing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -133,45 +128,44 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
     const t = setInterval(() => void loadPhones(), 20_000);
     return () => clearInterval(t);
   }, [loadPhones]);
+  useEffect(() => {
+    ordersApi
+      .reference()
+      .then((r) => setStatuses(r.statuses))
+      .catch(() => setStatuses([]));
+  }, []);
 
-  const body = (over: Partial<{ enabled: boolean }> = {}) => ({
+  const body = (over: Partial<{ enabled: boolean; approval: ApprovalConfig }> = {}) => ({
     enabled,
-    provider,
-    ...(replacing && token.trim() ? { token: token.trim() } : {}),
-    device,
-    deviceName,
     onReady,
-    templates: { ready },
+    templates,
+    approval,
     ...over,
   });
 
-  const persist = async (over: Partial<{ enabled: boolean }> = {}) => {
+  const persist = async (over: Partial<{ enabled: boolean; approval: ApprovalConfig }> = {}) => {
     const next = await smsApi.save(body(over));
     onSaved(next);
     setEnabled(next.enabled);
-    setToken("");
-    setReplacing(!next.hasToken);
+    setApproval(next.approval);
+    // Меню заказов спросит заново: «Согласовать по SMS» появляется и пропадает с настройкой.
+    forgetSmsStatus();
     return next;
   };
 
   /** Выключатель сохраняет сразу: выключили — панель сворачивается в строку. */
   const flip = (on: boolean) =>
     act("switch", async () => {
-      if (!on) {
-        await persist({ enabled: false });
-        setExpanded(false);
-        say("SMS выключены");
-        return;
-      }
-      setExpanded(true);
-      // SemySMS без токена включить нельзя — сначала токен, потом «Сохранить».
-      if (provider === "semysms" && !saved.hasToken && !token.trim()) {
-        setEnabled(true);
-        setError("Вставьте токен SemySMS и нажмите «Сохранить»");
-        return;
-      }
-      await persist({ enabled: true });
-      say("SMS включены");
+      await persist({ enabled: on });
+      setExpanded(on);
+      say(on ? "SMS включены" : "SMS выключены");
+    });
+
+  /** Выключатель согласования — тоже сразу, как и главный. */
+  const flipApproval = (on: boolean) =>
+    act("approval", async () => {
+      await persist({ approval: { ...approval, enabled: on } });
+      say(on ? "Согласование по SMS включено" : "Согласование по SMS выключено");
     });
 
   const save = () =>
@@ -180,38 +174,33 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
       say(next.enabled ? "Сохранено" : "Сохранено. SMS пока выключены");
     });
 
-  const loadDevices = () =>
-    act("devices", async () => {
-      const r = await smsApi.devices(replacing && token.trim() ? token.trim() : undefined);
-      setDevices(r.devices);
-      if (!r.devices.length) setError("В SemySMS нет ни одного телефона — установите их приложение и добавьте телефон в личном кабинете");
-    });
-
   const test = () =>
     act("test", async () => {
       const r = await smsApi.test(testPhone);
       if (r.status === "FAILED") setError(r.error ?? "SMS не отправлена");
-      else say(provider === "phone" ? "Тестовая SMS ушла телефону-шлюзу — придёт через несколько секунд" : "Тестовая SMS передана SemySMS — придёт через несколько секунд");
+      else say("Тестовая SMS ушла телефону-шлюзу — придёт через несколько секунд");
     });
 
+  const setTemplate = (k: TemplateKey) => (v: string) => setTemplates((t) => ({ ...t, [k]: v }));
   const dirty =
-    provider !== saved.provider ||
-    (replacing && !!token.trim()) ||
-    device !== saved.device ||
     onReady !== saved.onReady ||
-    ready !== saved.templates.ready ||
-    enabled !== saved.enabled;
+    enabled !== saved.enabled ||
+    (Object.keys(templates) as TemplateKey[]).some((k) => templates[k] !== saved.templates[k]) ||
+    JSON.stringify(approval) !== JSON.stringify(saved.approval);
 
   const online = phones?.filter((p) => p.online).length ?? 0;
   const summary = !saved.enabled
     ? "Выключено"
-    : saved.provider === "phone"
-      ? phones === null
+    : (phones === null
         ? "Свой телефон"
         : phones.length === 0
-          ? "Свой телефон · ни один не подключён"
-          : `Свой телефон · на связи ${online} из ${phones.length}`
-      : `SemySMS · ${saved.deviceName ?? "любой включённый телефон"}`;
+          ? "Ни один телефон не подключён"
+          : `Телефонов на связи: ${online} из ${phones.length}`) + (saved.approval.enabled ? " · согласование по SMS" : "");
+
+  const waiting = statuses.filter((x) => x.group === "WAITING");
+  const working = statuses.filter((x) => x.group === "IN_PROGRESS" || x.group === "NEW");
+  const autoWaiting = waiting.find((x) => /соглас/i.test(x.name)) ?? waiting[0];
+  const autoYes = statuses.find((x) => x.group === "IN_PROGRESS");
 
   return (
     <Panel
@@ -226,81 +215,14 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
         {notice && <Banner>{notice}</Banner>}
         {error && <Banner tone="error">{error}</Banner>}
 
-        <div>
-          <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Чем отправлять</span>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {PROVIDERS.map((p) => (
-              <button key={p.id} type="button" aria-pressed={provider === p.id} onClick={() => setProvider(p.id)} className={box(provider === p.id)}>
-                <span className={"block text-[14.5px] font-semibold " + (provider === p.id ? "text-brand-ink" : "")}>{p.label}</span>
-                <span className="mt-0.5 block text-[12.5px] text-ink-dim">{p.hint}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <p className="text-[13px] text-ink-dim">
+          SMS уходят с вашего телефона на Android с приложением FineCRM SMS — без сторонних сервисов, платите только
+          оператору за SIM-карту.
+        </p>
 
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="space-y-4">
-            {provider === "phone" ? (
-              <PhonesBlock phones={phones} onPair={() => setPairing(true)} onChanged={() => void loadPhones()} />
-            ) : (
-              <>
-                <Field label="Токен API SemySMS" hint={replacing ? "Личный кабинет semysms.net → API" : "После сохранения токен не показывается целиком"}>
-                  {replacing ? (
-                    <Input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="например, 7c1d…e04f" />
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span className="flex min-h-[46px] flex-1 items-center rounded-field border border-line bg-surface-input px-3.5 font-mono text-[14.5px]">
-                        {saved.tokenHint}
-                      </span>
-                      <Button type="button" variant="secondary" onClick={() => setReplacing(true)}>
-                        Заменить
-                      </Button>
-                    </div>
-                  )}
-                </Field>
-                <div>
-                  <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Телефон в SemySMS</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="min-w-0 flex-1 text-[14px]">
-                      {device === "active" ? "Любой включённый телефон" : (deviceName ?? `Телефон ${device}`)}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={busy === "devices" || (!saved.hasToken && !token.trim())}
-                      onClick={() => void loadDevices()}
-                    >
-                      {busy === "devices" ? "Проверяем…" : "Проверить подключение"}
-                    </Button>
-                  </div>
-                  {devices && devices.length > 0 && (
-                    <div className="mt-2.5 space-y-1.5">
-                      {[{ id: "active", name: "Любой включённый", online: true, battery: null, lastActive: null } as GatewayDevice, ...devices].map((d) => (
-                        <button
-                          key={d.id}
-                          type="button"
-                          aria-pressed={device === d.id}
-                          onClick={() => {
-                            setDevice(d.id);
-                            setDeviceName(d.id === "active" ? null : d.name);
-                          }}
-                          className={"flex w-full items-center gap-3 " + box(device === d.id)}
-                        >
-                          <span className={"h-2 w-2 shrink-0 rounded-full " + (d.online ? "bg-state-done" : "bg-ink-dim")} />
-                          <span className="min-w-0 flex-1 text-[14px] font-semibold">{d.name}</span>
-                          {d.id !== "active" && (
-                            <span className="text-[12.5px] text-ink-dim">
-                              {d.online ? "на связи" : "не на связи"}
-                              {d.battery !== null ? ` · батарея ${d.battery}%` : ""}
-                            </span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+            <PhonesBlock phones={phones} onPair={() => setPairing(true)} onChanged={() => void loadPhones()} />
 
             <div>
               <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Когда заказ готов к выдаче</span>
@@ -316,26 +238,13 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
           </div>
 
           <div className="space-y-4">
-            <Field label="Текст «Готов к выдаче»" hint={smsCounter(ready)}>
-              <Textarea value={ready} maxLength={1000} onChange={(e) => setReady(e.target.value)} />
-            </Field>
-            <div className="-mt-2 flex flex-wrap items-center gap-1.5">
-              {saved.placeholders.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setReady((t) => (t.endsWith(" ") || !t ? t : t + " ") + p)}
-                  className="rounded-pill border border-line bg-surface-raised px-2.5 py-1 font-mono text-[12px] text-ink-muted hover:text-ink"
-                >
-                  {p}
-                </button>
-              ))}
-              {ready !== saved.defaults.ready && (
-                <button type="button" onClick={() => setReady(saved.defaults.ready)} className="px-2 text-[12.5px] font-semibold text-brand hover:text-brand-ink">
-                  Вернуть стандартный
-                </button>
-              )}
-            </div>
+            <TemplateField
+              label="Текст «Готов к выдаче»"
+              value={templates.ready}
+              fallback={saved.defaults.ready}
+              placeholders={saved.placeholders.filter((p) => p !== "{стоимость}" && p !== "{работы}")}
+              onChange={setTemplate("ready")}
+            />
             <p className="text-[12.5px] text-ink-dim">
               Подставится: {"{клиент}"} — имя клиента, {"{техника}"} — «ноутбук Lenovo G580», {"{номер}"} — номер заказа,{" "}
               {"{сумма}"} — сколько осталось заплатить, {"{мастерская}"} — название с бланков. Одна SMS на русском — 70
@@ -361,6 +270,107 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
           </div>
         </div>
 
+        <section className="rounded-panel border border-line p-4" aria-label="Согласование по SMS">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-[15px] font-bold">Согласование по SMS</h3>
+              <p className="mt-0.5 max-w-[640px] text-[12.5px] text-ink-dim">
+                Клиент получает вопрос с ценой и отвечает на SMS «да» или «нет». Ответ приходит в заказ: «да» — заказ сам
+                переходит дальше, «нет» — остаётся с пометкой, непонятный ответ — решаете вы. Нужно приложение FineCRM SMS
+                1.2 или новее с разрешением читать SMS: оно пересылает только ответы клиентов, которых спросили.
+              </p>
+            </div>
+            <Switch on={approval.enabled} onChange={(v) => void flipApproval(v)} label="Согласование по SMS" disabled={busy === "approval" || !enabled} />
+          </div>
+
+          {approval.enabled && (
+            <div className="mt-4 grid gap-5 lg:grid-cols-2">
+              <div className="space-y-4">
+                <div>
+                  <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Когда заказ переводят на согласование</span>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {ON_WAITING.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        aria-pressed={approval.onWaiting === m.id}
+                        onClick={() => setApproval((a) => ({ ...a, onWaiting: m.id }))}
+                        className={box(approval.onWaiting === m.id)}
+                      >
+                        <span className={"block text-[14px] font-semibold " + (approval.onWaiting === m.id ? "text-brand-ink" : "")}>{m.label}</span>
+                        <span className="mt-0.5 block text-[12px] text-ink-dim">{m.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Статус «на согласовании»" hint="В него переводят перед вопросом клиенту">
+                    <Select
+                      aria-label="Статус на согласовании"
+                      value={approval.statusId ?? ""}
+                      onChange={(e) => setApproval((a) => ({ ...a, statusId: e.target.value || null }))}
+                    >
+                      <option value="">{autoWaiting ? `Сам: ${autoWaiting.name}` : "Сам"}</option>
+                      {waiting.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Если клиент согласен" hint="В этот статус заказ перейдёт сам">
+                    <Select
+                      aria-label="Статус при согласии"
+                      value={approval.yesStatusId ?? ""}
+                      onChange={(e) => setApproval((a) => ({ ...a, yesStatusId: e.target.value || null }))}
+                    >
+                      <option value="">{autoYes ? `Сам: ${autoYes.name}` : "Сам"}</option>
+                      {working.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <TemplateField
+                  label="Вопрос клиенту"
+                  value={templates.approval}
+                  fallback={saved.defaults.approval}
+                  placeholders={saved.placeholders}
+                  onChange={setTemplate("approval")}
+                />
+                <p className="-mt-2 text-[12.5px] text-ink-dim">
+                  {"{работы}"} — работы и запчасти из заказа через запятую, {"{стоимость}"} — их сумма (пока их нет —
+                  предварительная оценка с приёма).
+                </p>
+                <ReplyField
+                  label="Ответ, если согласен"
+                  on={approval.replyYes}
+                  onToggle={(v) => setApproval((a) => ({ ...a, replyYes: v }))}
+                  value={templates.approvalYes}
+                  fallback={saved.defaults.approvalYes}
+                  onChange={setTemplate("approvalYes")}
+                />
+                <ReplyField
+                  label="Ответ, если отказался"
+                  on={approval.replyNo}
+                  onToggle={(v) => setApproval((a) => ({ ...a, replyNo: v }))}
+                  value={templates.approvalNo}
+                  fallback={saved.defaults.approvalNo}
+                  onChange={setTemplate("approvalNo")}
+                />
+                <p className="text-[12.5px] text-ink-dim">
+                  Согласием считаются «да», «ок», «согласен», «+», «1» и похожие; отказом — «нет», «не надо», «−», «0». Ответ с
+                  вопросом («да, а сколько по времени?») решаете вы. Ответа ждём 3 дня.
+                </p>
+              </div>
+            </div>
+          )}
+        </section>
+
         <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row-reverse">
           <Button type="button" disabled={busy === "save" || !dirty} onClick={() => void save()} className="sm:min-w-[200px]">
             {busy === "save" ? "Сохраняем…" : dirty ? "Сохранить" : "Всё сохранено"}
@@ -380,6 +390,85 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
         />
       )}
     </Panel>
+  );
+}
+
+function TemplateField({
+  label,
+  value,
+  fallback,
+  placeholders,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  fallback: string;
+  placeholders: string[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <Field label={label} hint={smsCounter(value)}>
+        <Textarea value={value} maxLength={1000} onChange={(e) => onChange(e.target.value)} />
+      </Field>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {placeholders.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange((value.endsWith(" ") || !value ? value : value + " ") + p)}
+            className="rounded-pill border border-line bg-surface-raised px-2.5 py-1 font-mono text-[12px] text-ink-muted hover:text-ink"
+          >
+            {p}
+          </button>
+        ))}
+        {value !== fallback && (
+          <button type="button" onClick={() => onChange(fallback)} className="px-2 text-[12.5px] font-semibold text-brand hover:text-brand-ink">
+            Вернуть стандартный
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReplyField({
+  label,
+  on,
+  onToggle,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  on: boolean;
+  onToggle: (v: boolean) => void;
+  value: string;
+  fallback: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <span className="text-[13px] font-semibold text-ink-soft">{label}</span>
+        <Switch on={on} onChange={onToggle} label={label} />
+      </div>
+      {on ? (
+        <>
+          <Textarea aria-label={label} value={value} maxLength={1000} onChange={(e) => onChange(e.target.value)} />
+          <p className="mt-1 flex flex-wrap gap-x-3 text-[12px] text-ink-dim">
+            <span>{smsCounter(value)}</span>
+            {value !== fallback && (
+              <button type="button" onClick={() => onChange(fallback)} className="font-semibold text-brand hover:text-brand-ink">
+                Вернуть стандартный
+              </button>
+            )}
+          </p>
+        </>
+      ) : (
+        <p className="text-[12.5px] text-ink-dim">Не отвечать.</p>
+      )}
+    </div>
   );
 }
 

@@ -33,6 +33,7 @@ const ORDER: readonly string[] = [
   "auditLog",
   "feedback",
   // SMS и подключения: ни на что, кроме мастерской, не ссылаются
+  "smsApproval",
   "smsMessage",
   "smsPhone",
   "integration",

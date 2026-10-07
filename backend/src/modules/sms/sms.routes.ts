@@ -4,7 +4,6 @@ import { withTenant } from "../../lib/db";
 import { badRequest, conflict, forbidden, notFound, ah } from "../../lib/errors";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { PERMISSIONS } from "../../lib/permissions";
-import * as gateway from "../../lib/semysms";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { assertOrderAccess, seesCustomerContacts } from "../orders/orders.service";
@@ -19,23 +18,24 @@ import {
   KIND,
   ON_READY,
   PLACEHOLDERS,
-  PROVIDERS,
+  approvalOn,
   loadSettings,
   maskPhone,
+  normalizePhone,
   orderFacts,
   ready,
   refreshStatuses,
   render,
   sendSms,
   templateOf,
-  tokenHint,
   type SmsSettings,
+  type TemplateKey,
 } from "./sms";
+import { approvalStatuses, cancelApproval, decideApproval, lastApproval, startApproval } from "./sms.approval";
 
 /**
  * «Настройки → Интеграции → SMS» и SMS клиенту из заказа.
  *
- * Ключ SemySMS в интерфейс не возвращается никогда — только «•••• 4f2a».
  * Менять подключение может тот, у кого право «Настройки мастерской».
  * Отправлять — тот, кто работает с заказом: меняет статус, правит, выдаёт.
  * Номер клиента сотруднику без доступа к контактам показывается маской.
@@ -63,16 +63,14 @@ const manage = (req: Request) => {
 
 const TEXT_MAX = 1000;
 
+const TEMPLATE_KEYS = Object.keys(DEFAULT_TEMPLATES) as TemplateKey[];
+
 function settingsView(s: SmsSettings) {
   return {
     enabled: s.enabled,
-    provider: s.provider,
-    hasToken: !!s.token,
-    tokenHint: tokenHint(s.token),
-    device: s.device,
-    deviceName: s.deviceName,
     onReady: s.onReady,
-    templates: { ready: templateOf(s, "ready") },
+    templates: Object.fromEntries(TEMPLATE_KEYS.map((k) => [k, templateOf(s, k)])) as Record<TemplateKey, string>,
+    approval: s.approval,
     defaults: DEFAULT_TEMPLATES,
     placeholders: PLACEHOLDERS,
   };
@@ -91,13 +89,25 @@ smsRouter.get(
 
 const settingsSchema = z.object({
   enabled: z.boolean(),
-  provider: z.enum(PROVIDERS).default("phone"),
-  /** Новый ключ. Не прислан — остаётся прежний. */
-  token: z.string().trim().max(200).optional(),
-  device: z.string().trim().min(1).max(100).default("active"),
-  deviceName: z.string().trim().max(200).nullable().optional(),
   onReady: z.enum(ON_READY).default("ask"),
-  templates: z.object({ ready: z.string().max(TEXT_MAX).optional() }).default({}),
+  templates: z
+    .object({
+      ready: z.string().max(TEXT_MAX).optional(),
+      approval: z.string().max(TEXT_MAX).optional(),
+      approvalYes: z.string().max(TEXT_MAX).optional(),
+      approvalNo: z.string().max(TEXT_MAX).optional(),
+    })
+    .default({}),
+  approval: z
+    .object({
+      enabled: z.boolean().default(false),
+      onWaiting: z.enum(ON_READY).default("ask"),
+      statusId: z.string().uuid().nullable().default(null),
+      yesStatusId: z.string().uuid().nullable().default(null),
+      replyYes: z.boolean().default(true),
+      replyNo: z.boolean().default(true),
+    })
+    .optional(),
 });
 
 smsRouter.put(
@@ -108,52 +118,40 @@ smsRouter.put(
     const tenantId = tenantOf(req);
     const saved = await withTenant(tenantId, async (tx) => {
       const before = await tx.integration.findFirst({ where: { kind: KIND } });
-      const secret = body.token ? body.token : (before?.secret ?? null);
-      if (body.enabled && body.provider === "semysms" && !secret) {
-        throw badRequest("Укажите токен API из личного кабинета SemySMS");
-      }
-      const ready = body.templates.ready?.trim();
-      const config = {
-        provider: body.provider,
-        device: body.device,
-        deviceName: body.device === "active" ? null : (body.deviceName ?? null),
-        onReady: body.onReady,
-        templates: { ready: ready && ready !== DEFAULT_TEMPLATES.ready ? ready : null },
+      const prev = await loadSettings(tx);
+      // Шаблон, совпавший со стандартным, не храним: поменяем стандартный — поменяется и у мастерской.
+      const keep = (k: TemplateKey) => {
+        const v = body.templates[k]?.trim();
+        if (v === undefined) return prev.templates[k];
+        return v && v !== DEFAULT_TEMPLATES[k] ? v : null;
       };
+      const approval = body.approval ?? prev.approval;
+      if (approval.statusId || approval.yesStatusId) {
+        const ids = [approval.statusId, approval.yesStatusId].filter((v): v is string => !!v);
+        const found = await tx.orderStatus.count({ where: { id: { in: ids } } });
+        if (found !== new Set(ids).size) throw badRequest("Такого статуса нет — выберите из списка");
+      }
+      const config = {
+        onReady: body.onReady,
+        templates: Object.fromEntries(TEMPLATE_KEYS.map((k) => [k, keep(k)])),
+        approval,
+      };
+      // Токен SemySMS больше не нужен — не держим его в базе.
       const row = before
-        ? await tx.integration.update({ where: { id: before.id }, data: { enabled: body.enabled, secret, config } })
-        : await tx.integration.create({ data: { tenantId, kind: KIND, enabled: body.enabled, secret, config } });
+        ? await tx.integration.update({ where: { id: before.id }, data: { enabled: body.enabled, secret: null, config } })
+        : await tx.integration.create({ data: { tenantId, kind: KIND, enabled: body.enabled, secret: null, config } });
       await writeAudit(tx, {
         tenantId,
         userId: actorUserId(req),
         entity: "Integration",
         entityId: row.id,
         action: "UPDATE",
-        // Ключ в журнал не пишем — только факт замены.
-        diff: { kind: KIND, enabled: body.enabled, provider: body.provider, tokenChanged: !!body.token, device: body.device, onReady: body.onReady },
+        diff: { kind: KIND, enabled: body.enabled, onReady: body.onReady, approval: approval.enabled },
         ip: clientIp(req),
       });
       return loadSettings(tx);
     });
     res.json(settingsView(saved));
-  })
-);
-
-/** Телефоны-шлюзы: по новому ключу (ещё не сохранён) или по сохранённому. */
-smsRouter.post(
-  "/devices",
-  ah(async (req, res) => {
-    manage(req);
-    const { token } = z.object({ token: z.string().trim().max(200).optional() }).parse(req.body ?? {});
-    const s = await withTenant(tenantOf(req), (tx) => loadSettings(tx));
-    const key = token || s.token;
-    if (!key) throw badRequest("Сначала укажите токен API");
-    try {
-      res.json({ devices: await gateway.devices(key) });
-    } catch (err) {
-      if (err instanceof gateway.SmsGatewayError) throw conflict(err.message);
-      throw err;
-    }
   })
 );
 
@@ -164,13 +162,13 @@ smsRouter.post(
     manage(req);
     const { phone } = z.object({ phone: z.string().trim().min(5).max(30) }).parse(req.body);
     const tenantId = tenantOf(req);
-    const to = gateway.gatewayPhone(phone);
+    const to = normalizePhone(phone);
     if (!to) throw badRequest("Номер не похож на телефон — например, +7 921 123-45-67");
     const s = await withTenant(tenantId, (tx) => loadSettings(tx));
-    if (s.provider === "semysms" && !s.token) throw badRequest("Сначала сохраните токен API");
     const tenant = await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }));
     const text = `Проверка SMS из FineCRM: всё работает. ${tenant?.name ?? ""}`.trim();
-    const row = await sendSms(tenantId, s, { phone: to, text, kind: "test", userId: actorUserId(req) });
+    if (!s.enabled) throw badRequest("Сначала включите SMS и сохраните");
+    const row = await sendSms(tenantId, { phone: to, text, kind: "test", userId: actorUserId(req) });
     res.json({ id: row.id, status: row.status, error: row.error });
   })
 );
@@ -232,8 +230,17 @@ smsRouter.delete(
 smsRouter.get(
   "/status",
   ah(async (req, res) => {
-    const s = await withTenant(tenantOf(req), (tx) => loadSettings(tx));
-    res.json({ enabled: ready(s), onReady: s.onReady, canSend: ready(s) && canSendSms(req) });
+    const { s, statuses } = await withTenant(tenantOf(req), async (tx) => {
+      const s = await loadSettings(tx);
+      return { s, statuses: await approvalStatuses(tx, s) };
+    });
+    res.json({
+      enabled: ready(s),
+      onReady: s.onReady,
+      canSend: ready(s) && canSendSms(req),
+      // Для меню заказа: «Согласовать по SMS» у заказов в «Согласовании».
+      approval: approvalOn(s) ? { onWaiting: s.approval.onWaiting, statusId: statuses.waiting?.id ?? null } : null,
+    });
   })
 );
 
@@ -268,10 +275,11 @@ smsRouter.get(
   "/order/:id",
   ah(async (req, res) => {
     const { tenantId, facts, settings } = await orderContext(req);
-    await refreshStatuses(tenantId, settings, { orderId: facts.order.id });
-    const rows = await withTenant(tenantId, (tx) =>
-      tx.smsMessage.findMany({ where: { orderId: facts.order.id }, orderBy: { createdAt: "desc" }, take: 50 })
-    );
+    await refreshStatuses(tenantId, { orderId: facts.order.id });
+    const [rows, approval] = await withTenant(tenantId, async (tx) => [
+      await tx.smsMessage.findMany({ where: { orderId: facts.order.id }, orderBy: { createdAt: "desc" }, take: 50 }),
+      await lastApproval(tx, facts.order.id),
+    ] as const);
     const ids = [...new Set(rows.map((r) => r.createdById).filter((v): v is string => !!v))];
     const users = await withTenant(tenantId, (tx) => tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } }));
     const names = new Map(users.map((u) => [u.id, u.fullName]));
@@ -281,6 +289,12 @@ smsRouter.get(
       canSend: ready(settings) && canSendSms(req),
       hasPhone: !!facts.phone,
       messages: rows.map((r) => toView(r, names)),
+      // Согласование: включено ли, можно ли спросить сейчас (заказ в «Согласовании»), последнее.
+      approval: {
+        enabled: approvalOn(settings),
+        canAsk: approvalOn(settings) && canSendSms(req) && facts.order.status.group === "WAITING",
+        last: approval ? { ...approval, phone: seesCustomerContacts(req) ? approval.phone : maskPhone(approval.phone) } : null,
+      },
     });
   })
 );
@@ -290,15 +304,23 @@ smsRouter.get(
   "/order/:id/preview",
   ah(async (req, res) => {
     const { facts, settings } = await orderContext(req);
-    const kind = req.query.kind === "free" ? "free" : "ready";
-    const text = kind === "ready" ? render(templateOf(settings, "ready"), facts.values) : "";
+    const kind = req.query.kind === "free" ? "free" : req.query.kind === "approval" ? "approval" : "ready";
+    const text = kind === "free" ? "" : render(templateOf(settings, kind), facts.values);
     res.json({
       enabled: ready(settings),
       kind,
       text,
       phone: facts.phone ? (seesCustomerContacts(req) ? facts.phone : maskPhone(facts.phone)) : null,
       customer: seesCustomerContacts(req) ? (facts.order.customer?.name ?? null) : null,
-      templates: { ready: render(templateOf(settings, "ready"), facts.values) },
+      templates: {
+        ready: render(templateOf(settings, "ready"), facts.values),
+        approval: render(templateOf(settings, "approval"), facts.values),
+      },
+      approval: {
+        enabled: approvalOn(settings),
+        cost: facts.cost,
+        hasWorks: facts.hasWorks,
+      },
     });
   })
 );
@@ -313,7 +335,7 @@ smsRouter.post(
     const { tenantId, facts, settings } = await orderContext(req);
     if (!ready(settings)) throw conflict("SMS не подключены — «Настройки → Интеграции»");
     if (!facts.phone) throw badRequest("У клиента не указан телефон");
-    const row = await sendSms(tenantId, settings, {
+    const row = await sendSms(tenantId, {
       orderId: facts.order.id,
       customerId: facts.order.customer?.id ?? null,
       phone: facts.phone,
@@ -343,7 +365,7 @@ export async function readyHint(req: Request, orderId: string): Promise<{ offer:
   }));
   if (!facts?.phone || !ready(settings) || settings.onReady === "off") return null;
   if (settings.onReady === "ask") return canSendSms(req) ? { offer: true } : null;
-  void sendSms(tenantId, settings, {
+  void sendSms(tenantId, {
     orderId,
     customerId: facts.order.customer?.id ?? null,
     phone: facts.phone,
@@ -352,4 +374,64 @@ export async function readyHint(req: Request, orderId: string): Promise<{ offer:
     userId: actorUserId(req),
   }).catch(() => undefined);
   return { auto: true };
+}
+
+// ------------------------------------------------------------------ согласование
+
+/** Спросить клиента: текст — из окна, где его можно было поправить. */
+smsRouter.post(
+  "/order/:id/approval",
+  ah(async (req, res) => {
+    const body = z.object({ text: z.string().trim().min(1, "Напишите текст").max(TEXT_MAX) }).parse(req.body);
+    if (!canSendSms(req)) throw forbidden("Отправлять SMS клиентам вам нельзя");
+    const { tenantId, facts, settings } = await orderContext(req);
+    if (!approvalOn(settings)) throw conflict("Согласование по SMS выключено — «Настройки → Интеграции»");
+    if (!facts.phone) throw badRequest("У клиента не указан телефон");
+    const r = await startApproval(tenantId, facts.order.id, body.text, actorUserId(req));
+    if (!r.ok) {
+      res.status(502).json({ error: r.error });
+      return;
+    }
+    res.status(201).json({ ok: true });
+  })
+);
+
+/** Ответ непонятен или клиент ответил по телефону — решает сотрудник. */
+smsRouter.post(
+  "/order/:id/approval/decide",
+  ah(async (req, res) => {
+    const { answer } = z.object({ answer: z.enum(["yes", "no"]) }).parse(req.body);
+    if (!canSendSms(req)) throw forbidden("Решать за клиента вам нельзя");
+    const { tenantId, facts } = await orderContext(req);
+    const done = await decideApproval(tenantId, facts.order.id, answer, actorUserId(req));
+    if (!done) throw conflict("По этому заказу нет согласования, ждущего ответа");
+    res.json({ ok: true });
+  })
+);
+
+smsRouter.post(
+  "/order/:id/approval/cancel",
+  ah(async (req, res) => {
+    if (!canSendSms(req)) throw forbidden("Отменять согласование вам нельзя");
+    const { tenantId, facts } = await orderContext(req);
+    await cancelApproval(tenantId, facts.order.id, actorUserId(req));
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * Заказ перевели в статус согласования: что делать. Как readyHint: «ask» —
+ * интерфейс откроет окно с готовым вопросом, «auto» — уходит сам.
+ */
+export async function approvalHint(req: Request, orderId: string, statusId: string): Promise<{ offer: true } | { auto: true } | { failed: string } | null> {
+  const tenantId = tenantOf(req);
+  const { facts, settings, statuses } = await withTenant(tenantId, async (tx) => {
+    const settings = await loadSettings(tx);
+    return { facts: await orderFacts(tx, tenantId, orderId), settings, statuses: await approvalStatuses(tx, settings) };
+  });
+  if (!approvalOn(settings) || settings.approval.onWaiting === "off") return null;
+  if (!facts?.phone || statuses.waiting?.id !== statusId || !canSendSms(req)) return null;
+  if (settings.approval.onWaiting === "ask") return { offer: true };
+  const r = await startApproval(tenantId, orderId, render(templateOf(settings, "approval"), facts.values), actorUserId(req));
+  return r.ok ? { auto: true } : { failed: r.error };
 }

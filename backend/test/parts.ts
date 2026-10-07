@@ -93,9 +93,11 @@ async function main() {
   check(rcBroken.length === 2 && rcBroken[0].stock === "unknown", "ReComB: подсказки сломались — витрина всё равно показана");
 
   const ai = await read("aitech", "aitech.html", "it5571vg");
-  check(ai.length === 2, "Aitech: две карточки", ai.length);
-  check(ai[0]?.price === 680 && ai[0]?.priceNote === "опт 600 ₽" && ai[0]?.article === "52700", "Aitech: розница, опт, артикул", ai[0]);
-  check(ai[1]?.price === null && ai[1]?.stock === "out", "Aitech: без цены — нет в продаже", ai[1]);
+  check(ai.length === 3, "Aitech: три карточки", ai.length);
+  check(ai[0]?.stock === "in" && ai[0]?.stockText === "5 шт." && ai[0]?.price === 480, "Aitech: «Доступно 5» — в наличии, 5 шт.", ai[0]);
+  check(ai[1]?.price === 680 && ai[1]?.priceNote === "опт 600 ₽" && ai[1]?.article === "52700", "Aitech: розница, опт, артикул", ai[1]);
+  check(ai[1]?.stock === "out" && !ai[1]?.stockText, "Aitech: цена есть, а «Доступно» нет — нет в наличии", ai[1]);
+  check(ai[2]?.price === null && ai[2]?.stock === "out", "Aitech: без цены — нет в продаже", ai[2]);
 
   const ex = await read("extraparts", "extraparts.html", "NT156WHM-N10");
   check(ex[0]?.name === 'Матрица 15.6" NT156WHM-N10 Boe Hydis' && ex[0]?.price === 8400 && ex[0]?.stock === "out", "ExtraParts: нет в наличии", ex[0]);

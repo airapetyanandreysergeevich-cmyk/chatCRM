@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { PrintDialog } from "../components/PrintDialog";
 import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
-import type { ReadyHint } from "../lib/sms";
+import type { ApprovalHint, ReadyHint } from "../lib/sms";
 import { printingApi } from "../lib/printing";
 import { IconCamera, IconFolder, IconPlus, IconSearch } from "../components/icons";
 import { useOrderFolder } from "../components/OrderFolder";
@@ -398,7 +398,7 @@ export default function OrderCard() {
 
   // SMS клиенту: окно-предложение после «Готов к выдаче» и номер версии
   // карточки «SMS клиенту», чтобы она перечитала список после отправки.
-  const [smsOffer, setSmsOffer] = useState(false);
+  const [smsOffer, setSmsOffer] = useState<false | "ready" | "approval">(false);
   const [smsVersion, setSmsVersion] = useState(0);
 
   async function run(action: () => Promise<unknown>, message: string) {
@@ -415,10 +415,21 @@ export default function OrderCard() {
       }
       // Заказ стал «Готов к выдаче»: сервер подсказывает, что делать с SMS клиенту.
       const sms = (result as { sms?: ReadyHint } | undefined)?.sms;
-      if (sms && "offer" in sms) setSmsOffer(true);
+      if (sms && "offer" in sms) setSmsOffer("ready");
       if (sms && "auto" in sms) {
         message += " · SMS клиенту отправляется";
         setTimeout(() => setSmsVersion((v) => v + 1), 2500);
+      }
+      // Перевели на согласование: предложить спросить клиента по SMS.
+      const approval = (result as { approval?: ApprovalHint } | undefined)?.approval;
+      if (approval && "offer" in approval) setSmsOffer("approval");
+      if (approval && "auto" in approval) {
+        message += " · клиенту ушло согласование по SMS";
+        setSmsVersion((v) => v + 1);
+      }
+      if (approval && "failed" in approval) {
+        setWarn(`Согласование по SMS не отправлено: ${approval.failed}`);
+        setTimeout(() => setWarn(null), 9000);
       }
       setNotice(message);
       setTimeout(() => setNotice(null), 4000);
@@ -604,6 +615,12 @@ export default function OrderCard() {
                 Вернуть без ремонта
               </Button>
             ))}
+          {/* Выданное вернулось с той же неисправностью — новый заказ «по гарантии». */}
+          {order.issuedAt && can("orders.create") && (
+            <Button variant="secondary" onClick={() => navigate("/orders/new", { state: { repeatFrom: order.id, warranty: true } })}>
+              Принять по гарантии
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1217,12 +1234,14 @@ export default function OrderCard() {
       {smsOffer && (
         <SmsModal
           orderId={order.id}
-          kind="ready"
+          kind={smsOffer}
           onClose={() => setSmsOffer(false)}
           onSent={() => {
+            const asked = smsOffer === "approval";
             setSmsOffer(false);
             setSmsVersion((v) => v + 1);
-            setNotice("SMS клиенту отправлена");
+            void load();
+            setNotice(asked ? "Клиенту ушёл вопрос — ответ придёт в заказ" : "SMS клиенту отправлена");
             setTimeout(() => setNotice(null), 4000);
           }}
         />

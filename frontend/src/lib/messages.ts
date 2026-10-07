@@ -18,6 +18,8 @@ export interface OrderMessage {
   createdAt: string;
   deleted: boolean;
   author: { id: string; fullName: string } | null;
+  /** Запись самой программы: «Клиент согласился по SMS». */
+  system?: boolean;
   attachments: MessagePhoto[];
 }
 

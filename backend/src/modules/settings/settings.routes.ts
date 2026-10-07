@@ -124,7 +124,16 @@ const printSchema = z
     name: text(80),
     requisites: text(400),
     intake: z
-      .object({ title: text(80), terms: text(20000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
+      .object({
+        title: text(80),
+        // Заголовок квитанции, когда технику принимают по гарантии.
+        warrantyTitle: text(80),
+        terms: text(20000),
+        signClient: text(100),
+        signStaff: text(100),
+        size: textSize,
+        leading: textLeading,
+      })
       .strip()
       .optional(),
     act: z

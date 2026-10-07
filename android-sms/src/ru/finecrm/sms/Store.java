@@ -65,6 +65,8 @@ final class Store {
                 .remove("token")
                 .remove("pending")
                 .remove("parts")
+                .remove("watch")
+                .remove("incoming")
                 .putString("status", why)
                 .apply();
     }
@@ -204,6 +206,85 @@ final class Store {
             return result;
         } catch (JSONException e) {
             return null;
+        }
+    }
+
+    // ------------------------------------------------------------ ответы клиентов
+
+    /** Номер — только цифры, «8…» и «+7…» одинаково: 79211234567. */
+    static String digits(String phone) {
+        if (phone == null) return "";
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < phone.length(); i++) {
+            char ch = phone.charAt(i);
+            if (ch >= '0' && ch <= '9') b.append(ch);
+        }
+        String d = b.toString();
+        if (d.length() == 11 && d.charAt(0) == '8') d = "7" + d.substring(1);
+        if (d.length() == 10 && d.charAt(0) == '9') d = "7" + d;
+        return d;
+    }
+
+    /** Номера, от которых ждём ответа на согласование: их присылает сервер. */
+    static synchronized void setWatch(Context c, JSONArray phones) {
+        JSONArray clean = new JSONArray();
+        if (phones != null) {
+            for (int i = 0; i < phones.length() && i < 500; i++) {
+                String d = digits(phones.optString(i, ""));
+                if (d.length() >= 10) clean.put(d);
+            }
+        }
+        prefs(c).edit().putString("watch", clean.toString()).apply();
+    }
+
+    static synchronized boolean watching(Context c, String phone) {
+        String d = digits(phone);
+        if (d.length() < 10) return false;
+        try {
+            JSONArray all = new JSONArray(prefs(c).getString("watch", "[]"));
+            for (int i = 0; i < all.length(); i++) if (d.equals(all.optString(i))) return true;
+        } catch (JSONException ignored) {
+            // испорченный список — значит, никого не ждём
+        }
+        return false;
+    }
+
+    /** Ответ клиента ждёт, пока будет связь с FineCRM. */
+    static synchronized void enqueueIncoming(Context c, String from, String text, long at) {
+        try {
+            JSONArray all = new JSONArray(prefs(c).getString("incoming", "[]"));
+            JSONObject o = new JSONObject();
+            o.put("from", from);
+            o.put("text", text.length() > 2000 ? text.substring(0, 2000) : text);
+            o.put("at", at);
+            all.put(o);
+            // Больше сотни неотправленных — старые уже не нужны.
+            JSONArray keep = new JSONArray();
+            for (int i = Math.max(0, all.length() - 100); i < all.length(); i++) keep.put(all.get(i));
+            prefs(c).edit().putString("incoming", keep.toString()).apply();
+        } catch (JSONException ignored) {
+            prefs(c).edit().remove("incoming").apply();
+        }
+    }
+
+    static synchronized JSONObject peekIncoming(Context c) {
+        try {
+            JSONArray all = new JSONArray(prefs(c).getString("incoming", "[]"));
+            return all.length() > 0 ? all.getJSONObject(0) : null;
+        } catch (JSONException e) {
+            prefs(c).edit().remove("incoming").apply();
+            return null;
+        }
+    }
+
+    static synchronized void dropIncoming(Context c) {
+        try {
+            JSONArray all = new JSONArray(prefs(c).getString("incoming", "[]"));
+            JSONArray rest = new JSONArray();
+            for (int i = 1; i < all.length(); i++) rest.put(all.get(i));
+            prefs(c).edit().putString("incoming", rest.toString()).apply();
+        } catch (JSONException e) {
+            prefs(c).edit().remove("incoming").apply();
         }
     }
 }

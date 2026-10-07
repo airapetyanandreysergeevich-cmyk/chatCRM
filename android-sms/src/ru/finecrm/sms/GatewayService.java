@@ -125,6 +125,8 @@ public class GatewayService extends Service {
                 }
                 JSONObject r = Http.request("GET", base + "api/sms/phone/next?wait=25", token, null, 45000);
                 online();
+                // От кого ждём ответа на согласование. Старый сервер списка не шлёт — никого не ждём.
+                Store.setWatch(this, r.optJSONArray("watch"));
                 JSONObject job = r.optJSONObject("job");
                 if (job != null) {
                     SmsSender.send(this, job.getString("id"), job.getString("phone"), job.getString("text"));
@@ -161,8 +163,9 @@ public class GatewayService extends Service {
         }
     }
 
-    /** Отчёты о SMS — серверу, по одному, пока есть что и пока есть связь. */
+    /** Отчёты о SMS и ответы клиентов — серверу, по одному, пока есть что и пока есть связь. */
     static synchronized void flushResults(Context c) {
+        flushIncoming(c);
         String base = Store.base(c);
         String token = Store.token(c);
         if (base.isEmpty() || token.isEmpty()) return;
@@ -184,6 +187,26 @@ public class GatewayService extends Service {
         if (s != null) s.update(null);
     }
 
+    /** Ответы клиентов на согласование. Сервер не принял (400) — не держим. */
+    private static void flushIncoming(Context c) {
+        String base = Store.base(c);
+        String token = Store.token(c);
+        if (base.isEmpty() || token.isEmpty()) return;
+        for (int guard = 0; guard < 100; guard++) {
+            JSONObject next = Store.peekIncoming(c);
+            if (next == null) break;
+            try {
+                Http.request("POST", base + "api/sms/phone/incoming", token, next, 20000);
+                Store.dropIncoming(c);
+            } catch (Http.Refused e) {
+                if (e.code >= 400 && e.code < 500) Store.dropIncoming(c);
+                else break;
+            } catch (Exception e) {
+                break;
+            }
+        }
+    }
+
     /** Что телефон сообщает о себе: батарея, разрешения, версия. */
     static JSONObject state(Context c) {
         JSONObject o = new JSONObject();
@@ -195,6 +218,8 @@ public class GatewayService extends Service {
             }
             o.put("smsPermission", Build.VERSION.SDK_INT < 23
                     || c.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED);
+            o.put("receivePermission", Build.VERSION.SDK_INT < 23
+                    || c.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED);
             if (Build.VERSION.SDK_INT >= 23) {
                 PowerManager pm = (PowerManager) c.getSystemService(POWER_SERVICE);
                 o.put("batteryOptimized", pm != null && !pm.isIgnoringBatteryOptimizations(c.getPackageName()));

@@ -3,7 +3,16 @@ import { Modal } from "./Modal";
 import { Banner, Button, Card, SectionLabel, Spinner, Textarea } from "./ui";
 import { ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
-import { SMS_STATUS_LABEL, smsApi, smsCounter, type SmsMessage, type SmsPreview, type SmsStatus } from "../lib/sms";
+import {
+  SMS_STATUS_LABEL,
+  smsApi,
+  smsCounter,
+  type Approval,
+  type OrderSmsData,
+  type SmsKind,
+  type SmsPreview,
+  type SmsStatus,
+} from "../lib/sms";
 
 /**
  * SMS клиенту в карточке заказа: что уже отправляли и кнопка «Написать SMS».
@@ -18,8 +27,8 @@ const STATUS_TONE: Record<SmsStatus, string> = {
 };
 
 export function OrderSms({ orderId, version, onSent }: { orderId: string; version: number; onSent: () => void }) {
-  const [data, setData] = useState<Awaited<ReturnType<typeof smsApi.order>> | null>(null);
-  const [writing, setWriting] = useState(false);
+  const [data, setData] = useState<OrderSmsData | null>(null);
+  const [writing, setWriting] = useState<null | "free" | "approval">(null);
 
   const load = useCallback(() => smsApi.order(orderId).then(setData).catch(() => setData(null)), [orderId]);
 
@@ -28,21 +37,23 @@ export function OrderSms({ orderId, version, onSent }: { orderId: string; versio
   }, [load, version]);
 
   // Пока есть неокончательные — переспрашиваем: телефон-шлюз отправляет за секунды, доставка — до минуты.
-  const pending = !!data?.messages.some((m) => m.status === "QUEUED" || m.status === "SENT");
+  // И пока ждём ответа на согласование: он придёт сам, и заказ может сменить статус.
+  const pending =
+    !!data?.messages.some((m) => m.status === "QUEUED" || m.status === "SENT") || data?.approval.last?.status === "PENDING";
   useEffect(() => {
     if (!pending) return;
     const t = setInterval(() => void load(), 15_000);
     return () => clearInterval(t);
   }, [pending, load]);
 
-  if (!data || (!data.enabled && data.messages.length === 0)) return null;
+  if (!data || (!data.enabled && data.messages.length === 0 && !data.approval.last)) return null;
 
   return (
     <Card>
       <div className="flex items-center justify-between gap-3">
         <SectionLabel>SMS клиенту</SectionLabel>
         {data.canSend && data.hasPhone && (
-          <Button type="button" variant="secondary" className="min-h-[34px] px-3 text-[13px]" onClick={() => setWriting(true)}>
+          <Button type="button" variant="secondary" className="min-h-[34px] px-3 text-[13px]" onClick={() => setWriting("free")}>
             Написать SMS
           </Button>
         )}
@@ -50,6 +61,16 @@ export function OrderSms({ orderId, version, onSent }: { orderId: string; versio
       {data.canSend && !data.hasPhone && (
         <p className="mt-2 text-[13px] text-ink-dim">У клиента не указан телефон — SMS отправить некуда.</p>
       )}
+      <ApprovalBlock
+        orderId={orderId}
+        approval={data.approval}
+        canSend={data.canSend && data.hasPhone}
+        onAsk={() => setWriting("approval")}
+        onChanged={() => {
+          void load();
+          onSent();
+        }}
+      />
       {data.messages.length === 0 ? (
         <p className="mt-3 text-[13.5px] text-ink-dim">Пока не отправляли.</p>
       ) : (
@@ -71,10 +92,10 @@ export function OrderSms({ orderId, version, onSent }: { orderId: string; versio
       {writing && (
         <SmsModal
           orderId={orderId}
-          kind="free"
-          onClose={() => setWriting(false)}
+          kind={writing}
+          onClose={() => setWriting(null)}
           onSent={() => {
-            setWriting(false);
+            setWriting(null);
             void load();
             onSent();
           }}
@@ -95,22 +116,22 @@ export function SmsModal({
   onSent,
 }: {
   orderId: string;
-  kind: "ready" | "free";
+  kind: SmsKind;
   onClose: () => void;
-  onSent: (m: SmsMessage) => void;
+  onSent: () => void;
 }) {
   const [preview, setPreview] = useState<SmsPreview | null>(null);
-  const [mode, setMode] = useState<"ready" | "free">(kind);
+  const [mode, setMode] = useState<SmsKind>(kind);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     smsApi
-      .preview(orderId, "ready")
+      .preview(orderId, kind === "approval" ? "approval" : "ready")
       .then((p) => {
         setPreview(p);
-        setText(kind === "ready" ? p.templates.ready : "");
+        setText(kind === "ready" ? p.templates.ready : kind === "approval" ? p.templates.approval : "");
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось подготовить SMS"));
   }, [orderId, kind]);
@@ -119,8 +140,9 @@ export function SmsModal({
     setBusy(true);
     setError(null);
     try {
-      const r = await smsApi.send(orderId, text.trim(), mode);
-      onSent(r.message);
+      if (mode === "approval") await smsApi.ask(orderId, text.trim());
+      else await smsApi.send(orderId, text.trim(), mode);
+      onSent();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "SMS не отправлена");
       setBusy(false);
@@ -128,7 +150,7 @@ export function SmsModal({
   }
 
   return (
-    <Modal title={kind === "ready" ? "Отправить SMS клиенту?" : "SMS клиенту"} onClose={onClose}>
+    <Modal title={kind === "ready" ? "Отправить SMS клиенту?" : kind === "approval" ? "Согласовать по SMS" : "SMS клиенту"} onClose={onClose}>
       {!preview && !error ? (
         <Spinner />
       ) : (
@@ -139,11 +161,22 @@ export function SmsModal({
               {kind === "ready" && (
                 <p className="text-[14px] text-ink-soft">Заказ готов к выдаче — сообщить клиенту?</p>
               )}
+              {kind === "approval" && (
+                <p className="text-[14px] text-ink-soft">
+                  Клиент ответит на эту SMS «да» или «нет» — ответ придёт в заказ, а при согласии заказ сам перейдёт дальше.
+                </p>
+              )}
+              {kind === "approval" && !preview.approval.hasWorks && !preview.approval.cost && (
+                <Banner tone="warning">
+                  В заказе пока нет ни работ, ни оценки — клиент увидит «по результатам диагностики» и «по договорённости».
+                  Добавьте работы или впишите цену в текст сами.
+                </Banner>
+              )}
               <p className="text-[14px]">
                 <span className="text-ink-dim">Кому: </span>
                 <span className="font-semibold">{[preview.customer, preview.phone].filter(Boolean).join(" · ") || "—"}</span>
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              {kind !== "approval" && <div className="flex flex-wrap gap-1.5">
                 {(["ready", "free"] as const).map((m) => (
                   <button
                     key={m}
@@ -161,7 +194,7 @@ export function SmsModal({
                     {m === "ready" ? "Готов к выдаче" : "Свой текст"}
                   </button>
                 ))}
-              </div>
+              </div>}
               <div>
                 <Textarea
                   aria-label="Текст SMS"
@@ -176,14 +209,104 @@ export function SmsModal({
           )}
           <div className="flex flex-col gap-2 sm:flex-row-reverse">
             <Button type="button" disabled={busy || !text.trim() || !preview?.phone} onClick={() => void send()} className="sm:flex-1">
-              {busy ? "Отправляем…" : "Отправить"}
+              {busy ? "Отправляем…" : kind === "approval" ? "Спросить клиента" : "Отправить"}
             </Button>
             <Button type="button" variant="secondary" onClick={onClose} className="sm:flex-1">
-              {kind === "ready" ? "Не сейчас" : "Отмена"}
+              {kind === "free" ? "Отмена" : "Не сейчас"}
             </Button>
           </div>
         </div>
       )}
     </Modal>
+  );
+}
+
+const APPROVAL_LINE: Record<Approval["status"], { text: string; tone: string }> = {
+  PENDING: { text: "Ждём ответа клиента", tone: "text-state-waiting" },
+  YES: { text: "Клиент согласен", tone: "text-state-done" },
+  NO: { text: "Клиент отказался", tone: "text-state-off" },
+  UNCLEAR: { text: "Ответ непонятен — решите сами", tone: "text-state-waiting" },
+  CANCELLED: { text: "Согласование отменено", tone: "text-ink-dim" },
+  EXPIRED: { text: "Клиент не ответил за 3 дня", tone: "text-ink-dim" },
+};
+
+/**
+ * Согласование по SMS в карточке заказа: спросить, что ответил клиент, а если
+ * ответ непонятен или клиент ответил звонком — решить кнопкой.
+ */
+function ApprovalBlock({
+  orderId,
+  approval,
+  canSend,
+  onAsk,
+  onChanged,
+}: {
+  orderId: string;
+  approval: OrderSmsData["approval"];
+  canSend: boolean;
+  onAsk: () => void;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const last = approval.last;
+  if (!approval.enabled && !last) return null;
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не получилось");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const open = last && (last.status === "PENDING" || last.status === "UNCLEAR");
+  const small = "min-h-[34px] px-3 text-[13px]";
+
+  return (
+    <div data-approval className="mt-3 rounded-field border border-line bg-surface-raised px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[13px] font-semibold text-ink-soft">Согласование по SMS</span>
+        {approval.canAsk && canSend && !open && (
+          <Button type="button" variant="secondary" className={small} onClick={onAsk}>
+            {last ? "Спросить снова" : "Согласовать по SMS"}
+          </Button>
+        )}
+      </div>
+      {!last ? (
+        <p className="mt-1 text-[12.5px] text-ink-dim">
+          {approval.canAsk ? "Клиент ответит «да» или «нет» — ответ придёт сюда." : "Спросить можно, когда заказ на согласовании."}
+        </p>
+      ) : (
+        <>
+          <p className={"mt-1 text-[13.5px] font-semibold " + APPROVAL_LINE[last.status].tone}>{APPROVAL_LINE[last.status].text}</p>
+          <p className="text-[12.5px] text-ink-dim">
+            спросили {formatDateTime(last.createdAt)}
+            {last.author ? ` · ${last.author}` : ""}
+            {last.repliedAt ? ` · ответ ${formatDateTime(last.repliedAt)}` : ""}
+            {last.decidedBy ? ` · отметил ${last.decidedBy}` : ""}
+          </p>
+          {last.replyText && <p className="mt-1 whitespace-pre-wrap text-[14px] leading-snug">«{last.replyText}»</p>}
+        </>
+      )}
+      {error && <p className="mt-1.5 text-[12.5px] text-state-off">{error}</p>}
+      {open && canSend && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button type="button" className={small} disabled={busy} onClick={() => void act(() => smsApi.decide(orderId, "yes"))}>
+            {last.status === "UNCLEAR" ? "Считать согласием" : "Клиент согласен"}
+          </Button>
+          <Button type="button" variant="secondary" className={small} disabled={busy} onClick={() => void act(() => smsApi.decide(orderId, "no"))}>
+            {last.status === "UNCLEAR" ? "Считать отказом" : "Клиент отказался"}
+          </Button>
+          <Button type="button" variant="ghost" className={small} disabled={busy} onClick={() => void act(() => smsApi.cancelApproval(orderId))}>
+            Отменить
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
