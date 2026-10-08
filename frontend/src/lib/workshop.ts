@@ -1,3 +1,4 @@
+import type { TileLayout } from "./tile";
 import { api, type Page } from "./api";
 import type { OrderStatus } from "./orders";
 import type { StageKey } from "./stages";
@@ -17,7 +18,11 @@ export interface BoardCard {
   device: { kind: string; brand: string | null; model: string | null } | null;
   master: { id: string; fullName: string } | null;
   /** Имени нет, если сотруднику не показываются контакты клиентов. */
-  customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string };
+  customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string; color?: string | null };
+  /** Неисправность со слов клиента (до 300 знаков) — для «Редактора панелей заказа». */
+  complaint?: string;
+  /** Итог заказа — только тем, кто видит деньги. */
+  total?: number;
 }
 
 export interface StageColumn {
@@ -99,6 +104,8 @@ export interface Summary {
   overdue: OverdueDebt[];
   overdueTotal: number;
   prefs: DashboardPrefs;
+  /** Как рисовать карточку заказа (Настройки → Интерфейс → Редактор панелей заказа). */
+  tile?: TileLayout;
   /** Видит ли человек деньги клиентов — от этого есть ли у него «Должники». */
   money: boolean;
   /** Пусто, если панель выключена или человеку не положено её видеть. */

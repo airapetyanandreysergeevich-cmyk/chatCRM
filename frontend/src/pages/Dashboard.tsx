@@ -11,6 +11,8 @@ import { menuFromBoard, useOrderMenu } from "../components/OrderMenu";
 import { IconMore } from "../components/icons";
 import { STAGES, type Stage } from "../lib/stages";
 import { GearButton, PanelMenu } from "../components/PanelMenu";
+import { TileBody } from "../components/OrderTile";
+import { DEFAULT_TILE, type TileLayout } from "../lib/tile";
 import { columnsFor, isShown, panelLabel, withPanel } from "../lib/dashboard";
 import {
   summaryApi,
@@ -123,21 +125,19 @@ type Om = ReturnType<typeof useOrderMenu>;
 
 function OrderCardTile({
   card,
+  tile,
   om,
   dragging,
   onDragStart,
   onDragEnd,
 }: {
   card: BoardCard;
+  tile?: TileLayout;
   om: Om;
   dragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
-  const due = dueLabel(card.dueAt);
-  const device =
-    [card.device?.kind, card.device?.brand, card.device?.model].filter(Boolean).join(" ") ||
-    "Техника не указана";
   const menu = menuFromBoard(card);
   // Тянуть можно то, чей статус человеку можно менять: мастер с правом «только свои» — свои.
   const canDrag = om.canStatus(menu);
@@ -157,16 +157,17 @@ function OrderCardTile({
       }}
       onDragEnd={() => setTimeout(onDragEnd, 0)}
       className={
-        "group relative block select-none rounded-card border border-line bg-surface-raised p-3 transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand " +
+        "group relative block select-none rounded-card border border-line bg-surface-raised transition-all duration-150 hover:-translate-y-[1px] hover:border-line-strong hover:shadow-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand " +
         (canDrag ? "cursor-grab active:cursor-grabbing " : "") +
         (dragging ? "opacity-40" : "")
       }
+      style={{ padding: `${(tile ?? DEFAULT_TILE).pad}px` }}
     >
-      {/* Место под «⋯» — только где она видна всегда (телефон); мышью она появляется поверх, при наведении. */}
-      <div className="flex items-center gap-2 [@media(hover:none)]:pr-7">
-        <span className="whitespace-nowrap font-mono text-[13px] font-semibold text-ink-soft" {...copyable("order", card.number)}>{card.number}</span>
-        {card.isUrgent && <Badge tone="danger">срочный</Badge>}
-      </div>
+      {/* Что и как показано на карточке — «Настройки → Интерфейс → Редактор
+          панелей заказа» (components/OrderTile.tsx). По умолчанию — как было:
+          номер и «срочный», техника, срок и мастер. Место под «⋯» в первой
+          строке — только где она видна всегда (телефон). */}
+      <TileBody card={card} tile={tile} firstRowPad />
       {/* «⋯» — то же меню, что по правой кнопке: на телефоне правой кнопки нет,
           а долгое нажатие не всякий догадается сделать. */}
       <button
@@ -177,33 +178,6 @@ function OrderCardTile({
       >
         <IconMore className="h-[18px] w-[18px]" />
       </button>
-
-      <p className="mt-1.5 truncate text-[14px] font-semibold">{device}</p>
-
-      {/* Ни клиента, ни названия статуса здесь нет: доска отвечает на вопрос
-          «что чинить дальше», а колонка уже сказала, на какой это стадии.
-          Всё остальное — на карточке заказа, в одном нажатии отсюда. */}
-      <div className="mt-2 flex items-center justify-between gap-2 text-[12px]">
-        {/* Срок не обрезаем никогда: в узкой колонке уступает имя мастера —
-            «просрочен 5 дн.» важнее, чем чья это работа. */}
-        <span
-          className={
-            "shrink-0 whitespace-nowrap " +
-            (due?.overdue
-              ? "font-semibold text-state-off"
-              : due?.soon
-                ? "font-semibold text-state-waiting"
-                : "text-ink-dim")
-          }
-        >
-          {due ? due.text : ""}
-        </span>
-        {card.master && (
-          <span className="min-w-0 truncate text-right text-ink-dim">
-            {shortName(card.master.fullName)}
-          </span>
-        )}
-      </div>
     </Link>
   );
 }
@@ -330,6 +304,7 @@ function StageColumnPanel({
   column,
   fit,
   prefs,
+  tile,
   gear,
   onOpenMenu,
   om,
@@ -343,6 +318,7 @@ function StageColumnPanel({
   /** Сколько карточек помещается на экран. Одно число на все колонки. */
   fit: number;
   prefs: PanelPrefs | undefined;
+  tile?: TileLayout;
   gear: React.ReactNode;
   onOpenMenu: () => void;
   om: Om;
@@ -378,6 +354,7 @@ function StageColumnPanel({
             <OrderCardTile
               key={card.id}
               card={card}
+              tile={tile}
               om={om}
               dragging={drag?.id === card.id}
               onDragStart={() => setDrag(card)}
@@ -815,6 +792,7 @@ export default function Dashboard() {
                 column={byKey.get(key) ?? { key, total: 0, items: [] }}
                 fit={fit}
                 prefs={prefs.panels[key]}
+                tile={data.tile}
                 gear={gearFor(key)}
                 onOpenMenu={() => setMenu(key)}
                 om={om}

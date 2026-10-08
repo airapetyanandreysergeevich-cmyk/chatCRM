@@ -10,7 +10,10 @@ import {
   requireTenant,
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
-import { seesCustomerContacts } from "../orders/orders.service";
+import { seesCustomerContacts, seesMoney } from "../orders/orders.service";
+import { effectiveTile, normalizeTile } from "./tile";
+import { forbidden } from "../../lib/errors";
+import { clientIp, writeAudit } from "../../lib/audit";
 import { debts } from "../../lib/debt";
 import { badRequest } from "../../lib/errors";
 import { Prisma } from "@prisma/client";
@@ -67,9 +70,12 @@ const cardSelect = {
   acceptedAt: true,
   dueAt: true,
   status: { select: { id: true, name: true, group: true, color: true } },
-  customer: { select: { id: true, name: true, type: true } },
+  customer: { select: { id: true, name: true, type: true, color: true } },
   device: { select: { kind: true, brand: true, model: true } },
   assignedMaster: { select: { id: true, fullName: true } },
+  // Для «Редактора панелей заказа»: неисправность и сумма — если их включат на карточке.
+  complaint: true,
+  total: true,
 } as const;
 
 type CardRow = Prisma.OrderGetPayload<{ select: typeof cardSelect }>;
@@ -89,6 +95,23 @@ const STAGE_ORDER: Record<StageSort, (a: CardRow, b: CardRow) => number> = {
   // Как читает человек: Р-999 раньше Р-1021.
   number: (a, b) => numberOf(a.number) - numberOf(b.number) || a.number.localeCompare(b.number),
 };
+
+/** Карточка заказа на главной: своя → мастерской → стандартная (tile.ts). */
+async function tileOf(req: Request) {
+  const userId = userOf(req);
+  const [user, tenant] = await withTenant(tenantOf(req), (tx) =>
+    Promise.all([
+      userId ? tx.user.findFirst({ where: { id: userId }, select: { cardLayout: true } }) : null,
+      tx.tenant.findUnique({ where: { id: tenantOf(req) }, select: { settings: true } }),
+    ])
+  );
+  const workshop = (tenant?.settings as Record<string, unknown> | null)?.cardLayout ?? null;
+  return {
+    mine: normalizeTile(user?.cardLayout ?? null),
+    workshop: normalizeTile(workshop),
+    effective: effectiveTile(user?.cardLayout ?? null, workshop),
+  };
+}
 
 /** Настройки главной этого сотрудника. У входа платформы своих нет — по умолчанию. */
 async function prefsOf(req: Request): Promise<DashboardPrefs> {
@@ -197,7 +220,9 @@ summaryRouter.get(
     const seesAll = has(req, PERMISSIONS.ORDERS_VIEW_ALL);
     const onlyMine = !seesAll && has(req, PERMISSIONS.ORDERS_VIEW_ASSIGNED) && me;
     const contacts = seesCustomerContacts(req);
+    const money = seesMoney(req);
     const prefs = await prefsOf(req);
+    const tile = (await tileOf(req)).effective;
 
     // Мастер видит на доске только свои заказы — ровно то же, что и в списке.
     // Доска, не совпадающая со списком, читается как поломка.
@@ -239,7 +264,11 @@ summaryRouter.get(
             master: o.assignedMaster,
             // Имя клиента — часть контактов: мастеру база клиентов не нужна,
             // и сервер её просто не кладёт в ответ.
-            customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type },
+            // Цветная метка — не контакт: её видят все, кто видит заказ.
+            customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type, color: o.customer.color },
+            complaint: o.complaint.length > 300 ? o.complaint.slice(0, 300) : o.complaint,
+            // Сумма — только тем, кто видит деньги заказа.
+            ...(money ? { total: Number(o.total) } : {}),
           })),
         });
       }
@@ -267,6 +296,7 @@ summaryRouter.get(
       stages,
       scope: onlyMine ? "mine" : "all",
       prefs,
+      tile,
       // Может ли человек вообще видеть деньги клиентов: от этого зависит,
       // есть ли в его настройках «Должники» и полоса просрочки.
       money: contacts,
@@ -304,6 +334,77 @@ summaryRouter.put(
       tx.user.updateMany({ where: { id: userId }, data: { dashboardPrefs: prefs as unknown as Prisma.InputJsonValue } })
     );
     res.json({ prefs });
+  })
+);
+
+// ---------------------------------------------------------------- «Редактор панелей заказа»
+
+summaryRouter.get(
+  "/tile",
+  ah(async (req, res) => {
+    res.json({
+      ...(await tileOf(req)),
+      personal: userOf(req) !== null,
+      // «Сделать так у всех» — тому, кто правит настройки мастерской.
+      canShare: has(req, PERMISSIONS.SETTINGS_MANAGE),
+      money: seesMoney(req),
+      contacts: seesCustomerContacts(req),
+    });
+  })
+);
+
+/** Своя карточка. null — вернуть общую (или стандартную). */
+summaryRouter.put(
+  "/tile",
+  ah(async (req, res) => {
+    const userId = userOf(req);
+    if (!userId) throw badRequest("Карточка заказа сохраняется у сотрудника мастерской");
+    const body = z.object({ tile: z.unknown() }).parse(req.body ?? {});
+    const tile = body.tile === null ? null : normalizeTile(body.tile);
+    if (body.tile !== null && !tile) throw badRequest("Не похоже на раскладку карточки");
+    await withTenant(tenantOf(req), (tx) =>
+      tx.user.updateMany({
+        where: { id: userId },
+        data: { cardLayout: tile ? (tile as unknown as Prisma.InputJsonValue) : Prisma.DbNull },
+      })
+    );
+    res.json(await tileOf(req));
+  })
+);
+
+/**
+ * «Сделать так у всех»: карточка мастерской, личные сбрасываются — иначе у
+ * тех, кто когда-то правил свою, ничего бы не поменялось. null — у всех
+ * стандартная.
+ */
+summaryRouter.put(
+  "/tile/workshop",
+  ah(async (req, res) => {
+    if (!has(req, PERMISSIONS.SETTINGS_MANAGE)) throw forbidden("Менять карточку у всех может тот, кто правит настройки мастерской");
+    const body = z.object({ tile: z.unknown() }).parse(req.body ?? {});
+    const tile = body.tile === null ? null : normalizeTile(body.tile);
+    if (body.tile !== null && !tile) throw badRequest("Не похоже на раскладку карточки");
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const t = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const before = (t?.settings as Record<string, unknown> | null) ?? {};
+      const { cardLayout: _old, ...rest } = before;
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { settings: (tile ? { ...rest, cardLayout: tile } : rest) as unknown as Prisma.InputJsonObject },
+      });
+      const reset = await tx.user.updateMany({ where: { cardLayout: { not: Prisma.DbNull } }, data: { cardLayout: Prisma.DbNull } });
+      await writeAudit(tx, {
+        tenantId,
+        userId: userOf(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        diff: { cardLayout: tile ? "общая карточка заказа" : "стандартная карточка заказа", personalReset: reset.count },
+        ip: clientIp(req),
+      });
+    });
+    res.json(await tileOf(req));
   })
 );
 
