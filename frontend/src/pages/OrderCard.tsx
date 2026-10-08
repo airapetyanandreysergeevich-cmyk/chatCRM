@@ -50,15 +50,23 @@ import {
 } from "../lib/orders";
 import { matchServices, PINNED_LIMIT, type Service } from "../lib/services";
 import { IssueDialog } from "../components/IssueDialog";
+import { WebSearchButton } from "../components/WebSearch";
+import { ReopenDialog } from "../components/ReopenDialog";
 import { PAYMENT_LABEL } from "../lib/debt";
 
+/** Пусто: не заполнено вовсе или заглушка «—» от formatDate/money. */
+const blank = (v: React.ReactNode) => v === null || v === undefined || v === false || (typeof v === "string" && (!v.trim() || v.trim() === "—"));
+
+/** Строки «название — значение». Незаполненные не показываем: «Email —» только занимает место. */
 function Rows({ items }: { items: Array<{ label: string; value: React.ReactNode }> }) {
+  const shown = items.filter((r) => !blank(r.value));
+  if (!shown.length) return null;
   return (
     <dl className="space-y-2 text-[14px]">
-      {items.map((r) => (
+      {shown.map((r) => (
         <div key={r.label} className="flex gap-3">
           <dt className="w-[150px] shrink-0 text-ink-muted">{r.label}</dt>
-          <dd className="min-w-0 flex-1">{r.value ?? "—"}</dd>
+          <dd className="min-w-0 flex-1">{r.value}</dd>
         </div>
       ))}
     </dl>
@@ -310,6 +318,8 @@ export default function OrderCard() {
   const [finish, setFinish] = useState<Finish>({ diagnosis: "", masterComment: "", recommendation: "", warrantyDays: "" });
   const [returnReason, setReturnReason] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
+  /** «Вернуть в работу»: окно открыто; statusId — если выбрали статус в списке. */
+  const [reopening, setReopening] = useState<{ statusId?: string } | null>(null);
   /** null — блок удаления свёрнут, строка — набранная причина. */
   const [deleteReason, setDeleteReason] = useState<string | null>(null);
   const [shooting, setShooting] = useState(false);
@@ -369,7 +379,12 @@ export default function OrderCard() {
   }, [loaded]);
 
   // Печать бланка: окно «на принтер / открыть для печати».
-  const [printing, setPrinting] = useState<{ doc: "intake" | "act"; afterIntake?: boolean; auto?: boolean } | null>(null);
+  const [printing, setPrinting] = useState<{
+    doc: "intake" | "act" | "extra";
+    afterIntake?: boolean;
+    auto?: boolean;
+    question?: string;
+  } | null>(null);
   // Наклейки: окно сейчас и окно «после квитанции» — после приёма они идут друг за другом.
   const [labelling, setLabelling] = useState<{ afterIntake?: boolean; auto?: boolean } | null>(null);
   const labelsNext = useRef<{ afterIntake: boolean; auto: boolean } | null>(null);
@@ -515,6 +530,10 @@ export default function OrderCard() {
   const canEditWork = can("orders.edit") || isMyOrder;
   const canIssue = can("orders.issue") && !order.issuedAt;
   const canChangeStatus = can("orders.status") || (can("orders.status.own") && isMyOrder);
+  // Выданный — снова в работу: тот, кто выдаёт или меняет статусы (сервер проверяет так же).
+  const canReopen = !!order.issuedAt && (can("orders.issue", "orders.status") || (can("orders.status.own") && isMyOrder));
+  const extra = order.extra ?? null;
+  const hasExtra = !!extra && (extra.works.length > 0 || extra.parts.length > 0 || (extra.amount ?? 0) > 0);
   const seesMoney = order.total !== undefined;
   const intake = order.attachments.filter((a) => a.kind === "INTAKE");
   const completion = order.attachments.filter((a) => a.kind === "COMPLETION");
@@ -567,6 +586,14 @@ export default function OrderCard() {
               value={order.status.id}
               onChange={(e) => {
                 const to = e.target.value;
+                // Выданный заказ в статус работы — это «Вернуть в работу»: с причиной,
+                // и выдача снимается. Список остаётся на прежнем статусе до подтверждения.
+                const target = ref.statuses.find((s) => s.id === to);
+                if (order.issuedAt && target && target.group !== "CLOSED" && target.group !== "CANCELLED") {
+                  if (canReopen) setReopening({ statusId: to });
+                  else setError("Вернуть выданный заказ в работу может тот, кто выдаёт заказы или меняет статусы");
+                  return;
+                }
                 // Сначала — несохранённое (диагноз, работы): «Готов» должен уйти уже с ними.
                 void run(async () => {
                   await saveDirty();
@@ -605,6 +632,16 @@ export default function OrderCard() {
               Акт работ
             </Button>
           )}
+          {hasExtra && (
+            <Button variant="secondary" onClick={() => setPrinting({ doc: "extra" })}>
+              Акт доплаты
+            </Button>
+          )}
+          {canReopen && (
+            <Button variant="secondary" onClick={() => setReopening({})}>
+              Вернуть в работу
+            </Button>
+          )}
           {canIssue &&
             (order.completedAt ? (
               <Button onClick={() => setIssuing(true)} disabled={saving}>
@@ -624,13 +661,13 @@ export default function OrderCard() {
         </div>
       </div>
 
-      {/* Отдать технику до окончания ремонта можно, но причина обязательна —
-          иначе заказ закроется молча и разбираться будет не по чему. */}
+      {/* Отдать технику до окончания ремонта можно и без пояснения: в истории
+          всё равно останется «Выдано без ремонта», а причину пишут, когда она есть. */}
       {returnReason !== null && (
         <Card>
           <SectionLabel>Выдача без ремонта</SectionLabel>
           <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-            <Field label="Причина" hint="Например: клиент отказался от ремонта, неисправность не подтвердилась">
+            <Field label="Причина — по желанию" hint="Например: клиент отказался от ремонта, неисправность не подтвердилась">
               <Input
                 value={returnReason}
                 autoFocus
@@ -639,10 +676,10 @@ export default function OrderCard() {
               />
             </Field>
             <Button
-              disabled={saving || returnReason.trim().length < 3}
+              disabled={saving}
               onClick={() =>
                 void run(async () => {
-                  await ordersApi.issue(order.id, { reason: returnReason.trim() });
+                  await ordersApi.issue(order.id, { withoutRepair: true, ...(returnReason.trim() ? { reason: returnReason.trim() } : {}) });
                   setReturnReason(null);
                 }, "Техника возвращена клиенту без ремонта")
               }
@@ -661,9 +698,24 @@ export default function OrderCard() {
           orderId={order.id}
           onClose={() => setIssuing(false)}
           onIssue={async (payment) => {
-            await ordersApi.issue(order.id, { payment });
+            const r = await ordersApi.issue(order.id, { payment });
             setIssuing(false);
             await run(async () => {}, "Заказ выдан клиенту");
+            // Выдали после «Вернуть в работу» и что-то добавили — предложить «Акт доплаты».
+            if (r?.extra) setPrinting({ doc: "extra", question: "Распечатать акт доплаты?" });
+          }}
+        />
+      )}
+
+      {reopening && (
+        <ReopenDialog
+          order={order}
+          statuses={ref?.statuses}
+          statusId={reopening.statusId}
+          onClose={() => setReopening(null)}
+          onDone={async () => {
+            setReopening(null);
+            await run(async () => {}, "Заказ возвращён в работу");
           }}
         />
       )}
@@ -701,7 +753,10 @@ export default function OrderCard() {
       <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
         <div className="space-y-4">
           <Card>
-            <SectionLabel>Со слов клиента</SectionLabel>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <SectionLabel>Со слов клиента</SectionLabel>
+              <WebSearchButton device={order.device} complaint={order.complaint} diagnosis={order.diagnosis} />
+            </div>
             <p className="mt-3 whitespace-pre-wrap text-[15px] leading-relaxed">{order.complaint}</p>
             {order.receptionNote && (
               <>
@@ -712,16 +767,21 @@ export default function OrderCard() {
               </>
             )}
 
-            <div className="mt-5 grid gap-5 border-t border-line pt-5 sm:grid-cols-2">
-              <Checklist title="Комплектность" items={order.completeness ?? []} />
-              <div className="space-y-3">
-                <Checklist title="Внешнее состояние" items={order.appearance ?? []} />
-                {/* Следы вскрытия и влаги сервер уже вписал в список выше —
-                    и у новых заказов, и у старых, где они стояли флагом.
-                    Примечание осталось только у заказов, принятых до кнопок. */}
-                {order.appearanceNote && <p className="text-[13px] text-ink-muted">{order.appearanceNote}</p>}
+            {/* Не отмечено ничего — блока нет: «ничего не отмечено» только занимает место. */}
+            {(order.completeness?.length || order.appearance?.length || order.appearanceNote) ? (
+              <div className="mt-5 grid gap-5 border-t border-line pt-5 sm:grid-cols-2">
+                {order.completeness?.length ? <Checklist title="Комплектность" items={order.completeness} /> : null}
+                {(order.appearance?.length || order.appearanceNote) ? (
+                  <div className="space-y-3">
+                    {order.appearance?.length ? <Checklist title="Внешнее состояние" items={order.appearance} /> : null}
+                    {/* Следы вскрытия и влаги сервер уже вписал в список выше —
+                        и у новых заказов, и у старых, где они стояли флагом.
+                        Примечание осталось только у заказов, принятых до кнопок. */}
+                    {order.appearanceNote && <p className="text-[13px] text-ink-muted">{order.appearanceNote}</p>}
+                  </div>
+                ) : null}
               </div>
-            </div>
+            ) : null}
           </Card>
 
           {/* Прошлые ремонты той же вещи — сразу под жалобой: мастер смотрит их до того, как браться. */}
@@ -779,63 +839,6 @@ export default function OrderCard() {
         </div>
 
         <div className="space-y-4">
-          <Card>
-            <SectionLabel>Заказ</SectionLabel>
-            <div className="mt-3">
-              <Rows
-                items={[
-                  { label: "Принят", value: formatDateTime(order.acceptedAt) },
-                  { label: "Приёмщик", value: order.acceptedBy?.fullName },
-                  { label: "Срок готовности", value: formatDate(order.dueAt) },
-                  // Когда закончили и когда отдали — разные дни, и путать их
-                  // нельзя: гарантия и претензии клиента считаются от выдачи.
-                  ...(order.completedAt ? [{ label: "Готов", value: formatDateTime(order.completedAt) }] : []),
-                  ...(order.issuedAt ? [{ label: "Выдан", value: formatDateTime(order.issuedAt) }] : []),
-                  {
-                    label: "Мастер",
-                    // Мастера меняет тот, кто вправе править заказ: «взялся
-                    // сам владелец» или «передали коллеге» — прямо здесь, без
-                    // пересоздания заказа.
-                    value:
-                      can("orders.edit") && ref ? (
-                        <Select
-                          aria-label="Мастер"
-                          value={order.assignedMaster?.id ?? ""}
-                          disabled={saving}
-                          onChange={(e) =>
-                            void run(
-                              () => ordersApi.assignMaster(order.id, e.target.value || null),
-                              e.target.value ? "Мастер назначен" : "Мастер снят с заказа"
-                            )
-                          }
-                        >
-                          <option value="">Не назначен</option>
-                          {/* Назначенный раньше мог сменить роль или уволиться —
-                              он всё равно должен быть виден в поле. */}
-                          {order.assignedMaster && !ref.masters.some((m) => m.id === order.assignedMaster?.id) && (
-                            <option value={order.assignedMaster.id}>{order.assignedMaster.fullName}</option>
-                          )}
-                          {ref.masters.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {masterLabel(m)}
-                            </option>
-                          ))}
-                        </Select>
-                      ) : (
-                        (order.assignedMaster?.fullName ?? "не назначен")
-                      ),
-                  },
-                  { label: "Место хранения", value: order.storageLocation },
-                  { label: "Пароль устройства", value: order.devicePasscode },
-                  {
-                    label: "Согласовано до",
-                    value: order.approvedLimit ? money(order.approvedLimit) : "не ограничено",
-                  },
-                ]}
-              />
-            </div>
-          </Card>
-
           {order.customer.name ? (
             <Card>
               <SectionLabel>Клиент</SectionLabel>
@@ -901,6 +904,73 @@ export default function OrderCard() {
             </Card>
           )}
 
+          <Card>
+            <SectionLabel>Заказ</SectionLabel>
+            <div className="mt-3">
+              <Rows
+                items={[
+                  { label: "Принят", value: formatDateTime(order.acceptedAt) },
+                  { label: "Приёмщик", value: order.acceptedBy?.fullName },
+                  { label: "Срок готовности", value: formatDate(order.dueAt) },
+                  // Когда закончили и когда отдали — разные дни, и путать их
+                  // нельзя: гарантия и претензии клиента считаются от выдачи.
+                  ...(order.completedAt ? [{ label: "Готов", value: formatDateTime(order.completedAt) }] : []),
+                  ...(order.issuedAt ? [{ label: "Выдан", value: formatDateTime(order.issuedAt) }] : []),
+                  // Возвращали после выдачи — когда и зачем; прошлая выдача — для «Акта доплаты».
+                  ...(extra
+                    ? [
+                        { label: "Выдавали", value: formatDateTime(extra.prevIssuedAt) },
+                        {
+                          label: "Вернули в работу",
+                          value: `${formatDateTime(extra.reopenedAt)}${extra.reason ? ` — ${extra.reason}` : ""}`,
+                        },
+                      ]
+                    : []),
+                  {
+                    label: "Мастер",
+                    // Мастера меняет тот, кто вправе править заказ: «взялся
+                    // сам владелец» или «передали коллеге» — прямо здесь, без
+                    // пересоздания заказа.
+                    value:
+                      can("orders.edit") && ref ? (
+                        <Select
+                          aria-label="Мастер"
+                          value={order.assignedMaster?.id ?? ""}
+                          disabled={saving}
+                          onChange={(e) =>
+                            void run(
+                              () => ordersApi.assignMaster(order.id, e.target.value || null),
+                              e.target.value ? "Мастер назначен" : "Мастер снят с заказа"
+                            )
+                          }
+                        >
+                          <option value="">Не назначен</option>
+                          {/* Назначенный раньше мог сменить роль или уволиться —
+                              он всё равно должен быть виден в поле. */}
+                          {order.assignedMaster && !ref.masters.some((m) => m.id === order.assignedMaster?.id) && (
+                            <option value={order.assignedMaster.id}>{order.assignedMaster.fullName}</option>
+                          )}
+                          {ref.masters.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {masterLabel(m)}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        (order.assignedMaster?.fullName ?? "не назначен")
+                      ),
+                  },
+                  { label: "Место хранения", value: order.storageLocation },
+                  { label: "Пароль устройства", value: order.devicePasscode },
+                  {
+                    label: "Согласовано до",
+                    value: order.approvedLimit ? money(order.approvedLimit) : null,
+                  },
+                ]}
+              />
+            </div>
+          </Card>
+
           <OrderSms orderId={order.id} version={smsVersion} onSent={() => setSmsVersion((v) => v + 1)} />
 
           {seesMoney && (
@@ -909,7 +979,7 @@ export default function OrderCard() {
               <div className="mt-3">
                 <Rows
                   items={[
-                    { label: "Предварительно", value: money(order.estimatedCost) },
+                    { label: "Предварительно", value: order.estimatedCost ? money(order.estimatedCost) : null },
                     { label: "Работы", value: money(order.totalWork) },
                     // Скидку показываем отдельной строкой, а не вычтенной из
                     // работ: клиент должен видеть, что она у него есть.
@@ -932,7 +1002,7 @@ export default function OrderCard() {
                           },
                         ]
                       : []),
-                    { label: "Предоплата", value: money(order.prepayment) },
+                    { label: "Предоплата", value: order.prepayment ? money(order.prepayment) : null },
                     {
                       label: "Итого",
                       value: <span className="text-[17px] font-bold">{money(order.total)}</span>,
@@ -1254,6 +1324,7 @@ export default function OrderCard() {
           doc={printing.doc}
           afterIntake={printing.afterIntake}
           auto={printing.auto}
+          question={printing.question}
           onClose={() => {
             setPrinting(null);
             const next = labelsNext.current;

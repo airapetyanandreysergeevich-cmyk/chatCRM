@@ -19,13 +19,16 @@ export function PrintDialog({
   doc,
   afterIntake = false,
   auto = false,
+  question,
   onClose,
 }: {
   orderId: string;
   number: string;
-  doc: "intake" | "act";
+  doc: "intake" | "act" | "extra";
   /** Открыто сразу после «Принять в ремонт». */
   afterIntake?: boolean;
+  /** Вопрос над кнопками — например, после повторной выдачи: «Распечатать акт доплаты?». */
+  question?: string;
   /** Не спрашивать — отправить сразу (настройка «Печатать сразу»). */
   auto?: boolean;
   onClose: () => void;
@@ -38,7 +41,7 @@ export function PrintDialog({
   const [always, setAlways] = useState(false);
   const started = useRef(false);
 
-  const name = doc === "act" ? "Акт работ" : "Квитанция";
+  const name = doc === "act" ? "Акт работ" : doc === "extra" ? "Акт доплаты" : "Квитанция";
   const openPage = () => navigate(`/orders/${orderId}/print?doc=${doc}`);
 
   async function send() {
@@ -79,6 +82,7 @@ export function PrintDialog({
     <Modal title={afterIntake ? `Заказ ${number} принят` : `${name} · ${number}`} onClose={onClose}>
       <div className="space-y-4">
         {afterIntake && !job && !busy && <p className="text-[15px]">Распечатать квитанцию о приёме?</p>}
+        {question && !job && !busy && <p className="text-[15px]">{question}</p>}
 
         {loading ? (
           <Spinner label="Ищем принтер" />
@@ -135,7 +139,7 @@ export function PrintDialog({
           )}
           {!loading && (
             <Button type="button" variant={usable ? "secondary" : "primary"} onClick={openPage} className="sm:flex-1">
-              {usable ? "Открыть для печати" : `Открыть ${doc === "act" ? "акт" : "квитанцию"}`}
+              {usable ? "Открыть для печати" : `Открыть ${doc === "act" ? "акт" : doc === "extra" ? "акт доплаты" : "квитанцию"}`}
             </Button>
           )}
           {afterIntake && (

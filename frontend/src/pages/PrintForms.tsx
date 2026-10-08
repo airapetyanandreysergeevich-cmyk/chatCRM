@@ -233,7 +233,7 @@ function DocCard({
   extraTitle,
 }: {
   title: string;
-  kind: Doc;
+  kind: "intake" | "act";
   /** Второй заголовок — квитанция при приёме по гарантии. */
   extraTitle?: { value: string; fallback: string; onChange: (v: string) => void };
   texts: DocTexts;

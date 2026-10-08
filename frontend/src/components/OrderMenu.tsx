@@ -24,6 +24,7 @@ import {
   IconWarranty,
 } from "./icons";
 import { IssueDialog } from "./IssueDialog";
+import { ReopenDialog } from "./ReopenDialog";
 import { LabelDialog } from "./LabelDialog";
 import { Modal } from "./Modal";
 import { OrderEditModal } from "./OrderEditModal";
@@ -84,7 +85,8 @@ export const menuFromOrder = (o: Order): MenuOrder => ({
 
 type Dialog =
   | { kind: "peek"; o: MenuOrder }
-  | { kind: "print"; o: MenuOrder; doc: "intake" | "act" }
+  | { kind: "print"; o: MenuOrder; doc: "intake" | "act" | "extra"; question?: string }
+  | { kind: "reopen"; o: MenuOrder; statusId?: string }
   | { kind: "labels"; order: Order }
   | { kind: "edit"; order: Order }
   | { kind: "sms"; o: MenuOrder; sms: SmsKind }
@@ -286,7 +288,16 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
     <>
       {dialog.kind === "peek" && <OrderPeek orderId={dialog.o.id} onClose={() => setDialog(null)} />}
       {dialog.kind === "print" && (
-        <PrintDialog orderId={dialog.o.id} number={dialog.o.number} doc={dialog.doc} onClose={() => setDialog(null)} />
+        <PrintDialog orderId={dialog.o.id} number={dialog.o.number} doc={dialog.doc} question={dialog.question} onClose={() => setDialog(null)} />
+      )}
+      {dialog.kind === "reopen" && (
+        <ReopenDialog
+          order={{ id: dialog.o.id, number: dialog.o.number }}
+          statuses={ref?.statuses}
+          statusId={dialog.statusId}
+          onClose={() => setDialog(null)}
+          onDone={() => done(`${dialog.o.number} возвращён в работу`)}
+        />
       )}
       {dialog.kind === "labels" && <LabelDialog order={dialog.order} onClose={() => setDialog(null)} />}
       {dialog.kind === "edit" && ref && (
@@ -313,8 +324,10 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
           orderId={dialog.o.id}
           onClose={() => setDialog(null)}
           onIssue={async (payment) => {
-            await ordersApi.issue(dialog.o.id, { payment });
+            const r = await ordersApi.issue(dialog.o.id, { payment });
             done(`${dialog.o.number} выдан клиенту`);
+            // Выдали после «Вернуть в работу» с добавленным — предложить «Акт доплаты».
+            if (r?.extra) setDialog({ kind: "print", o: dialog.o, doc: "extra", question: "Распечатать акт доплаты?" });
           }}
         />
       )}
@@ -361,7 +374,13 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
               case "edit":
                 return void withOrder(o.id, (order) => setDialog({ kind: "edit", order }));
               case "status":
+                // Выданный — в статус работы: это «Вернуть в работу», с причиной.
+                if (o.issued && a.status.group !== "CLOSED" && a.status.group !== "CANCELLED") {
+                  return setDialog({ kind: "reopen", o, statusId: a.status.id });
+                }
                 return void changeStatus(o, a.status);
+              case "reopen":
+                return setDialog({ kind: "reopen", o });
               case "master":
                 return void ordersApi
                   .assignMaster(o.id, a.masterId)
@@ -398,6 +417,8 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
             work: can("orders.edit") || (!!myId && open.o.masterId === myId),
             del: can("orders.delete"),
             issue: can("orders.issue") && open.o.completed && !open.o.issued,
+            // Выданный — снова в работу: кто выдаёт или меняет статусы (сервер проверяет так же).
+            reopen: open.o.issued && (can("orders.issue", "orders.status") || canStatus(open.o)),
             repeat: can("orders.create"),
             folder: folder.available,
           }}
@@ -431,7 +452,7 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
 // ---------------------------------------------------------------- само меню
 
 type Action =
-  | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "approve" | "photo" | "issue" | "delete" | "urgent" | "copy" | "repeat" | "warranty" | "folder" }
+  | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "approve" | "photo" | "issue" | "reopen" | "delete" | "urgent" | "copy" | "repeat" | "warranty" | "folder" }
   | { kind: "print"; doc: "intake" | "act" }
   | { kind: "status"; status: OrderStatus }
   | { kind: "master"; masterId: string | null; name: string };
@@ -440,7 +461,7 @@ const GROUP_LABEL: Partial<Record<StatusGroup, string>> = {
   NEW: "Диагностика",
   WAITING: "Согласование",
   IN_PROGRESS: "Ремонт",
-  DONE: "Выдача",
+  DONE: "Готов",
 };
 
 function OrderMenu({
@@ -454,7 +475,7 @@ function OrderMenu({
   at: Open;
   reference: Reference | null;
   canStatus: boolean;
-  perms: { edit: boolean; work: boolean; del: boolean; issue: boolean; repeat: boolean; folder: boolean };
+  perms: { edit: boolean; work: boolean; del: boolean; issue: boolean; reopen: boolean; repeat: boolean; folder: boolean };
   act: (a: Action) => void;
   onClose: () => void;
 }) {
@@ -675,10 +696,15 @@ function OrderMenu({
             Открыть папку заказа
           </MenuItem>
         )}
-        {(perms.issue || perms.repeat) && <Sep />}
+        {(perms.issue || perms.reopen || perms.repeat) && <Sep />}
         {perms.issue && (
           <MenuItem big={big} icon={<IconOrders className={ico} />} onClick={() => act({ kind: "issue" })}>
             Выдать клиенту…
+          </MenuItem>
+        )}
+        {perms.reopen && (
+          <MenuItem big={big} icon={<IconStatusProgress className={ico} />} onClick={() => act({ kind: "reopen" })}>
+            Вернуть в работу…
           </MenuItem>
         )}
         {perms.repeat && o.issued && (

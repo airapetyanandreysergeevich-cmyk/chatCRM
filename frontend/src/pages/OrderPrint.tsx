@@ -33,7 +33,8 @@ export default function OrderPrint() {
   const navigate = useNavigate();
   const { me } = useAuth();
 
-  const doc: Doc = params.get("doc") === "act" ? "act" : "intake";
+  const asked = params.get("doc");
+  const doc: Doc = asked === "act" || asked === "extra" ? asked : "intake";
   const [order, setOrder] = useState<Order | null>(null);
   const [forms, setForms] = useState<PrintForms | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +115,18 @@ export default function OrderPrint() {
           >
             Акт работ
           </button>
+          {order.extra && (
+            <button
+              type="button"
+              onClick={() => navigate(`/orders/${id}/print?doc=extra`)}
+              className={
+                "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
+                (doc === "extra" ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              }
+            >
+              Акт доплаты
+            </button>
+          )}
         </div>
         <button
           type="button"

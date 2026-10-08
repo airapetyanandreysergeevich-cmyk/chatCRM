@@ -43,7 +43,7 @@ export const PALETTE_FIELDS: Array<{ key: keyof Palette; label: string; hint: st
   { key: "stageNew", label: "Диагностика", hint: "Колонка на главной и статусы этой стадии" },
   { key: "stageWaiting", label: "Согласование", hint: "Ждём ответа клиента или запчасть" },
   { key: "stageProgress", label: "Ремонт", hint: "Мастер работает с техникой" },
-  { key: "stageDone", label: "Выдача", hint: "Готово, ждёт клиента" },
+  { key: "stageDone", label: "Готов", hint: "Готово, ждёт клиента" },
   { key: "bg", label: "Фон окна", hint: "Самый нижний слой, под панелями" },
   { key: "surface", label: "Фон панелей", hint: "Карточки, списки, модальные окна" },
   { key: "brand", label: "Кнопки", hint: "Основные кнопки и выделение в меню" },

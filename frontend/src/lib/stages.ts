@@ -73,7 +73,7 @@ export const STAGES: Stage[] = [
   },
   {
     key: "DONE",
-    label: "Выдача",
+    label: "Готов",
     glow: "bg-stage-done/[0.85] shadow-[0_0_14px_1px_rgb(var(--stage-done)/0.5)]",
     dot: "bg-stage-done shadow-[0_0_8px_1px_rgb(var(--stage-done)/0.75)]",
     chip: "bg-stage-done/10 text-stage-done",

@@ -42,6 +42,7 @@ import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { rememberDevice } from "../hints/hints.service";
 import { countQuickPicks } from "../quickpicks/quickpicks.service";
 import { deviceHistory } from "./history";
+import { extraOf, parseReopens, snapshot } from "./reopen";
 import { matchableSerial, realSerial } from "../../lib/serial";
 import { assertAssignable } from "../staff/masters";
 import {
@@ -939,6 +940,11 @@ ordersRouter.post(
       const status = await tx.orderStatus.findFirst({ where: { id: statusId } });
       if (!status) throw badRequest("Статус не найден");
       if (status.id === order.statusId) return null;
+      // Выданный заказ снова в ремонт — только через «Вернуть в работу»: иначе
+      // статус менялся, а заказ оставался выданным, и выдать его снова было нельзя.
+      if (order.issuedAt && status.group !== "CLOSED" && status.group !== "CANCELLED") {
+        throw conflict("Заказ уже выдан — верните его в работу кнопкой «Вернуть в работу»");
+      }
       const was = await tx.orderStatus.findFirst({ where: { id: order.statusId }, select: { group: true } });
       const becameReady = status.group === "DONE" && was?.group !== "DONE";
       const now = new Date();
@@ -1284,10 +1290,13 @@ ordersRouter.post(
   "/:id/issue",
   requirePermission(PERMISSIONS.ORDERS_ISSUE),
   ah(async (req, res) => {
-    const { discount, reason, payment } = z
+    const { discount, reason: rawReason, withoutRepair: asked, payment } = z
       .object({
         discount: z.number().min(0).default(0),
-        reason: z.string().trim().min(3).max(300).optional(),
+        /** Пояснение к выдаче без ремонта — по желанию (Андрей, 08.10.2026). */
+        reason: z.string().trim().max(300).optional(),
+        /** Выдают, не дождавшись ремонта: клиент отказался, не подтвердилось. */
+        withoutRepair: z.boolean().optional(),
         /**
          * Чем расплатились. Приходит с выдачи, где приёмщик выбирает одно из
          * трёх. Необязательно: заказ можно выдать и без денег — например,
@@ -1302,17 +1311,20 @@ ordersRouter.post(
           .optional(),
       })
       .parse(req.body ?? {});
+    const reason = rawReason || undefined;
     const tenantId = tenantOf(req);
 
-    await withTenant(tenantId, async (tx) => {
+    const extra = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
       if (order.issuedAt) throw conflict("Заказ уже выдан");
       // Технику можно отдать и без ремонта — клиент отказался, не подтвердилась
-      // неисправность. Но это осознанное решение, поэтому нужна причина: иначе
-      // заказ закрывается «в ноль» и никто потом не поймёт, что произошло.
-      if (!order.completedAt && !reason) {
-        throw conflict("Ремонт ещё не завершён — укажите причину выдачи без ремонта");
+      // неисправность. Пояснение по желанию: «Выдано без ремонта» в истории
+      // останется и без него. Но кнопка должна сказать это явно — случайный
+      // запрос на выдачу неготового заказа отклоняем, как раньше.
+      const withoutRepair = !order.completedAt || !!asked || !!reason;
+      if (!order.completedAt && !asked && !reason) {
+        throw conflict("Ремонт ещё не завершён — выдайте технику кнопкой «Вернуть без ремонта»");
       }
 
       const closed = await tx.orderStatus.findFirst({
@@ -1371,7 +1383,7 @@ ordersRouter.post(
             fromStatusId: order.statusId,
             toStatusId: closed.id,
             userId: actorUserId(req),
-            comment: reason ? `Выдано без ремонта: ${reason}` : "Выдано клиенту",
+            comment: withoutRepair ? `Выдано без ремонта${reason ? `: ${reason}` : ""}` : "Выдано клиенту",
           },
         });
       }
@@ -1385,8 +1397,99 @@ ordersRouter.post(
           issued: true,
           discount,
           ...(payment ? { payment: payment.method, due } : {}),
-          ...(reason ? { withoutRepair: reason } : {}),
+          ...(withoutRepair ? { withoutRepair: reason ?? true } : {}),
         },
+        ip: clientIp(req),
+      });
+
+      // Выдаём после «Вернуть в работу» — есть ли что вписать в «Акт доплаты».
+      if (!order.reopens) return null;
+      const now = await tx.order.findFirst({ where: { id: order.id }, include: { works: true, parts: true } });
+      const x = now ? extraOf(now, true) : null;
+      return x && (x.works.length || x.parts.length || (x.amount ?? 0) > 0) ? { amount: x.amount ?? 0 } : null;
+    });
+
+    // Фронт предложит распечатать «Акт доплаты».
+    res.json({ ok: true, ...(extra ? { extra } : {}) });
+  })
+);
+
+// ---------------------------------------------------------------- возврат в работу
+
+/**
+ * Выданный заказ — снова в работу (клиент вернулся «доделать»). Выдача
+ * снимается, первая остаётся в истории и в снимке `reopens`; при повторной
+ * выдаче добавленное печатается «Актом доплаты». Подробно — orders/reopen.ts.
+ */
+ordersRouter.post(
+  "/:id/reopen",
+  ah(async (req, res) => {
+    const { reason, statusId } = z
+      .object({
+        reason: z.string().trim().min(2, "Напишите коротко, что нужно доделать").max(300),
+        statusId: z.string().uuid().optional(),
+      })
+      .parse(req.body ?? {});
+    const tenantId = tenantOf(req);
+    const me = actorUserId(req);
+
+    await withTenant(tenantId, async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: req.params.id, deletedAt: null },
+        include: { works: true, parts: true },
+      });
+      if (!order) throw notFound("Заказ не найден");
+      // Кто выдаёт или меняет статусы — тот и возвращает. Мастер с правом
+      // «только свои» — свой заказ.
+      const canAny = has(req, PERMISSIONS.ORDERS_ISSUE) || has(req, PERMISSIONS.ORDERS_STATUS);
+      const canOwn = has(req, PERMISSIONS.ORDERS_STATUS_OWN) && !!me && order.assignedMasterId === me;
+      if (!canAny && !canOwn) throw forbidden("Вернуть этот заказ в работу нельзя");
+      if (!order.issuedAt) throw conflict("Заказ ещё не выдан — он и так в работе");
+
+      const status = statusId
+        ? await tx.orderStatus.findFirst({ where: { id: statusId } })
+        : ((await tx.orderStatus.findFirst({ where: { group: "IN_PROGRESS" }, orderBy: { sortOrder: "asc" } })) ??
+          (await tx.orderStatus.findFirst({ where: { group: "NEW" }, orderBy: { sortOrder: "asc" } })));
+      if (!status) throw badRequest("Статус не найден");
+      if (status.group === "CLOSED" || status.group === "CANCELLED") {
+        throw badRequest("Выберите статус работы — «Выдан» и «Отменён» сюда не подходят");
+      }
+
+      const now = new Date();
+      const reopens = [
+        ...parseReopens(order.reopens),
+        snapshot({ ...order, issuedAt: order.issuedAt }, { at: now, byId: me, reason }),
+      ];
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          issuedAt: null,
+          issuedById: null,
+          // Снова в ремонте: «Готов» поставят ещё раз, и гарантия пойдёт от него.
+          completedAt: null,
+          paymentMethod: null,
+          debtDueAt: null,
+          statusId: status.id,
+          reopens: reopens as unknown as Prisma.InputJsonValue,
+        },
+      });
+      await tx.orderStatusHistory.create({
+        data: {
+          tenantId,
+          orderId: order.id,
+          fromStatusId: order.statusId,
+          toStatusId: status.id,
+          userId: me,
+          comment: `Возвращён в работу после выдачи: ${reason}`,
+        },
+      });
+      await writeAudit(tx, {
+        tenantId,
+        userId: me,
+        entity: "Order",
+        entityId: order.id,
+        action: "STATUS",
+        diff: { reopened: true, reason, issuedAt: order.issuedAt.toISOString(), to: status.name },
         ip: clientIp(req),
       });
     });

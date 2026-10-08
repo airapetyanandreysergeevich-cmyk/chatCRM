@@ -722,6 +722,9 @@ model Order {
   paymentMethod PaymentMethod?
   /// Когда клиент обещал заплатить. Только для выдачи в долг.
   debtDueAt     DateTime?
+  /// Возвраты в работу после выдачи: [{ at, byId, reason, issuedAt, total, works, parts }].
+  /// Снимок на момент возврата — по нему печатается «Акт доплаты» (orders/reopen.ts).
+  reopens       Json?
 
   totalWork  Decimal @default(0) @db.Decimal(12, 2)
   totalParts Decimal @default(0) @db.Decimal(12, 2)

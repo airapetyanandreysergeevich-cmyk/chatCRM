@@ -316,7 +316,7 @@ printingRouter.post(
   ah(async (req, res) => {
     const body = z
       .object({
-        doc: z.enum(["intake", "act", "test", "label", "label-test"]),
+        doc: z.enum(["intake", "act", "extra", "test", "label", "label-test"]),
         orderId: z.string().uuid().optional(),
         stationId: z.string().uuid().optional(),
         printer: z.string().trim().min(1).max(200).optional(),

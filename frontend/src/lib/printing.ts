@@ -13,7 +13,7 @@ import type { LabelsView } from "./labels";
  * сообщает серверу принтеры этого компьютера и печатает задания.
  */
 
-export type PrintDoc = "intake" | "act" | "test" | "label" | "label-test";
+export type PrintDoc = "intake" | "act" | "extra" | "test" | "label" | "label-test";
 export type IntakeMode = "ask" | "auto" | "off";
 
 export interface PrinterInfo {
@@ -150,7 +150,7 @@ export function stationUrl(
         ? `orders/${job.orderId}/label?${(job.items ?? []).map((i) => `i=${encodeURIComponent(i)}`).join("&")}&station=1${t}`
         : job.doc === "test" || !job.orderId
           ? `print-test?station=1&printer=${encodeURIComponent(job.printer)}&pc=${encodeURIComponent(stationName)}`
-          : `orders/${job.orderId}/print?doc=${job.doc === "act" ? "act" : "intake"}&station=1`;
+          : `orders/${job.orderId}/print?doc=${job.doc === "act" || job.doc === "extra" ? job.doc : "intake"}&station=1`;
   return new URL(BASE + path, window.location.origin).toString();
 }
 

@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { extraOf } from "./reopen";
 import type { Request } from "express";
 import { toLabels, withFlags } from "../../lib/dictionaries";
 import { forbidden } from "../../lib/errors";
@@ -167,6 +168,8 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
     totalParts: num(order.totalParts),
     previousRepair: opts.previousRepair ?? null,
     parentOrderId: order.parentOrderId,
+    // Возвращали в работу после выдачи — что добавили с тех пор (для «Акта доплаты»).
+    extra: extraOf(order, opts.money),
   };
 
   return {

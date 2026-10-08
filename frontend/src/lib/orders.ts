@@ -57,6 +57,19 @@ export interface PreviousRepair {
  * для тех, кому они не положены. Поэтому они необязательные — интерфейс
  * просто не рисует то, чего не пришло.
  */
+export type ExtraLine = { name: string; qty: number; price: number };
+/** «Акт доплаты»: последний возврат в работу и добавленное после него. Суммы — тем, кто видит деньги. */
+export interface OrderExtra {
+  times: number;
+  reopenedAt: string;
+  reason: string;
+  prevIssuedAt: string;
+  works: ExtraLine[];
+  parts: ExtraLine[];
+  totalBefore?: number;
+  amount?: number;
+}
+
 export interface Order {
   id: string;
   number: string;
@@ -117,6 +130,8 @@ export interface Order {
   totalWork: number | null;
   totalParts: number | null;
   previousRepair: PreviousRepair | null;
+  /** Возвращали в работу после выдачи — что добавили с тех пор (backend orders/reopen.ts). */
+  extra?: OrderExtra | null;
   parentOrderId: string | null;
 
   /**
@@ -281,13 +296,17 @@ export const ordersApi = {
     id: string,
     body: { diagnosis: string; masterComment?: string; recommendation?: string; warrantyDays?: number | null }
   ) => api.put(`/orders/${id}/finish`, body),
+  /** Выданный заказ — снова в работу. Без statusId — первый статус стадии «Ремонт». */
+  reopen: (id: string, reason: string, statusId?: string) =>
+    api.post<{ ok: true }>(`/orders/${id}/reopen`, { reason, ...(statusId ? { statusId } : {}) }),
   issue: (
     id: string,
-    opts: { discount?: number; reason?: string; payment?: { method: PaymentMethod; promisedAt?: string } } = {}
+    opts: { discount?: number; reason?: string; withoutRepair?: boolean; payment?: { method: PaymentMethod; promisedAt?: string } } = {}
   ) =>
-    api.post(`/orders/${id}/issue`, {
+    api.post<{ ok: true; extra?: { amount: number } }>(`/orders/${id}/issue`, {
       discount: opts.discount ?? 0,
       ...(opts.reason ? { reason: opts.reason } : {}),
+      ...(opts.withoutRepair ? { withoutRepair: true } : {}),
       ...(opts.payment ? { payment: opts.payment } : {}),
     }),
   /** Мягкое удаление: заказ уходит из списков, но остаётся в базе и в журнале. */

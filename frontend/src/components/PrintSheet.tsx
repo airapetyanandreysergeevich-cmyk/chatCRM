@@ -12,7 +12,10 @@ import type { DocTexts, PrintForms } from "../lib/printForms";
  * Всегда чёрным по белому, независимо от темы: это бумага, а не экран.
  */
 
-export type Doc = "intake" | "act";
+export type Doc = "intake" | "act" | "extra";
+
+/** Заголовок акта доплаты — после «Вернуть в работу» и повторной выдачи. */
+export const EXTRA_TITLE = "Акт доплаты";
 
 const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `${v.toLocaleString("ru-RU")} ₽`;
@@ -165,7 +168,9 @@ export function PrintSheet({
   const parts = order.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price }));
   const texts = doc === "intake" ? forms.intake : forms.act;
   // Приняли по гарантии — у квитанции свой заголовок («Акт приема … по гарантии»).
-  const title = doc === "intake" && order.kind === "WARRANTY" ? forms.warrantyTitle : texts.title;
+  const title =
+    doc === "extra" ? EXTRA_TITLE : doc === "intake" && order.kind === "WARRANTY" ? forms.warrantyTitle : texts.title;
+  const extra = order.extra ?? null;
 
   // Лист A4. Ширина в миллиметрах, чтобы на экране было видно, как ляжет.
   // В предпросмотре настроек лист не ужимается под окно: его уменьшают
@@ -198,8 +203,12 @@ export function PrintSheet({
                 стояла дата готовности, и заказ, забранный через неделю,
                 выглядел выданным в день ремонта. Ещё не выданный — сегодня:
                 акт печатают у стойки, когда клиент уже пришёл. */}
-            от {formatDate(doc === "act" ? (order.issuedAt ?? new Date().toISOString()) : order.acceptedAt)}
+            от {formatDate(doc !== "intake" ? (order.issuedAt ?? new Date().toISOString()) : order.acceptedAt)}
           </p>
+          {/* Доплата — к какой выдаче: заказ тот же, номер тот же. */}
+          {doc === "extra" && extra && (
+            <p className="mt-0.5 text-[11px] text-black/70">к выдаче от {formatDate(extra.prevIssuedAt)}</p>
+          )}
           {/* По гарантии — к какому ремонту: по нему и решают, гарантийный ли случай. */}
           {order.kind === "WARRANTY" && order.previousRepair && (
             <p className="mt-0.5 text-[11px] text-black/70">
@@ -231,8 +240,13 @@ export function PrintSheet({
                     doc === "intake" ? "Срок готовности" : "Ремонт завершён",
                     doc === "intake" ? formatDate(order.dueAt) : formatDateTime(order.completedAt),
                   ],
-                  ...(doc === "act" && order.issuedAt
-                    ? ([["Выдана клиенту", formatDateTime(order.issuedAt)]] as Array<[string, string]>)
+                  ...(doc === "extra" && extra
+                    ? ([["Выдана ранее", formatDateTime(extra.prevIssuedAt)]] as Array<[string, string]>)
+                    : []),
+                  ...(doc !== "intake" && order.issuedAt
+                    ? ([[doc === "extra" ? "Выдана повторно" : "Выдана клиенту", formatDateTime(order.issuedAt)]] as Array<
+                        [string, string]
+                      >)
                     : []),
                 ]}
               />
@@ -270,6 +284,11 @@ export function PrintSheet({
             </>
           ) : (
             <>
+              {doc === "extra" && extra && (
+                <Section title="Повторное обращение">
+                  <p className="text-[12px] leading-relaxed">{extra.reason || "—"}</p>
+                </Section>
+              )}
               <Section title="Заявленная неисправность">
                 <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
               </Section>
@@ -278,7 +297,56 @@ export function PrintSheet({
         }
       />
 
-      {doc === "intake" ? (
+      {doc === "extra" ? (
+        <>
+          <div className="mt-4">
+            <Section title="Дополнительно выполненные работы">
+              <LineTable rows={extra?.works ?? []} showMoney={showMoney} />
+            </Section>
+          </div>
+          <Section title="Дополнительные запчасти и материалы">
+            <LineTable rows={extra?.parts ?? []} showMoney={showMoney} />
+          </Section>
+          <div className="mt-4 grid grid-cols-2 items-start gap-x-[8mm] break-inside-avoid">
+            <Section title="Гарантия">
+              <Pairs
+                items={[
+                  [
+                    "На работы",
+                    order.warrantyDays ? `${order.warrantyDays} дн. — до ${formatDate(order.warrantyUntil)}` : "—",
+                  ],
+                  ["Мастер", order.assignedMaster?.fullName ?? "—"],
+                ]}
+              />
+            </Section>
+            {showMoney && extra?.amount !== undefined ? (
+              <table className="ml-auto text-[12px]">
+                <tbody>
+                  <tr>
+                    <td className="py-0.5 pr-6 text-black/55">По выдаче {formatDate(extra.prevIssuedAt)}</td>
+                    <td className="py-0.5 text-right tabular-nums">{money(extra.totalBefore)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 pr-6 text-black/55">Итого по заказу</td>
+                    <td className="py-0.5 text-right tabular-nums">{money(order.total)}</td>
+                  </tr>
+                  <tr className="border-t border-black/40">
+                    <td className="py-1 pr-6 font-bold">К доплате</td>
+                    <td className="py-1 text-right text-[15px] font-extrabold tabular-nums">{money(Math.max(0, extra.amount))}</td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              <div />
+            )}
+          </div>
+          <Terms title="Условия гарантии" texts={texts} />
+          <div className="grid grid-cols-2 gap-10">
+            <SignLine label={texts.signClient} />
+            <SignLine label={texts.signStaff} stamp={forms.stamp} />
+          </div>
+        </>
+      ) : doc === "intake" ? (
         <>
           <Terms title="Условия" texts={texts} />
           <div className="grid grid-cols-2 gap-10">
