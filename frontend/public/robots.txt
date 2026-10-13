@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /api/
+Disallow: /b/
+Disallow: /relay/
+Disallow: /download/
+
+Sitemap: https://www.finecrm.ru/sitemap.xml

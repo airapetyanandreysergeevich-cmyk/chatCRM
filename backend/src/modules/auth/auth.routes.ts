@@ -2,13 +2,25 @@ import { Router, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z, ZodError } from "zod";
 import { prisma, withTenant } from "../../lib/db";
-import { ah, unauthorized } from "../../lib/errors";
+import { AppError, ah, unauthorized } from "../../lib/errors";
 import { authenticate, currentTenantId, permissionsOf } from "../../middleware/auth";
 import { isWorkshopLogin, localProblem, splitWorkshopLogin } from "../../lib/login";
 import { findWorkshop } from "../relay/boxes.service";
 import { localLoginDomain } from "../relay/remoteAccess";
 import { relayHub } from "../relay/relay.instance";
-import { login, refreshCookieOptions, REFRESH_COOKIE, revokeRefresh, rotateRefresh } from "./auth.service";
+import {
+  login,
+  refreshCookieOptions,
+  REFRESH_COOKIE,
+  revokeRefresh,
+  rotateRefresh,
+  SIGNED_IN_COOKIE,
+  signedInCookieOptions,
+} from "./auth.service";
+
+/** Метка для главной (см. SIGNED_IN_COOKIE): поставить после входа, снять после выхода. */
+const markSignedIn = (res: Response) => res.cookie(SIGNED_IN_COOKIE, "1", signedInCookieOptions());
+const unmarkSignedIn = (res: Response) => res.clearCookie(SIGNED_IN_COOKIE, { ...signedInCookieOptions(), maxAge: undefined });
 
 export const authRouter = Router();
 
@@ -108,6 +120,7 @@ async function loginThroughBox(
   // Печенье сессии узел связи уже пометил путём /b/<код>/ — просто передаём.
   const cookies = reply.headers["set-cookie"];
   if (cookies) res.setHeader("set-cookie", cookies);
+  markSignedIn(res);
   res.json({ kind: "box", redirect: `/b/${found.code}/` });
 }
 
@@ -131,6 +144,7 @@ authRouter.post(
 
     const { accessToken, refresh, kind } = await login({ ...body, req });
     res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions());
+    markSignedIn(res);
     res.json({ accessToken, kind });
   })
 );
@@ -139,10 +153,23 @@ authRouter.post(
   "/refresh",
   ah(async (req, res) => {
     const raw = req.cookies?.[REFRESH_COOKIE];
-    if (!raw) throw unauthorized("Нет сессии");
-    const { accessToken, refresh } = await rotateRefresh(raw, req);
-    res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions());
-    res.json({ accessToken });
+    if (!raw) {
+      unmarkSignedIn(res);
+      throw unauthorized("Нет сессии");
+    }
+    let rotated: Awaited<ReturnType<typeof rotateRefresh>>;
+    try {
+      rotated = await rotateRefresh(raw, req);
+    } catch (e) {
+      // Сессия кончилась — на главной снова сайт. Сбой базы метку не трогает:
+      // человек по-прежнему свой, просто сервер на миг не ответил.
+      if (e instanceof AppError && e.status === 401) unmarkSignedIn(res);
+      throw e;
+    }
+    res.cookie(REFRESH_COOKIE, rotated.refresh, refreshCookieOptions());
+    // Заодно ставит метку тем, кто вошёл ещё до её появления.
+    markSignedIn(res);
+    res.json({ accessToken: rotated.accessToken });
   })
 );
 
@@ -151,6 +178,7 @@ authRouter.post(
   ah(async (req, res) => {
     await revokeRefresh(req.cookies?.[REFRESH_COOKIE]);
     res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOptions(), maxAge: undefined });
+    unmarkSignedIn(res);
     res.json({ ok: true });
   })
 );

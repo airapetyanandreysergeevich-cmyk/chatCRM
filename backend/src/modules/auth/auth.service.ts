@@ -27,6 +27,26 @@ export function refreshCookieOptions() {
   };
 }
 
+/**
+ * Метка «с этого браузера уже входили в программу».
+ *
+ * По ней nginx решает, что показать на главной: гостю — сайт о FineCRM, своему —
+ * программу. Ключ сессии для этого не годится: он живёт только на адресах
+ * /api/auth, и на «/» браузер его не присылает. В метке ничего секретного —
+ * просто «1»; доступ к данным по-прежнему решает только ключ сессии.
+ */
+export const SIGNED_IN_COOKIE = "rs_in";
+
+export function signedInCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: env.cookieSecure,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: env.refreshTokenTtlDays * 24 * 60 * 60 * 1000,
+  };
+}
+
 /** Создаёт refresh-сессию и возвращает сырой токен — в базе лежит только его хеш. */
 async function issueRefresh(params: {
   tenantId?: string | null;
