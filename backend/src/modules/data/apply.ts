@@ -295,6 +295,7 @@ async function applyStock(
     ...(numOrUndef(v["Цена продажи, ₽"]) !== undefined ? { salePrice: numOrUndef(v["Цена продажи, ₽"]) } : {}),
     ...(val(v["Место хранения"]) !== undefined ? { location: val(v["Место хранения"]) } : {}),
     ...(val(v["Поставщик"]) !== undefined ? { supplier: val(v["Поставщик"]) } : {}),
+    ...(val(v["Примечание"]) !== undefined ? { note: val(v["Примечание"]) } : {}),
   };
 
   const itemId = row.existingId

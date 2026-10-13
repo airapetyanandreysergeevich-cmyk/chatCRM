@@ -1060,6 +1060,8 @@ model StockItem {
   /// Цена продажи — её подставляет заказ, когда запчасть берут со склада.
   salePrice     Decimal? @db.Decimal(12, 2)
   supplier      String?
+  /// Примечание к позиции: что важно знать, беря её («ревизия 2.0», «под заказ»).
+  note          String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @default(now()) @updatedAt
 

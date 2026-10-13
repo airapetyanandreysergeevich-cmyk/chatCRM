@@ -205,8 +205,8 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
     key: "stock",
     title: "Склад",
     sheet: "Склад",
-    hint: "Номенклатура и остатки. Слияние по артикулу, а если его нет — по названию.",
-    matchBy: "Артикул",
+    hint: "Номенклатура и остатки. Слияние по артикулу и месту хранения, а если артикула нет — по названию и месту. Один товар в разных местах — разные позиции.",
+    matchBy: "Артикул и место",
     columns: [
       { title: "Артикул", aliases: ["SKU", "Код"], width: 18 },
       { title: "Наименование", aliases: ["Название", "Товар"], width: 40, required: true },
@@ -219,6 +219,7 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
       { title: "Цена продажи, ₽", aliases: ["Цена продажи", "Розница"], width: 16, kind: "number" },
       { title: "Место хранения", aliases: ["Место", "Ячейка"], width: 18 },
       { title: "Поставщик", width: 20 },
+      { title: "Примечание", aliases: ["Комментарий", "Заметка"], width: 30 },
     ],
   },
 

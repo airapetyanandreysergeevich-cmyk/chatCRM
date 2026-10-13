@@ -282,6 +282,9 @@ function validateRow(def: DatasetDef, values: Record<string, string>, row: numbe
 }
 
 /** Название услуги без учёта регистра и лишних пробелов — как её узнаёт человек. */
+/** Место хранения для сличения: без регистра и лишних пробелов; пусто — «без места». */
+export const placeKey = (raw: string | null | undefined): string => (raw ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
 export const serviceKey = (raw: string): string => raw.trim().replace(/\s+/g, " ").toLowerCase();
 
 function matchKey(dataset: DatasetKey, values: Record<string, string>): string | null {
@@ -295,9 +298,13 @@ function matchKey(dataset: DatasetKey, values: Record<string, string>): string |
   // Логин к этому времени уже приведён к виду мастерской (staffRowIssues).
   if (dataset === "staff") return (values["Логин"] ?? "").trim().toLowerCase() || null;
   if (dataset === "services") return serviceKey(values["Название"] ?? "") || null;
-  // На складе артикул есть не всегда — тогда сличаем по названию.
+  // На складе артикул есть не всегда — тогда сличаем по названию. И всегда — вместе
+  // с местом: один и тот же товар в шкафу и в ящике — две позиции со своими остатками.
   const sku = (values["Артикул"] ?? "").trim();
-  return sku || (values["Наименование"] ?? "").trim().toLowerCase() || null;
+  const what = sku || (values["Наименование"] ?? "").trim().toLowerCase();
+  if (!what) return null;
+  const loc = placeKey(values["Место хранения"]);
+  return loc ? `${what} · ${loc}` : what;
 }
 
 /** Помечаем строки, которые обновят существующие записи, а не создадут новые. */
@@ -382,14 +389,33 @@ async function markExisting(
   }
 
   // Удалённые со склада (скрытые) не узнаём: строка файла заведёт позицию заново, а не оживит невидимую.
-  const items = await tx.stockItem.findMany({ where: { isActive: true }, select: { id: true, sku: true, name: true } });
-  const bySku = new Map(items.filter((i) => i.sku).map((i) => [i.sku as string, i.id]));
-  const byName = new Map(items.map((i) => [i.name.trim().toLowerCase(), i.id]));
+  const items = await tx.stockItem.findMany({ where: { isActive: true }, select: { id: true, sku: true, name: true, location: true } });
+  const group = (key: (i: (typeof items)[number]) => string | null) => {
+    const m = new Map<string, typeof items>();
+    for (const i of items) {
+      const k = key(i);
+      if (k) m.set(k, [...(m.get(k) ?? []), i]);
+    }
+    return m;
+  };
+  const bySku = group((i) => i.sku);
+  const byName = group((i) => i.name.trim().toLowerCase());
+  // Позиция, которую уже взяла строка выше, второй строке не достаётся:
+  // «Шкаф А» и «Ящик 4» одного товара не должны слиться в одну.
+  const taken = new Set<string>();
   for (const r of rows) {
     const sku = (r.values["Артикул"] ?? "").trim();
-    const id = (sku && bySku.get(sku)) || byName.get((r.values["Наименование"] ?? "").trim().toLowerCase());
-    if (id) {
-      r.existingId = id;
+    const all = (sku ? bySku.get(sku) : byName.get((r.values["Наименование"] ?? "").trim().toLowerCase())) ?? [];
+    const free = all.filter((i) => !taken.has(i.id));
+    const loc = placeKey(r.values["Место хранения"]);
+    // Сначала — тот же товар в том же месте. Иначе единственный такой товар:
+    // у него ещё нет места (файл его проставит) или место в файле не указано.
+    const same = free.find((i) => placeKey(i.location) === loc);
+    const only = all.length === 1 && free.length === 1 && (!loc || !placeKey(free[0].location)) ? free[0] : undefined;
+    const hit = same ?? only;
+    if (hit) {
+      taken.add(hit.id);
+      r.existingId = hit.id;
       r.action = "update";
     }
   }

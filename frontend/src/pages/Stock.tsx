@@ -22,7 +22,7 @@ import { PartsSearch } from "../components/PartsSearch";
 import { SuggestInput } from "../components/SuggestInput";
 import { buildTree, CategoryDialog, flatTree, indent, rootColor, STOCK_PALETTE, type CategoryDialogKind, type TreeNode } from "../components/StockTree";
 import { CategoryPicker, ContextMenu, MenuItem, useMenuTrigger, type MenuAt, type MenuEntry } from "../components/StockMenu";
-import { Badge, Banner, Button, EmptyState, Field, Input, List, ListRow, PageHeader, SearchInput, Select, Spinner } from "../components/ui";
+import { Badge, Banner, Button, EmptyState, Field, GrowText, Input, List, ListRow, PageHeader, SearchInput, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDateTime, plural } from "../lib/format";
@@ -103,7 +103,7 @@ export default function Stock() {
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
   const [exact, setExact] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ item: StockItem | null; categoryId: string | null } | null>(null);
+  const [editing, setEditing] = useState<{ item: StockItem | null; categoryId: string | null; copy?: StockItem } | null>(null);
   const [moving, setMoving] = useState<{ item: StockItem; type: MoveType } | null>(null);
   const [history, setHistory] = useState<StockItem | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -557,6 +557,7 @@ export default function Stock() {
             { label: "Переместить в", icon: <IconFolder className={ico} />, sub: movePicker(ids, one ? item.categoryId ?? null : undefined, sheet) },
             ...(seesCost ? [{ label: "Наценка", icon: <span className="text-[13px] font-bold">%</span>, sub: markupPanel(ids, sheet) }] : []),
             { label: "Место хранения…", icon: <PinIcon />, onClick: () => setLocationFor(ids) },
+            ...(one ? [{ label: "Завести в другом месте…", icon: <IconPlus className={ico} />, onClick: () => setEditing({ item: null, categoryId: item.categoryId ?? null, copy: item }) }] : []),
           ] as MenuEntry[])
         : []),
       { sep: true },
@@ -736,6 +737,11 @@ export default function Stock() {
           <p className="truncate text-[14px] font-medium leading-snug md:text-[13.5px]">
             {i.name}
             {i.sku && <span className="ml-2 hidden font-mono text-[11.5px] text-ink-dim md:inline">{i.sku}</span>}
+            {i.note && (
+              <span title={i.note} aria-label={`Примечание: ${i.note}`} data-note-mark className="ml-1.5 inline-flex translate-y-[2px] text-ink-dim">
+                <NoteIcon />
+              </span>
+            )}
           </p>
           <p className="truncate text-[12.5px] text-ink-dim md:hidden">
             {[i.sku, i.location, i.salePrice ? money(i.salePrice) : null].filter(Boolean).join(" · ") || "—"}
@@ -1140,6 +1146,7 @@ export default function Stock() {
       {editing && (
         <ItemModal
           item={editing.item}
+          copy={editing.copy}
           defaultCategory={editing.categoryId}
           roots={roots}
           hints={hints}
@@ -1330,6 +1337,12 @@ const ExpandIcon = ({ collapse }: { collapse: boolean }) => (
     {collapse ? <path d="m7 4 5 5 5-5M7 20l5-5 5 5" /> : <path d="m7 9 5-5 5 5M7 15l5 5 5-5" />}
   </svg>
 );
+const NoteIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-[14px] w-[14px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M5 4h14v11l-5 5H5z" />
+    <path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4" />
+  </svg>
+);
 const PinIcon = () => (
   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z" />
@@ -1512,6 +1525,13 @@ function StockDetail({
         <div className="rounded-field border border-line bg-surface-input px-3 py-2.5">
           <p className="text-[11.5px] text-ink-dim">Поставщик</p>
           <p className="text-[14px] font-semibold">{item.supplier}</p>
+        </div>
+      )}
+
+      {item.note && (
+        <div className="rounded-field border border-line bg-surface-input px-3 py-2.5" data-detail-note>
+          <p className="text-[11.5px] text-ink-dim">Примечание</p>
+          <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{item.note}</p>
         </div>
       )}
 
@@ -1743,6 +1763,7 @@ const parseMoney = (v: string) => {
 
 function ItemModal({
   item,
+  copy,
   defaultCategory,
   roots,
   hints,
@@ -1751,6 +1772,8 @@ function ItemModal({
   onDone,
 }: {
   item: StockItem | null;
+  /** «Завести в другом месте»: всё как у этой позиции, кроме места и остатка. */
+  copy?: StockItem;
   defaultCategory: string | null;
   roots: ReturnType<typeof buildTree>;
   hints: { suppliers: string[]; locations: string[] };
@@ -1760,16 +1783,18 @@ function ItemModal({
 }) {
   const flat = flatTree(roots);
   const str = (n: number | null | undefined) => (n === null || n === undefined ? "" : String(n));
+  const src = item ?? copy ?? null;
   const [form, setForm] = useState({
-    name: item?.name ?? "",
-    sku: item?.sku ?? "",
-    categoryId: item ? (item.categoryId ?? "") : (defaultCategory ?? ""),
-    unit: item?.unit ?? "шт",
-    minQty: str(item?.minQty ?? 0),
+    name: src?.name ?? "",
+    sku: src?.sku ?? "",
+    categoryId: src ? (src.categoryId ?? "") : (defaultCategory ?? ""),
+    unit: src?.unit ?? "шт",
+    minQty: str(src?.minQty ?? 0),
     location: item?.location ?? "",
-    supplier: item?.supplier ?? "",
-    purchasePrice: str(item?.purchasePrice),
-    salePrice: str(item?.salePrice),
+    supplier: src?.supplier ?? "",
+    note: src?.note ?? "",
+    purchasePrice: str(src?.purchasePrice),
+    salePrice: str(src?.salePrice),
   });
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1800,6 +1825,7 @@ function ItemModal({
       minQty: Number(form.minQty.replace(",", ".")) || 0,
       location: form.location,
       supplier: form.supplier,
+      note: form.note,
       ...(seesCost ? { purchasePrice: purchase } : {}),
       salePrice: sale,
     };
@@ -1815,11 +1841,16 @@ function ItemModal({
   }
 
   return (
-    <Modal title={item ? item.name : "Новая позиция"} onClose={onClose}>
+    <Modal title={item ? item.name : copy ? "Тот же товар в другом месте" : "Новая позиция"} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4" data-stock-item-form>
         {error && <Banner tone="error">{error.message}</Banner>}
+        {copy && (
+          <Banner>
+            Отдельная позиция со своим остатком: укажите место, где лежит этот товар, и оприходуйте его. «{copy.name}» в «{copy.location || "без места"}» останется как есть.
+          </Banner>
+        )}
         <Field label="Название" error={error?.field("name")} hint="Так, как вы её ищете: «Блок питания 19V 65W»">
-          <Input value={form.name} onChange={set("name")} invalid={!!error?.field("name")} autoFocus={!item} />
+          <Input value={form.name} onChange={set("name")} invalid={!!error?.field("name")} autoFocus={!item && !copy} />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Артикул" error={error?.field("sku")} hint="Необязательно">
@@ -1837,7 +1868,7 @@ function ItemModal({
           </Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Место хранения" hint="Шкаф, полка, ячейка">
+          <Field label="Место хранения" hint="Шкаф, полка, ячейка. Тот же товар в другом месте — отдельная позиция">
             <SuggestInput
               value={form.location}
               onChange={(location) => setForm((f) => ({ ...f, location }))}
@@ -1893,6 +1924,9 @@ function ItemModal({
             <Input value={form.minQty} onChange={set("minQty")} inputMode="decimal" />
           </Field>
         </div>
+        <Field label="Примечание" hint="Видно в карточке позиции, ищется поиском склада">
+          <GrowText value={form.note} onChange={set("note")} maxLength={2000} placeholder="Ревизия платы, совместимость, «под заказ»…" rows={2} aria-label="Примечание" />
+        </Field>
         <div className="flex flex-col gap-2 pt-2 sm:flex-row-reverse">
           <Button type="submit" disabled={busy || !form.name.trim()} className="sm:flex-1">
             {busy ? "Сохраняем…" : item ? "Сохранить" : "Завести"}

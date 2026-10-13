@@ -219,6 +219,7 @@ export async function stockSheet(tx: Prisma.TransactionClient, ids?: string[]): 
       salePrice: true,
       location: true,
       supplier: true,
+      note: true,
       balances: {
         select: { qty: true, avgCost: true, warehouse: { select: { name: true } } },
       },
@@ -246,6 +247,7 @@ export async function stockSheet(tx: Prisma.TransactionClient, ids?: string[]): 
         i.salePrice === null ? "" : num(i.salePrice),
         i.location ?? "",
         i.supplier ?? "",
+        i.note ?? "",
       ];
     }),
   };

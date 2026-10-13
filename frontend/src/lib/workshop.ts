@@ -131,6 +131,8 @@ export interface StockItem {
   categoryPath?: string | null;
   location?: string | null;
   supplier?: string | null;
+  /** Примечание к позиции. */
+  note?: string | null;
   salePrice?: number | null;
   updatedAt?: string;
   minQty: number;
@@ -178,6 +180,7 @@ export interface StockItemInput {
   minQty?: number;
   location?: string;
   supplier?: string;
+  note?: string;
   purchasePrice?: number | null;
   salePrice?: number | null;
 }

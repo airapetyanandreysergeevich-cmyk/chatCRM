@@ -305,6 +305,7 @@ stockRouter.get(
         { category: { contains: w, mode: "insensitive" as const } },
         { location: { contains: w, mode: "insensitive" as const } },
         { supplier: { contains: w, mode: "insensitive" as const } },
+        { note: { contains: w, mode: "insensitive" as const } },
       ],
     });
     let words = searchWords(q.search);
@@ -354,6 +355,7 @@ stockRouter.get(
         categoryPath: i.categoryId ? pathOf(i.categoryId, byId) : null,
         location: i.location,
         supplier: i.supplier,
+        note: i.note,
         salePrice: i.salePrice === null ? null : num(i.salePrice),
         purchasePrice: i.purchasePrice === null ? null : num(i.purchasePrice),
         updatedAt: i.updatedAt,
@@ -448,9 +450,30 @@ const itemSchema = z.object({
   minQty: z.coerce.number().min(0).max(1_000_000).default(0),
   location: z.string().trim().max(120).optional(),
   supplier: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(2000).optional(),
   purchasePrice: money,
   salePrice: money,
 });
+
+/** Место для сравнения: пусто — «без места», без регистра и лишних пробелов. */
+const placeOf = (s: string | null | undefined) => (s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * Артикул занят — только если тот же товар лежит в том же месте. Один товар в
+ * шкафу и в ящике — две позиции со своими остатками (так их и загружают из файла).
+ */
+async function assertSkuFree(tx: Prisma.TransactionClient, sku: string | null | undefined, location: string | null | undefined, exceptId?: string) {
+  if (!sku) return;
+  const same = await tx.stockItem.findMany({ where: { sku, isActive: true, ...(exceptId ? { id: { not: exceptId } } : {}) }, select: { name: true, location: true } });
+  const hit = same.find((i) => placeOf(i.location) === placeOf(location));
+  if (hit) {
+    throw conflict(
+      location?.trim()
+        ? `Артикул «${sku}» в месте «${location.trim()}» уже есть — «${hit.name}». Другое место — другая позиция`
+        : `Артикул «${sku}» без места уже занят позицией «${hit.name}». Укажите место — тогда это будет отдельная позиция`
+    );
+  }
+}
 
 /** Категория позиции: из дерева (categoryId) или текстом (category) — и путь текстом рядом. */
 async function categoryData(tx: Prisma.TransactionClient, tenantId: string, body: { categoryId?: string | null; category?: string }) {
@@ -477,10 +500,7 @@ stockRouter.post(
     const tenantId = tenantOf(req);
 
     const item = await withTenant(tenantId, async (tx) => {
-      if (body.sku) {
-        const same = await tx.stockItem.findFirst({ where: { sku: body.sku, isActive: true } });
-        if (same) throw conflict(`Артикул «${body.sku}» уже занят позицией «${same.name}»`);
-      }
+      await assertSkuFree(tx, body.sku, body.location);
       const created = await tx.stockItem.create({
         data: {
           tenantId,
@@ -490,6 +510,7 @@ stockRouter.post(
           minQty: body.minQty,
           location: body.location || null,
           supplier: body.supplier || null,
+          note: body.note || null,
           purchasePrice: body.purchasePrice ?? null,
           salePrice: body.salePrice ?? null,
           ...(await categoryData(tx, tenantId, body)),
@@ -521,10 +542,9 @@ stockRouter.patch(
     await withTenant(tenantId, async (tx) => {
       const item = await tx.stockItem.findFirst({ where: { id: req.params.id } });
       if (!item) throw notFound("Позиция не найдена");
-      if (body.sku) {
-        const same = await tx.stockItem.findFirst({ where: { sku: body.sku, isActive: true, id: { not: item.id } } });
-        if (same) throw conflict(`Артикул «${body.sku}» уже занят позицией «${same.name}»`);
-      }
+      const sku = body.sku !== undefined ? body.sku || null : item.sku;
+      const location = body.location !== undefined ? body.location || null : item.location;
+      if (body.sku !== undefined || body.location !== undefined) await assertSkuFree(tx, sku, location, item.id);
       await tx.stockItem.update({
         where: { id: item.id },
         data: {
@@ -534,6 +554,7 @@ stockRouter.patch(
           ...(body.minQty !== undefined ? { minQty: body.minQty } : {}),
           ...(body.location !== undefined ? { location: body.location || null } : {}),
           ...(body.supplier !== undefined ? { supplier: body.supplier || null } : {}),
+          ...(body.note !== undefined ? { note: body.note || null } : {}),
           ...(body.purchasePrice !== undefined ? { purchasePrice: body.purchasePrice } : {}),
           ...(body.salePrice !== undefined ? { salePrice: body.salePrice } : {}),
           ...(await categoryData(tx, tenantId, body)),
@@ -615,6 +636,19 @@ stockRouter.post(
         }
         detail = { pct: body.pct, skipped: skipped.length };
       } else if (body.action === "location") {
+        // Тот же товар в том же месте — одна позиция: свести две в одно место нельзя.
+        const target = placeOf(body.location);
+        const skus = [...new Set(items.map((i) => i.sku).filter((x): x is string => !!x))];
+        if (skus.length) {
+          const twins = await tx.stockItem.findMany({ where: { sku: { in: skus }, isActive: true, id: { notIn: ids } }, select: { sku: true, name: true, location: true } });
+          const outside = twins.find((t) => placeOf(t.location) === target);
+          const inside = skus.find((sku) => items.filter((i) => i.sku === sku).length > 1);
+          if (outside || inside) {
+            throw conflict(
+              `Артикул «${outside?.sku ?? inside}» ${body.location.trim() ? `в месте «${body.location.trim()}»` : "без места"} уже есть — один товар в одном месте должен быть одной позицией`
+            );
+          }
+        }
         changed = (await tx.stockItem.updateMany({ where: { id: { in: ids } }, data: { location: body.location || null } })).count;
         detail = { location: body.location || null };
       } else {
