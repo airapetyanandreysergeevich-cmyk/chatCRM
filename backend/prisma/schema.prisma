@@ -1083,6 +1083,8 @@ model StockCategory {
   parentId  String?
   name      String
   sortOrder Int      @default(0)
+  /// Цвет карточки категории на складе («#45C08A»); пусто — по порядку из палитры.
+  color     String?
   createdAt DateTime @default(now())
 
   tenant   Tenant          @relation(fields: [tenantId], references: [id])

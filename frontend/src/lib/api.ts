@@ -123,15 +123,19 @@ export const api = {
    * в памяти вкладки, поэтому просто перейти по ссылке нельзя — запрос
    * должен нести заголовок авторизации, как и все остальные.
    */
-  download: async (path: string): Promise<{ blob: Blob; fileName: string }> => {
-    const headers: Record<string, string> = {};
-    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  download: async (path: string, body?: unknown): Promise<{ blob: Blob; fileName: string }> => {
+    // С телом — POST: список выбранного (сотни id) в адрес не помещается.
+    const init = (): RequestInit => {
+      const headers: Record<string, string> = {};
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+      if (body === undefined) return { headers, credentials: "include" };
+      headers["Content-Type"] = "application/json";
+      return { method: "POST", headers, credentials: "include", body: JSON.stringify(body) };
+    };
 
-    let res = await fetch(url(`api${path}`), { headers, credentials: "include" });
+    let res = await fetch(url(`api${path}`), init());
     if (res.status === 401 && (await refreshOnce())) {
-      const retry: Record<string, string> = {};
-      if (accessToken) retry.Authorization = `Bearer ${accessToken}`;
-      res = await fetch(url(`api${path}`), { headers: retry, credentials: "include" });
+      res = await fetch(url(`api${path}`), init());
     }
 
     if (!res.ok) {

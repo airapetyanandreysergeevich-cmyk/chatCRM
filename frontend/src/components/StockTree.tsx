@@ -1,33 +1,29 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ApiError } from "../lib/api";
-import { stockApi, type StockCatalog, type StockCategory } from "../lib/workshop";
-import { IconChevronDown, IconDelete, IconEdit, IconPlus } from "./icons";
+import { stockApi, type StockCategory } from "../lib/workshop";
 import { Modal } from "./Modal";
 import { Banner, Button, Field, Input, Select } from "./ui";
 
 /**
- * Каталог склада деревом — как папки в Проводнике.
+ * Каталог склада: дерево категорий и всё, что с ним работает, — цвета
+ * карточек, окно «новая / переименовать / удалить».
  *
- * Слева «Все позиции», «Без категории» и категории с подкатегориями; число —
- * позиций вместе с подкатегориями. Что раскрыто, помнится на устройстве.
- * У того, кто ведёт склад, при наведении — «+» (подкатегория), карандаш и
- * урна; позицию из списка можно перетащить мышью на категорию.
+ * Сам склад (pages/Stock.tsx) показывает категории верхнего уровня
+ * карточками своего цвета, подкатегории — кнопками внутри карточки.
  */
 
-const OPEN_KEY = "finecrm.stock.open";
-const readOpen = (): Set<string> => {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]") as string[]);
-  } catch {
-    return new Set();
-  }
-};
-const saveOpen = (s: Set<string>) => {
-  try {
-    localStorage.setItem(OPEN_KEY, JSON.stringify([...s]));
-  } catch {
-    /* не запомнили — откроется свёрнутым */
-  }
+/** Цвета карточек категорий. Свой цвет не выбран — берётся по порядку. */
+export const STOCK_PALETTE = ["#4C8DFF", "#45C08A", "#E8A94B", "#46B9CE", "#B48CF0", "#E06B6B", "#F08CC0", "#8A93A6"];
+
+/**
+ * Цвет категории верхнего уровня: свой или из палитры по её id. Не по месту в
+ * списке: иначе новая категория «Аксессуары» перекрасила бы все карточки ниже.
+ */
+export const rootColor = (root: { id: string; color?: string | null }) => {
+  if (root.color) return root.color;
+  let h = 0;
+  for (const ch of root.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return STOCK_PALETTE[h % (STOCK_PALETTE.length - 1)];
 };
 
 export interface TreeNode extends StockCategory {
@@ -69,178 +65,18 @@ export function flatTree(roots: TreeNode[]): TreeNode[] {
 
 export const indent = (n: TreeNode) => "   ".repeat(n.depth) + n.name;
 
-type Dialog =
+export type CategoryDialogKind =
   | { kind: "create"; parentId: string | null }
   | { kind: "edit"; node: TreeNode }
   | { kind: "delete"; node: TreeNode };
 
-export function StockTree({
-  catalog,
-  selected,
-  onSelect,
-  canEdit,
-  onChanged,
-  onDropItem,
-}: {
-  catalog: StockCatalog;
-  /** "" — все позиции, "none" — без категории, иначе id. */
-  selected: string;
-  onSelect: (key: string) => void;
-  canEdit: boolean;
-  onChanged: () => void;
-  /** Позицию бросили на категорию (null — «Без категории»). */
-  onDropItem?: (itemId: string, categoryId: string | null) => void;
-}) {
-  const roots = useMemo(() => buildTree(catalog.items), [catalog.items]);
-  const [open, setOpen] = useState<Set<string>>(readOpen);
-  const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [over, setOver] = useState<string | null>(null);
-
-  const toggle = (id: string) =>
-    setOpen((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      saveOpen(next);
-      return next;
-    });
-
-  const drop = (key: string) =>
-    onDropItem
-      ? {
-          onDragOver: (e: React.DragEvent) => {
-            if (!e.dataTransfer.types.includes("text/x-stock-item")) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            if (over !== key) setOver(key);
-          },
-          onDragLeave: () => setOver((o) => (o === key ? null : o)),
-          onDrop: (e: React.DragEvent) => {
-            e.preventDefault();
-            setOver(null);
-            const id = e.dataTransfer.getData("text/x-stock-item");
-            if (id) onDropItem(id, key === "none" ? null : key);
-          },
-        }
-      : {};
-
-  const row = (key: string, label: string, count: number, depth: number, node?: TreeNode) => {
-    const active = selected === key;
-    const hasKids = !!node?.children.length;
-    const isOpen = node ? open.has(node.id) : false;
-    return (
-      <div
-        key={key || "all"}
-        {...(key ? drop(key) : {})}
-        data-cat={key || "all"}
-        className={
-          "group flex min-h-[38px] items-center rounded-field pr-1 text-[14px] transition-colors " +
-          (over === key ? "bg-brand-tint ring-2 ring-brand " : active ? "bg-brand-tint text-brand-ink " : "hover:bg-surface-raised ")
-        }
-        style={{ paddingLeft: `${4 + depth * 16}px` }}
-      >
-        <button
-          type="button"
-          aria-label={hasKids ? (isOpen ? `Свернуть: ${label}` : `Раскрыть: ${label}`) : undefined}
-          tabIndex={hasKids ? 0 : -1}
-          onClick={() => node && hasKids && toggle(node.id)}
-          className={"flex h-7 w-6 shrink-0 items-center justify-center text-ink-dim " + (hasKids ? "hover:text-ink" : "invisible")}
-        >
-          <IconChevronDown className={"h-4 w-4 transition-transform " + (isOpen ? "" : "-rotate-90")} />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onSelect(key);
-            if (node && hasKids && !isOpen) toggle(node.id);
-          }}
-          className={"min-w-0 flex-1 truncate py-1.5 text-left " + (active ? "font-semibold" : "")}
-          title={label}
-        >
-          {label}
-        </button>
-        {node && canEdit && (
-          <span className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-            <IconBtn label={`Подкатегория в «${label}»`} onClick={() => setDialog({ kind: "create", parentId: node.id })}>
-              <IconPlus className="h-[15px] w-[15px]" />
-            </IconBtn>
-            <IconBtn label={`Изменить «${label}»`} onClick={() => setDialog({ kind: "edit", node })}>
-              <IconEdit className="h-[15px] w-[15px]" />
-            </IconBtn>
-            <IconBtn label={`Удалить «${label}»`} onClick={() => setDialog({ kind: "delete", node })}>
-              <IconDelete className="h-[15px] w-[15px]" />
-            </IconBtn>
-          </span>
-        )}
-        <span className="ml-1 w-8 shrink-0 text-right font-mono text-[12px] text-ink-dim">{count}</span>
-      </div>
-    );
-  };
-
-  const render = (list: TreeNode[]): React.ReactNode =>
-    list.map((n) => (
-      <div key={n.id}>
-        {row(n.id, n.name, n.total, n.depth, n)}
-        {open.has(n.id) && n.children.length > 0 && render(n.children)}
-      </div>
-    ));
-
-  return (
-    <div data-stock-tree>
-      <div className="space-y-0.5">
-        {row("", "Все позиции", catalog.total, 0)}
-        {render(roots)}
-        {(catalog.uncategorized > 0 || selected === "none") && row("none", "Без категории", catalog.uncategorized, 0)}
-      </div>
-      {canEdit && (
-        <button
-          type="button"
-          onClick={() => setDialog({ kind: "create", parentId: null })}
-          className="mt-2 flex min-h-[36px] w-full items-center gap-2 rounded-field px-2 text-[13.5px] font-semibold text-brand-ink hover:bg-surface-raised"
-        >
-          <IconPlus className="h-4 w-4" /> Категория
-        </button>
-      )}
-      {dialog && (
-        <CategoryDialog
-          dialog={dialog}
-          roots={roots}
-          onClose={() => setDialog(null)}
-          onDone={(selectId) => {
-            setDialog(null);
-            if (selectId !== undefined) onSelect(selectId);
-            onChanged();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function IconBtn({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className="flex h-7 w-7 items-center justify-center rounded-field text-ink-dim hover:bg-surface-input hover:text-ink"
-    >
-      {children}
-    </button>
-  );
-}
-
-function CategoryDialog({
+export function CategoryDialog({
   dialog,
   roots,
   onClose,
   onDone,
 }: {
-  dialog: Dialog;
+  dialog: CategoryDialogKind;
   roots: TreeNode[];
   onClose: () => void;
   onDone: (selectId?: string) => void;

@@ -19,6 +19,8 @@ import {
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { recalcTotals } from "../orders/orders.service";
 import { applyMovement, defaultWarehouse, num } from "./stock.service";
+import { stockSheet } from "../data/export";
+import { contentDisposition, writeXlsx } from "../data/tableFile";
 import { assertCategory, ensurePath, pathOf, refreshPaths, splitPath, syncTextCategories, withDescendants } from "./catalog";
 
 /**
@@ -92,7 +94,7 @@ stockRouter.get(
       ]);
       const n = new Map(counts.map((c) => [c.categoryId, c._count._all]));
       return {
-        items: cats.map((c) => ({ id: c.id, parentId: c.parentId, name: c.name, count: n.get(c.id) ?? 0 })),
+        items: cats.map((c) => ({ id: c.id, parentId: c.parentId, name: c.name, color: c.color, count: n.get(c.id) ?? 0 })),
         uncategorized: n.get(null) ?? 0,
         total,
       };
@@ -100,6 +102,9 @@ stockRouter.get(
     res.json(out);
   })
 );
+
+/** Цвет карточки категории: «#RRGGBB»; null — снова по порядку из палитры. */
+const categoryColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Цвет — в виде #45C08A").nullable().optional();
 
 const categoryName = z.string().trim().min(1, "Назовите категорию").max(80).refine((s) => !s.includes("/"), "Без «/» в названии — это знак подкатегории");
 
@@ -127,7 +132,7 @@ stockRouter.patch(
   "/categories/:id",
   requirePermission(PERMISSIONS.STOCK_MOVE),
   ah(async (req, res) => {
-    const body = z.object({ name: categoryName.optional(), parentId: z.string().uuid().nullable().optional() }).parse(req.body);
+    const body = z.object({ name: categoryName.optional(), parentId: z.string().uuid().nullable().optional(), color: categoryColor }).parse(req.body);
     const tenantId = tenantOf(req);
     await withTenant(tenantId, async (tx) => {
       const cat = await tx.stockCategory.findFirst({ where: { id: req.params.id } });
@@ -145,7 +150,7 @@ stockRouter.patch(
         where: { id: { not: cat.id }, parentId, name: { equals: name, mode: "insensitive" } },
       });
       if (same) throw conflict(`Категория «${same.name}» здесь уже есть`);
-      await tx.stockCategory.update({ where: { id: cat.id }, data: { name, parentId } });
+      await tx.stockCategory.update({ where: { id: cat.id }, data: { name, parentId, ...(body.color !== undefined ? { color: body.color } : {}) } });
       await refreshPaths(tx, cat.id);
       await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "stockCategory", entityId: cat.id, action: "UPDATE", diff: body as Record<string, unknown>, ip: clientIp(req) });
     });
@@ -272,6 +277,8 @@ stockRouter.get(
         category: z.string().max(60).optional(),
         supplier: z.string().trim().max(120).optional(),
         location: z.string().trim().max(120).optional(),
+        /** Всё отобранное одним ответом — склад показывает позиции по категориям, без страниц. */
+        all: z.string().optional(),
         ...pageFields,
       })
       .parse(req.query);
@@ -404,7 +411,10 @@ stockRouter.get(
       }
     };
     const ordered = q.sort === "name" ? filtered : [...filtered].sort((a, b) => compareKeys(keyOf(a), keyOf(b)));
-    const page = ordered.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
+    const everything = truthy(q.all);
+    const pageSize = everything ? Math.max(1, ordered.length) : q.pageSize;
+    const pageNo = everything ? 1 : q.page;
+    const page = ordered.slice((pageNo - 1) * pageSize, pageNo * pageSize);
 
     res.json({
       searchFixed,
@@ -415,12 +425,13 @@ stockRouter.get(
       totals: {
         positions: items.length,
         low: items.filter((i) => i.low).length,
+        zero: items.filter((i) => i.qty <= 0).length,
         ...(cost ? { value: items.reduce((n, i) => n + i.value, 0) } : {}),
       },
       total: filtered.length,
-      page: q.page,
-      pageSize: q.pageSize,
-      pages: Math.max(1, Math.ceil(filtered.length / q.pageSize)),
+      page: pageNo,
+      pageSize,
+      pages: Math.max(1, Math.ceil(filtered.length / pageSize)),
     });
   })
 );
@@ -540,6 +551,126 @@ stockRouter.patch(
     });
 
     res.json({ ok: true });
+  })
+);
+
+// ------------------------------------------------------- сразу много позиций
+
+/** Наценка от закупки с округлением вверх до 10 ₽ — как кнопки в карточке позиции. */
+export const withMarkup = (purchase: number, pct: number) => Math.ceil((purchase * (1 + pct / 100)) / 10) * 10;
+
+const bulkSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("move"), ids: z.array(z.string().uuid()).min(1).max(500), categoryId: z.string().uuid().nullable() }),
+  z.object({ action: z.literal("markup"), ids: z.array(z.string().uuid()).min(1).max(500), pct: z.coerce.number().min(1).max(1000) }),
+  z.object({ action: z.literal("location"), ids: z.array(z.string().uuid()).min(1).max(500), location: z.string().trim().max(120) }),
+  z.object({ action: z.literal("delete"), ids: z.array(z.string().uuid()).min(1).max(500) }),
+]);
+
+/**
+ * Одно действие над выбранными позициями: перенести в категорию, поставить
+ * цену продажи наценкой от закупки, место хранения, удалить.
+ *
+ * Всё — одной транзакцией: либо со всеми выбранными, либо ни с одной.
+ * Удаление — только того, чего на складе нет: остаток сначала списывают
+ * движением (правило раздела), иначе штуки исчезли бы без следа. Удалённая
+ * позиция скрывается, а не стирается: на неё ссылаются движения и заказы.
+ */
+stockRouter.post(
+  "/bulk",
+  requirePermission(PERMISSIONS.STOCK_MOVE),
+  ah(async (req, res) => {
+    const body = bulkSchema.parse(req.body);
+    const tenantId = tenantOf(req);
+    const ids = [...new Set(body.ids)];
+    const out = await withTenant(tenantId, async (tx) => {
+      const items = await tx.stockItem.findMany({
+        where: { id: { in: ids }, isActive: true },
+        include: { balances: { select: { qty: true } } },
+      });
+      if (items.length !== ids.length) throw notFound("Часть позиций не найдена — обновите страницу");
+      let changed = 0;
+      const skipped: string[] = [];
+      const skippedIds = new Set<string>();
+      let detail: Record<string, unknown> = {};
+
+      if (body.action === "move") {
+        const categoryId = await assertCategory(tx, body.categoryId);
+        let category: string | null = null;
+        if (categoryId) {
+          const all = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
+          category = pathOf(categoryId, new Map(all.map((c) => [c.id, c])));
+        }
+        changed = (await tx.stockItem.updateMany({ where: { id: { in: ids } }, data: { categoryId, category } })).count;
+        detail = { categoryId, category };
+      } else if (body.action === "markup") {
+        for (const i of items) {
+          const purchase = i.purchasePrice === null ? 0 : num(i.purchasePrice);
+          if (purchase <= 0) {
+            skipped.push(i.name);
+            skippedIds.add(i.id);
+            continue;
+          }
+          await tx.stockItem.update({ where: { id: i.id }, data: { salePrice: withMarkup(purchase, body.pct) } });
+          changed++;
+        }
+        detail = { pct: body.pct, skipped: skipped.length };
+      } else if (body.action === "location") {
+        changed = (await tx.stockItem.updateMany({ where: { id: { in: ids } }, data: { location: body.location || null } })).count;
+        detail = { location: body.location || null };
+      } else {
+        const left = items
+          .map((i) => ({ name: i.name, unit: i.unit, qty: i.balances.reduce((n, b) => n + num(b.qty), 0) }))
+          .filter((i) => i.qty > 0);
+        if (left.length) {
+          const list = left.slice(0, 3).map((i) => `«${i.name}» — ${i.qty} ${i.unit}`).join(", ");
+          throw conflict(
+            `На складе ещё есть: ${list}${left.length > 3 ? ` и ещё ${left.length - 3}` : ""}. Сначала спишите остаток — потом удаляйте.`
+          );
+        }
+        changed = (await tx.stockItem.updateMany({ where: { id: { in: ids } }, data: { isActive: false } })).count;
+      }
+
+      // Журнал — у каждой позиции свой: «кто поменял цену этой матрице» ищут по позиции.
+      for (const i of items) {
+        if (skippedIds.has(i.id)) continue;
+        await writeAudit(tx, {
+          tenantId,
+          userId: actorUserId(req),
+          entity: "stockItem",
+          entityId: i.id,
+          action: body.action === "delete" ? "DELETE" : "UPDATE",
+          diff: { bulk: body.action, name: i.name, of: ids.length, ...detail },
+          ip: clientIp(req),
+        });
+      }
+      return { changed, skipped };
+    });
+    res.json({ ok: true, ...out });
+  })
+);
+
+/**
+ * Выбранные позиции — файлом Excel, тем же листом, что «Базы → Выгрузка»:
+ * поправили цены в Excel — и загрузили обратно там же.
+ */
+stockRouter.post(
+  "/export",
+  requirePermission(PERMISSIONS.STOCK_MOVE),
+  ah(async (req, res) => {
+    const { ids, name } = z
+      .object({ ids: z.array(z.string().uuid()).min(1).max(2000), name: z.string().trim().max(80).optional() })
+      .parse(req.body);
+    const tenantId = tenantOf(req);
+    const sheet = await withTenant(tenantId, async (tx) => {
+      const built = await stockSheet(tx, [...new Set(ids)]);
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "Data", entityId: "stock", action: "EXPORT", diff: { format: "xlsx", rows: built.rows.length, from: "stock" }, ip: clientIp(req) });
+      return built;
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const base = (name || "Склад").replace(/[\\/:*?"<>|]+/g, " ").trim() || "Склад";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", contentDisposition(`${base} ${stamp}.xlsx`, `stock-${stamp}.xlsx`));
+    res.send(await writeXlsx([sheet]));
   })
 );
 

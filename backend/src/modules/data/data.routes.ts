@@ -116,7 +116,7 @@ dataRouter.get(
         tx.user.count({ where: { deletedAt: null } }),
         tx.order.count({ where: { deletedAt: null } }),
         tx.customer.count({ where: { deletedAt: null } }),
-        tx.stockItem.count(),
+        tx.stockItem.count({ where: { isActive: true } }),
         tx.service.count(),
         tx.transaction.count({ where: { deletedAt: null } }),
       ]);

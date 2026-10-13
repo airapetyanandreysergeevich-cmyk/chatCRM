@@ -202,9 +202,12 @@ async function ordersSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   };
 }
 
-async function stockSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
+/** Склад листом; ids — только эти позиции (выгрузка выбранного со страницы склада). */
+export async function stockSheet(tx: Prisma.TransactionClient, ids?: string[]): Promise<SheetData> {
   const def = DATASETS.stock;
   const items = await tx.stockItem.findMany({
+    // Удалённые со склада скрыты и в файл не идут — иначе загрузка обратно оживила бы их.
+    where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) },
     orderBy: { name: "asc" },
     take: MAX_ROWS,
     select: {

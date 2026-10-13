@@ -148,6 +148,8 @@ export interface StockCategory {
   id: string;
   parentId: string | null;
   name: string;
+  /** Свой цвет карточки «#45C08A»; пусто — по порядку из палитры. */
+  color?: string | null;
   count: number;
 }
 
@@ -183,7 +185,7 @@ export interface StockItemInput {
 export interface StockList {
   items: StockItem[];
   /** Счётчики по всему складу, а не по странице и не по фильтру. */
-  totals: { positions: number; low: number; value?: number };
+  totals: { positions: number; low: number; zero?: number; value?: number };
   /** Поиск исправил раскладку — см. lib/searchPrefs. */
   searchFixed?: string | null;
   total: number;
@@ -306,12 +308,36 @@ export const stockApi = {
       category?: string;
       supplier?: string;
       location?: string;
+      /** «1» — всё отобранное одним ответом, без страниц. */
+      all?: string;
     } = {}
   ) => api.get<StockList>(`/stock${qs(params)}`),
   catalog: () => api.get<StockCatalog>("/stock/categories"),
   createCategory: (name: string, parentId: string | null) =>
     api.post<{ id: string; name: string; parentId: string | null }>("/stock/categories", { name, parentId }),
-  updateCategory: (id: string, body: { name?: string; parentId?: string | null }) => api.patch(`/stock/categories/${id}`, body),
+  updateCategory: (id: string, body: { name?: string; parentId?: string | null; color?: string | null }) =>
+    api.patch(`/stock/categories/${id}`, body),
+  /** Одно действие над выбранными позициями (см. backend stock.routes.ts → /bulk). */
+  bulk: (
+    body:
+      | { action: "move"; ids: string[]; categoryId: string | null }
+      | { action: "markup"; ids: string[]; pct: number }
+      | { action: "location"; ids: string[]; location: string }
+      | { action: "delete"; ids: string[] }
+  ) => api.post<{ ok: true; changed: number; skipped: string[] }>("/stock/bulk", body),
+  /** Выбранные позиции файлом Excel — тем же листом, что «Базы → Выгрузка». */
+  exportItems: async (ids: string[], name?: string) => {
+    const { blob, fileName } = await api.download("/stock/export", { ids, name });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Не сразу: иначе браузер иногда не успевает забрать файл и сохраняет его безымянным.
+    setTimeout(() => URL.revokeObjectURL(href), 30_000);
+  },
   deleteCategory: (id: string, moveTo?: string | null) =>
     api.del<{ ok: true; items: number; children: number }>(`/stock/categories/${id}${moveTo ? `?moveTo=${moveTo}` : ""}`),
   hints: () => api.get<{ suppliers: string[]; locations: string[] }>("/stock/hints"),

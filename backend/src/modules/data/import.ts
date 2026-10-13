@@ -381,7 +381,8 @@ async function markExisting(
     return;
   }
 
-  const items = await tx.stockItem.findMany({ select: { id: true, sku: true, name: true } });
+  // Удалённые со склада (скрытые) не узнаём: строка файла заведёт позицию заново, а не оживит невидимую.
+  const items = await tx.stockItem.findMany({ where: { isActive: true }, select: { id: true, sku: true, name: true } });
   const bySku = new Map(items.filter((i) => i.sku).map((i) => [i.sku as string, i.id]));
   const byName = new Map(items.map((i) => [i.name.trim().toLowerCase(), i.id]));
   for (const r of rows) {
