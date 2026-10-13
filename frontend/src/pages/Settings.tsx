@@ -98,7 +98,7 @@ const SECTIONS: Section[] = [
 
 export default function Settings() {
   const { can, me } = useAuth();
-  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
   // Раздел виден всем, но внутри у каждого своё: мастеру — только
   // оповещения, владельцу ещё и базы. Показывать недоступное с замочком
   // бессмысленно: сотрудник всё равно ничего с этим не сделает.

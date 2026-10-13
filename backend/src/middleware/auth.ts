@@ -37,7 +37,16 @@ export function currentTenantId(req: Request): string | null {
 export function permissionsOf(req: Request): string[] {
   if (!req.auth) return [];
   if (req.auth.kind === "platform") return [...ALL_PERMISSIONS];
-  return req.auth.isOwner ? [...ALL_PERMISSIONS] : req.auth.permissions;
+  return req.auth.isOwner || req.auth.isCoOwner ? [...ALL_PERMISSIONS] : req.auth.permissions;
+}
+
+/**
+ * Владелец или совладелец: всё, что раньше было «только владельцу» (стирание
+ * баз, тестовые данные, перенос, обратная связь), им одинаково доступно.
+ * Отличия совладельца — только в «Сотрудниках»: владельца он не трогает.
+ */
+export function isOwnerLike(req: Request): boolean {
+  return req.auth?.kind === "tenant" && (req.auth.isOwner || !!req.auth.isCoOwner);
 }
 
 export function requirePermission(...codes: string[]) {

@@ -246,6 +246,7 @@ export async function computeMonth(
       fullName: true,
       isActive: true,
       isOwner: true,
+      isCoOwner: true,
       deletedAt: true,
       workPercent: true,
       role: { select: { name: true } },
@@ -339,7 +340,7 @@ export async function computeMonth(
     rows.push({
       userId: u.id,
       name: u.fullName,
-      role: u.role?.name ?? (u.isOwner ? "Владелец" : null),
+      role: u.role?.name ?? (u.isOwner ? "Владелец" : u.isCoOwner ? "Совладелец" : null),
       isActive: u.isActive && !u.deletedAt,
       percent,
       start,

@@ -9,6 +9,8 @@ export interface TenantTokenPayload {
   roleCode: string | null;
   permissions: string[];
   isOwner: boolean;
+  /** Совладелец — права как у владельца (старые токены без поля — не совладелец). */
+  isCoOwner?: boolean;
 }
 
 /** Токен собственника или администратора платформы. */

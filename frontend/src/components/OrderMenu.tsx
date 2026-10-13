@@ -200,6 +200,10 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
   const bind = useCallback(
     (o: MenuOrder) => ({
       onContextMenu: (e: React.MouseEvent) => {
+        // Правая кнопка по технике и серийному номеру — их меню (копировать и
+        // поиск, components/CopyMenu.tsx), а не меню заказа.
+        const mouse = !(lastPointer.current === "touch" || lastPointer.current === "pen");
+        if (mouse && (e.target as Element).closest?.('[data-copy-kind="device"],[data-copy-kind="serial"]')) return;
         e.preventDefault();
         e.stopPropagation();
         const touch = lastPointer.current === "touch" || lastPointer.current === "pen";

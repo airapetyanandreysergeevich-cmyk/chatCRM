@@ -27,6 +27,8 @@ export interface OrderWork {
 export interface OrderPart extends OrderWork {
   source: "STOCK" | "PURCHASED" | "CUSTOMER";
   cost?: number | null;
+  /** Позиция склада: строка списывается со склада при сохранении заказа. */
+  stockItemId?: string | null;
 }
 
 export interface OrderAttachment {
@@ -289,7 +291,12 @@ export const ordersApi = {
   setStatus: (id: string, statusId: string, comment?: string) =>
     api.post(`/orders/${id}/status`, { statusId, comment }),
   saveWorks: (id: string, works: OrderWork[]) => api.put(`/orders/${id}/works`, { works }),
-  saveParts: (id: string, parts: OrderPart[]) => api.put(`/orders/${id}/parts`, { parts }),
+  /** sync: склад сверяется с заказом — новое списывается, убранное возвращается (stock/catalog.ts). */
+  saveParts: (id: string, parts: OrderPart[]) =>
+    api.put<{ ok: true; stock?: Array<{ name: string; qty: number; dir: "out" | "back" }> }>(`/orders/${id}/parts`, {
+      parts: parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price, source: p.source, stockItemId: p.stockItemId ?? null })),
+      sync: true,
+    }),
   complete: (id: string, body: unknown) => api.post(`/orders/${id}/complete`, body),
   /** Итог ремонта без смены статуса: диагноз, комментарий, рекомендации, гарантия. */
   saveFinish: (

@@ -2,7 +2,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { withTenant } from "../../lib/db";
 import { ah, forbidden } from "../../lib/errors";
-import { actorUserId, authenticate, currentTenantId, requireTenant } from "../../middleware/auth";
+import { actorUserId, authenticate, currentTenantId, requireTenant, isOwnerLike } from "../../middleware/auth";
 
 /**
  * Обратная связь от мастерской.
@@ -33,7 +33,7 @@ feedbackRouter.use(authenticate, requireTenant);
  * выглядело бы жалобой мастерской, которой она не подавала.
  */
 function requireWorkshopOwner(req: Request) {
-  if (req.auth?.kind !== "tenant" || !req.auth.isOwner) {
+  if (!isOwnerLike(req)) {
     throw forbidden("Обратную связь отправляет владелец мастерской");
   }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { copyable } from "../components/CopyMenu";
+import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { IconChevronLeft, IconCompany, IconEdit, IconOrders, IconPerson, IconUrgent, IconWarranty } from "../components/icons";
 import {
@@ -218,7 +218,7 @@ export default function ClientCard() {
                   title={
                     <>
                       <span className="font-mono text-[14px] text-ink-soft" {...copyable("order", o.number)}>{o.number}</span>
-                      <span className="truncate">{deviceTitle(o.device)}</span>
+                      <span className="truncate" {...copyable("device", deviceText(o.device))}>{deviceTitle(o.device)}</span>
                       {o.isUrgent && (
                         <Badge tone="danger" icon={<IconUrgent />}>
                           срочный

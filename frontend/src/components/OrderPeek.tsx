@@ -1,3 +1,4 @@
+import { copyable, deviceText } from "./CopyMenu";
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
@@ -117,8 +118,8 @@ function PeekBody({ order: o, onPhoto }: { order: PeekOrder; onPhoto: (i: number
 
       <Lines
         items={[
-          ["Техника", <span key="d" className="font-semibold">{device}</span>],
-          ["Серийный номер", o.device?.serial ? <span className="font-mono">{o.device.serial}</span> : null],
+          ["Техника", <span key="d" className="font-semibold" {...copyable("device", deviceText(o.device))}>{device}</span>],
+          ["Серийный номер", o.device?.serial ? <span className="font-mono" {...copyable("serial", o.device.serial)}>{o.device.serial}</span> : null],
           ["Клиент", o.customer.name ?? null],
           ["Мастер", o.assignedMaster?.fullName ?? null],
           ["Готов", o.completedAt ? formatDate(o.completedAt) : null],

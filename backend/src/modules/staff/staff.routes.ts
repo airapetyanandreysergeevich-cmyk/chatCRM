@@ -90,6 +90,7 @@ staffRouter.get(
           email: u.email,
           contactEmail: u.contactEmail,
           isOwner: u.isOwner,
+          isCoOwner: u.isCoOwner,
           isActive: u.isActive,
           lastLoginAt: u.lastLoginAt,
           // Владельцу важно видеть, у кого нет приложения: без него мастер
@@ -137,7 +138,30 @@ const createStaffSchema = z.object({
   roleIds: roleIdsField.optional(),
   workPercent: z.number().min(0).max(100).optional(),
   partPercent: z.number().min(0).max(100).optional(),
+  /** Совладелец — права как у владельца. Ставит только владелец. */
+  coOwner: z.boolean().optional(),
 });
+
+/**
+ * Кто кого может трогать в «Сотрудниках».
+ *
+ * Владельца правит, отключает и меняет ему пароль только он сам — раньше
+ * управляющий с правом «Сотрудники» мог сменить пароль владельцу и тем самым
+ * закрыть ему вход. Совладельца отключает, удаляет, снимает и меняет ему
+ * пароль только владелец; своё имя, телефон и пароль совладелец правит сам.
+ */
+function guardTarget(
+  req: Request,
+  target: { id: string; isOwner: boolean; isCoOwner: boolean },
+  what: "edit" | "access"
+) {
+  const me = actorUserId(req);
+  const iAmOwner = req.auth?.kind === "tenant" && req.auth.isOwner;
+  if (target.isOwner && target.id !== me) throw forbidden("Данные владельца меняет только он сам");
+  if (target.isCoOwner && !iAmOwner && (what === "access" || target.id !== me)) {
+    throw forbidden("Совладельца меняет только владелец");
+  }
+}
 
 staffRouter.post(
   "/staff",
@@ -158,9 +182,13 @@ staffRouter.post(
       if (count >= tenant.maxUsers)
         throw conflict(`Тариф позволяет не больше ${tenant.maxUsers} сотрудников. Обратитесь к нам, чтобы расширить.`);
 
+      if (body.coOwner && !(req.auth?.kind === "tenant" && req.auth.isOwner)) {
+        throw forbidden("Совладельца назначает только владелец");
+      }
       const ids = requestedRoles(body);
-      if (!ids?.length) throw badRequest("Выберите роль");
-      const roles = await resolveRoles(req, tx, ids);
+      // Совладельцу, как и владельцу, роль не обязательна: права у него и так все.
+      if (!ids?.length && !body.coOwner) throw badRequest("Выберите роль");
+      const roles = ids?.length ? await resolveRoles(req, tx, ids) : { roleId: null, extraRoleIds: [], names: [] };
 
       const user = await tx.user.create({
         data: {
@@ -174,6 +202,7 @@ staffRouter.post(
           extraRoleIds: roles.extraRoleIds,
           workPercent: body.workPercent ?? null,
           partPercent: body.partPercent ?? null,
+          isCoOwner: !!body.coOwner,
         },
       });
       await writeAudit(tx, {
@@ -202,6 +231,7 @@ const updateStaffSchema = z.object({
   isActive: z.boolean().optional(),
   workPercent: z.number().min(0).max(100).nullable().optional(),
   partPercent: z.number().min(0).max(100).nullable().optional(),
+  coOwner: z.boolean().optional(),
 });
 
 staffRouter.patch(
@@ -219,8 +249,14 @@ staffRouter.patch(
       const user = await tx.user.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!user) throw notFound("Сотрудник не найден");
       if (user.isOwner && body.isActive === false) throw forbidden("Владельца отключить нельзя");
+      const changesAccess = body.isActive !== undefined || body.coOwner !== undefined;
+      guardTarget(req, user, changesAccess ? "access" : "edit");
+      if (body.coOwner !== undefined) {
+        if (!(req.auth?.kind === "tenant" && req.auth.isOwner)) throw forbidden("Совладельца назначает только владелец");
+        if (user.isOwner) throw badRequest("Владелец и так владелец");
+      }
 
-      const { roleId: _one, roleIds: _many, ...fields } = body;
+      const { roleId: _one, roleIds: _many, coOwner, ...fields } = body;
       const ids = requestedRoles(body);
       const roles = ids ? await resolveRoles(req, tx, ids) : null;
 
@@ -231,6 +267,7 @@ staffRouter.patch(
           ...(fields.phone !== undefined ? { phone: fields.phone || null } : {}),
           ...(fields.contactEmail !== undefined ? { contactEmail: fields.contactEmail || null } : {}),
           ...(roles ? { roleId: roles.roleId, extraRoleIds: roles.extraRoleIds } : {}),
+          ...(coOwner !== undefined ? { isCoOwner: coOwner } : {}),
         },
       });
       await writeAudit(tx, {
@@ -239,13 +276,14 @@ staffRouter.patch(
         entity: "User",
         entityId: user.id,
         action: "UPDATE",
-        diff: safeDiff({ ...fields, ...(roles ? { roleNames: roles.names } : {}) }),
+        diff: safeDiff({ ...fields, ...(roles ? { roleNames: roles.names } : {}), ...(coOwner !== undefined ? { coOwner } : {}) }),
         ip: clientIp(req),
       });
       return next;
     });
 
-    if (body.isActive === false) await revokeAllForUser(updated.id);
+    // Отключили или поменяли права совладельца — пусть войдёт заново с новыми правами.
+    if (body.isActive === false || body.coOwner !== undefined) await revokeAllForUser(updated.id);
     res.json({ id: updated.id, fullName: updated.fullName, isActive: updated.isActive });
   })
 );
@@ -260,6 +298,7 @@ staffRouter.post(
     await withTenant(tenantId, async (tx) => {
       const user = await tx.user.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!user) throw notFound("Сотрудник не найден");
+      guardTarget(req, user, "edit");
       await tx.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } });
       await writeAudit(tx, {
         tenantId,
@@ -287,6 +326,7 @@ staffRouter.delete(
       if (!user) throw notFound("Сотрудник не найден");
       if (user.isOwner) throw forbidden("Владельца удалить нельзя");
       if (user.id === actorUserId(req)) throw forbidden("Себя удалить нельзя");
+      guardTarget(req, user, "access");
       // Мягкое удаление: заказы, история ремонта и зарплата за прошлое
       // продолжают ссылаться на сотрудника и показывают его имя. Логин
       // освобождаем: новый Иван в мастерской должен получить ivan@…, а не

@@ -20,7 +20,7 @@ interface StorageInfo {
  */
 export function StorageBanner() {
   const { me } = useAuth();
-  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
   const [info, setInfo] = useState<StorageInfo | null>(null);
 
   useEffect(() => {

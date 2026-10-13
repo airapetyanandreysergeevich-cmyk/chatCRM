@@ -3,7 +3,7 @@ import { clientIp, writeAudit } from "../../lib/audit";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, conflict, forbidden, notFound } from "../../lib/errors";
 import { removeFile } from "../../lib/storage";
-import { actorUserId, authenticate, currentTenantId, requireTenant } from "../../middleware/auth";
+import { actorUserId, authenticate, currentTenantId, requireTenant, isOwnerLike } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { revokeAllForUser } from "../auth/auth.service";
 import { localLoginDomain } from "../relay/remoteAccess";
@@ -22,7 +22,7 @@ demoRouter.use(authenticate, requireTenant, enforceTenantStatus);
 const tenantOf = (req: Request) => currentTenantId(req)!;
 
 function requireOwner(req: Request, _res: Response, next: NextFunction) {
-  if (req.auth?.kind === "tenant" && req.auth.isOwner) return next();
+  if (isOwnerLike(req)) return next();
   next(forbidden("Тестовыми данными распоряжается владелец мастерской"));
 }
 demoRouter.use(requireOwner);

@@ -126,13 +126,58 @@ export interface StockItem {
   name: string;
   unit: string;
   category: string | null;
+  /** Категория в дереве каталога и её путь «Матрицы/15.6». */
+  categoryId?: string | null;
+  categoryPath?: string | null;
+  location?: string | null;
+  supplier?: string | null;
+  salePrice?: number | null;
+  updatedAt?: string;
   minQty: number;
   qty: number;
   low: boolean;
   /** Приходят только тем, кому видна себестоимость. */
   avgCost?: number;
   value?: number;
+  purchasePrice?: number | null;
   places: StockPlace[];
+}
+
+/** Категория каталога склада; count — позиций прямо в ней (без подкатегорий). */
+export interface StockCategory {
+  id: string;
+  parentId: string | null;
+  name: string;
+  count: number;
+}
+
+export interface StockCatalog {
+  items: StockCategory[];
+  uncategorized: number;
+  total: number;
+}
+
+/** Подсказка со склада в «Запчастях» заказа. */
+export interface StockLookupItem {
+  id: string;
+  name: string;
+  sku: string | null;
+  unit: string;
+  location: string | null;
+  salePrice: number | null;
+  qty: number;
+}
+
+export interface StockItemInput {
+  name: string;
+  sku?: string;
+  unit?: string;
+  categoryId?: string | null;
+  minQty?: number;
+  location?: string;
+  supplier?: string;
+  purchasePrice?: number | null;
+  salePrice?: number | null;
 }
 
 export interface StockList {
@@ -251,11 +296,28 @@ export const summaryApi = {
 };
 
 export const stockApi = {
-  list: (params: { search?: string; filter?: string; sort?: string; layout?: string; page?: number } = {}) =>
-    api.get<StockList>(`/stock${qs(params)}`),
+  list: (
+    params: {
+      search?: string;
+      filter?: string;
+      sort?: string;
+      layout?: string;
+      page?: number;
+      category?: string;
+      supplier?: string;
+      location?: string;
+    } = {}
+  ) => api.get<StockList>(`/stock${qs(params)}`),
+  catalog: () => api.get<StockCatalog>("/stock/categories"),
+  createCategory: (name: string, parentId: string | null) =>
+    api.post<{ id: string; name: string; parentId: string | null }>("/stock/categories", { name, parentId }),
+  updateCategory: (id: string, body: { name?: string; parentId?: string | null }) => api.patch(`/stock/categories/${id}`, body),
+  deleteCategory: (id: string, moveTo?: string | null) =>
+    api.del<{ ok: true; items: number; children: number }>(`/stock/categories/${id}${moveTo ? `?moveTo=${moveTo}` : ""}`),
+  hints: () => api.get<{ suppliers: string[]; locations: string[] }>("/stock/hints"),
+  lookup: (q: string) => api.get<{ items: StockLookupItem[] }>(`/stock/lookup${qs({ q })}`),
   warehouses: () => api.get<Array<{ id: string; name: string; isDefault: boolean }>>("/stock/warehouses"),
-  createItem: (body: { sku?: string; name: string; unit?: string; category?: string; minQty?: number }) =>
-    api.post<{ id: string; name: string }>("/stock", body),
+  createItem: (body: StockItemInput) => api.post<{ id: string; name: string }>("/stock", body),
   updateItem: (id: string, body: Record<string, unknown>) => api.patch(`/stock/${id}`, body),
   move: (body: {
     stockItemId: string;

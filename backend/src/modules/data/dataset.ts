@@ -216,6 +216,9 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
       { title: "Себестоимость, ₽", aliases: ["Цена закупки", "Себестоимость"], width: 18, kind: "number" },
       { title: "Минимальный остаток", aliases: ["Мин. остаток"], width: 20, kind: "number" },
       { title: "Склад", aliases: ["Название склада"], width: 20 },
+      { title: "Цена продажи, ₽", aliases: ["Цена продажи", "Розница"], width: 16, kind: "number" },
+      { title: "Место хранения", aliases: ["Место", "Ячейка"], width: 18 },
+      { title: "Поставщик", width: 20 },
     ],
   },
 

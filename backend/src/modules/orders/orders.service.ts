@@ -152,6 +152,7 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
       qty: num(p.qty),
       price: num(p.price),
       source: p.source,
+      stockItemId: p.stockItemId,
       // Себестоимость — только тем, кто видит деньги.
       ...(opts.money ? { cost: num(p.cost) } : {}),
     })),

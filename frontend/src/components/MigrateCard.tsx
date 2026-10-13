@@ -27,7 +27,7 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
 export function MigrateCard() {
   const { me } = useAuth();
   const navigate = useNavigate();
-  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
   const [state, setState] = useState<{ canMigrate: boolean; sources: string[] } | null>(null);
   const [busy, setBusy] = useState<"parse" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);

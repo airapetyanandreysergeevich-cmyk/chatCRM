@@ -100,7 +100,7 @@ async function resolveRecipients(
       : (await tx.role.findMany({ where: { name: { in: roleKeys } }, select: { id: true } })).map((r) => r.id);
     if (ids.length) or.push({ roleId: { in: ids } }, { extraRoleIds: { hasSome: ids } });
   }
-  if (wantsOwner) or.push({ isOwner: true });
+  if (wantsOwner) or.push({ isOwner: true }, { isCoOwner: true });
 
   const byRole = or.length
     ? await tx.user.findMany({

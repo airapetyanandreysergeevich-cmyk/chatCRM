@@ -24,6 +24,7 @@ async function assignable(tx: Prisma.TransactionClient): Promise<Prisma.UserWher
       { roleId: { in: ids } },
       ...(ids.length ? [{ extraRoleIds: { hasSome: ids } }] : []),
       { isOwner: true },
+      { isCoOwner: true },
     ],
   };
 }

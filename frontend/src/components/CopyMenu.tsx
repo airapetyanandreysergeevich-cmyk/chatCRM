@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { searchUrl, type Engine } from "./WebSearch";
 
 /**
  * «Копировать» по правой кнопке — одно меню на всё приложение.
@@ -15,14 +17,27 @@ import { useEffect, useRef, useState } from "react";
  * хуже, чем оставить.
  */
 
-export type CopyKind = "phone" | "name" | "order" | "serial";
+export type CopyKind = "phone" | "name" | "order" | "serial" | "device";
 
 const WHAT: Record<CopyKind, string> = {
   phone: "телефон",
   name: "имя",
   order: "номер заказа",
   serial: "серийный номер",
+  device: "марку и модель",
 };
+
+/**
+ * У техники и серийного номера в меню ещё поиск: по своей базе заказов и в
+ * интернете (Андрей, 13.10.2026). Остальное — только «Копировать».
+ */
+const SEARCHABLE: ReadonlySet<CopyKind> = new Set<CopyKind>(["device", "serial"]);
+
+/** Что копировать и искать у техники: марка и модель; нет их — тип («Ноутбук»). */
+export function deviceText(d: { kind?: string | null; brand?: string | null; model?: string | null } | null | undefined): string {
+  const bm = [d?.brand, d?.model].map((s) => (s ?? "").trim()).filter(Boolean).join(" ");
+  return bm || (d?.kind ?? "").trim();
+}
 
 /** Пометка для элемента: по правому щелчку на нём появится «Копировать …». */
 export function copyable(kind: CopyKind, value: string | null | undefined) {
@@ -73,6 +88,7 @@ interface Open {
 }
 
 export function CopyMenu() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState<Open | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -136,9 +152,24 @@ export function CopyMenu() {
     setToast(ok ? `Скопировано: ${open.text}` : "Не удалось скопировать — выделите и нажмите Ctrl+C");
   }
 
+  /** Заказы с такой же техникой: поиск по словам ищет во всех стадиях, выданные тоже. */
+  function inBase() {
+    if (!open) return;
+    const q = open.text;
+    setOpen(null);
+    navigate(`/orders?search=${encodeURIComponent(q)}`);
+  }
+
+  /** В программе FineCRM ссылка уходит во внешний браузер (main.js), на телефоне — в браузер телефона. */
+  function web(engine: Engine) {
+    if (!open) return;
+    window.open(searchUrl(engine, open.text), "_blank", "noopener,noreferrer");
+    setOpen(null);
+  }
+
   // Меню не должно уезжать за край окна: у правого и нижнего края — открываем влево и вверх.
-  const W = 250;
-  const H = 48;
+  const W = 290;
+  const H = open && SEARCHABLE.has(open.kind) ? 48 + 9 + 3 * 42 : 48;
   // Чуть ниже и правее курсора, как системное меню, — чтобы не закрывать то, что копируем.
   const left = open ? Math.min(open.x + 2, window.innerWidth - W - 8) : 0;
   const top = open ? (open.y + H + 12 > window.innerHeight ? open.y - H - 4 : open.y + 6) : 0;
@@ -149,7 +180,7 @@ export function CopyMenu() {
         <div
           ref={menu}
           role="menu"
-          className="fixed z-[100] min-w-[190px] max-w-[250px] overflow-hidden rounded-field border border-line bg-surface-raised py-1 shadow-raised"
+          className="fixed z-[100] min-w-[190px] max-w-[290px] overflow-hidden rounded-field border border-line bg-surface-raised py-1 shadow-raised"
           style={{ left, top }}
           onContextMenu={(e) => e.preventDefault()}
         >
@@ -163,6 +194,20 @@ export function CopyMenu() {
             <CopyIcon />
             <span className="min-w-0 truncate">Копировать {WHAT[open.kind]}</span>
           </button>
+          {SEARCHABLE.has(open.kind) && (
+            <>
+              <div className="my-1 h-px bg-line" />
+              <MenuButton onClick={inBase} icon={<BaseIcon />}>
+                Найти в базе
+              </MenuButton>
+              <MenuButton onClick={() => web("google")} icon={<WebIcon />}>
+                Искать в Google
+              </MenuButton>
+              <MenuButton onClick={() => web("yandex")} icon={<WebIcon />}>
+                Искать в Яндексе
+              </MenuButton>
+            </>
+          )}
         </div>
       )}
       {toast && (
@@ -174,6 +219,38 @@ export function CopyMenu() {
         </div>
       )}
     </>
+  );
+}
+
+function MenuButton({ onClick, icon, children }: { onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[14px] text-ink transition-colors duration-100 hover:bg-surface-input focus:bg-surface-input focus:outline-none"
+    >
+      {icon}
+      <span className="min-w-0 truncate">{children}</span>
+    </button>
+  );
+}
+
+function BaseIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 20 20" className="h-[16px] w-[16px] shrink-0 text-ink-dim" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <circle cx="8.5" cy="8.5" r="5" />
+      <path d="m12.5 12.5 4 4" />
+    </svg>
+  );
+}
+
+function WebIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 20 20" className="h-[16px] w-[16px] shrink-0 text-ink-dim" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <circle cx="10" cy="10" r="7" />
+      <path d="M3 10h14M10 3c2 2.2 2.8 4.5 2.8 7s-.8 4.8-2.8 7c-2-2.2-2.8-4.5-2.8-7S8 5.2 10 3Z" />
+    </svg>
   );
 }
 

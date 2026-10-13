@@ -52,6 +52,7 @@ const ORDER: readonly string[] = [
   "stockMovement",
   "stockBalance",
   "stockItem",
+  "stockCategory",
   "warehouse",
   // закупки (позиции ссылаются на заявку)
   "purchaseRequestItem",

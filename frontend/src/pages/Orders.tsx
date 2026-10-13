@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { copyable } from "../components/CopyMenu";
+import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
 import {
@@ -331,7 +331,7 @@ export default function Orders() {
                   title={
                     <>
                       <span className="font-mono text-[14px] text-ink-soft" {...copyable("order", o.number)}>{o.number}</span>
-                      <span className="truncate">{deviceTitle(o)}</span>
+                      <span className="truncate" {...copyable("device", deviceText(o.device))}>{deviceTitle(o)}</span>
                       {o.isUrgent && (
                         <Badge tone="danger" icon={<IconUrgent />}>
                           срочный

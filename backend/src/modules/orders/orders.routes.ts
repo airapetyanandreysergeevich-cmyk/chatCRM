@@ -43,6 +43,7 @@ import { rememberDevice } from "../hints/hints.service";
 import { countQuickPicks } from "../quickpicks/quickpicks.service";
 import { deviceHistory } from "./history";
 import { extraOf, parseReopens, snapshot } from "./reopen";
+import { syncOrderStock } from "../stock/catalog";
 import { matchableSerial, realSerial } from "../../lib/serial";
 import { assertAssignable } from "../staff/masters";
 import {
@@ -1110,23 +1111,73 @@ const partsSchema = z.object({
         qty: z.number().min(0.001).default(1),
         price: z.number().min(0),
         source: z.enum(["STOCK", "PURCHASED", "CUSTOMER"]).default("STOCK"),
+        /** Позиция склада, из которой взята запчасть (подсказка в «Запчастях»). */
+        stockItemId: z.string().uuid().nullable().optional(),
       })
     )
     .max(100),
+  /**
+   * Новая карточка заказа шлёт true: строки несут stockItemId, и склад
+   * сверяется с заказом — добавленное списывается, убранное возвращается.
+   * Старая вкладка (без поля) склад не трогает и связи со складом не теряет.
+   */
+  sync: z.boolean().optional(),
 });
 
 ordersRouter.put(
   "/:id/parts",
   ah(async (req, res) => {
-    const { parts } = partsSchema.parse(req.body);
+    const { parts, sync } = partsSchema.parse(req.body);
     const tenantId = tenantOf(req);
 
-    const over = await withTenant(tenantId, async (tx) => {
+    const { over, moved } = await withTenant(tenantId, async (tx) => {
       const order = await loadEditableOrder(req, tx);
+      const old = await tx.orderPart.findMany({ where: { orderId: order.id } });
+      const oldRows = old.map((o) => ({ name: o.name, qty: Number(o.qty), source: o.source, stockItemId: o.stockItemId, cost: o.cost }));
+
+      // Связь со складом: новая карточка присылает её сама (только у строк «Со склада»
+      // и только существующие позиции); старая вкладка — сохраняем прежнюю по совпадению строки.
+      const asked = [...new Set(parts.map((p) => p.stockItemId).filter((x): x is string => !!x))];
+      const known = asked.length
+        ? new Set((await tx.stockItem.findMany({ where: { id: { in: asked } }, select: { id: true } })).map((i) => i.id))
+        : new Set<string>();
+      const pool = [...oldRows];
+      const rows = parts.map((p) => {
+        let stockItemId: string | null = null;
+        if (sync) stockItemId = p.source === "STOCK" && p.stockItemId && known.has(p.stockItemId) ? p.stockItemId : null;
+        else {
+          const i = pool.findIndex((o) => o.name === p.name && o.qty === p.qty && o.source === p.source && o.stockItemId);
+          if (i >= 0) stockItemId = pool.splice(i, 1)[0].stockItemId;
+        }
+        return { ...p, stockItemId };
+      });
+
+      const moved = sync
+        ? await syncOrderStock(tx, { tenantId, order, before: oldRows, after: rows, userId: actorUserId(req) })
+        : [];
+
+      // Себестоимость строки со склада — прежняя, если строка уже была, иначе средняя по складу.
+      const costOf = async (id: string | null) => {
+        if (!id) return null;
+        const prev = oldRows.find((o) => o.stockItemId === id && o.cost !== null);
+        if (prev) return prev.cost;
+        const bal = await tx.stockBalance.findFirst({ where: { stockItemId: id }, orderBy: { qty: "desc" }, select: { avgCost: true } });
+        return bal?.avgCost ?? null;
+      };
+
       await tx.orderPart.deleteMany({ where: { orderId: order.id } });
-      for (const p of parts) {
+      for (const p of rows) {
         await tx.orderPart.create({
-          data: { tenantId, orderId: order.id, name: p.name, qty: p.qty, price: p.price, source: p.source },
+          data: {
+            tenantId,
+            orderId: order.id,
+            name: p.name,
+            qty: p.qty,
+            price: p.price,
+            source: p.source,
+            stockItemId: p.stockItemId,
+            cost: await costOf(p.stockItemId),
+          },
         });
       }
       await recalcTotals(tx, order.id);
@@ -1136,14 +1187,15 @@ ordersRouter.put(
         entity: "Order",
         entityId: order.id,
         action: "UPDATE",
-        diff: { parts: parts.length },
+        diff: { parts: parts.length, ...(moved.length ? { stock: moved } : {}) },
         ip: clientIp(req),
       });
-      return limitExceeded(tx, order.id);
+      return { over: await limitExceeded(tx, order.id), moved };
     });
 
     notifyLimit(tenantId, req.params.id, over, actorUserId(req));
-    res.json({ ok: true });
+    // Что ушло со склада и что вернулось — карточка скажет это в подсказке.
+    res.json({ ok: true, ...(moved.length ? { stock: moved } : {}) });
   })
 );
 

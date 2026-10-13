@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { copyable } from "../components/CopyMenu";
+import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PrintDialog } from "../components/PrintDialog";
 import { LabelDialog } from "../components/LabelDialog";
@@ -52,6 +52,7 @@ import { matchServices, PINNED_LIMIT, type Service } from "../lib/services";
 import { IssueDialog } from "../components/IssueDialog";
 import { WebSearchButton } from "../components/WebSearch";
 import { ReopenDialog } from "../components/ReopenDialog";
+import { StockNameInput } from "../components/StockNameInput";
 import { PAYMENT_LABEL } from "../lib/debt";
 
 /** Пусто: не заполнено вовсе или заглушка «—» от formatDate/money. */
@@ -191,7 +192,10 @@ function LineEditor<T extends OrderWork>({
   extraColumn,
   services,
   actions,
+  nameInput,
 }: {
+  /** Своё поле названия (у запчастей — с подсказками со склада). */
+  nameInput?: (row: T, update: (patch: Partial<T>) => void) => React.ReactNode;
   title: string;
   rows: T[];
   setRows: (next: T[]) => void;
@@ -223,7 +227,9 @@ function LineEditor<T extends OrderWork>({
         {rows.map((row, i) => (
           // items-start: длинное название растёт вниз, количество и цена остаются у первой строки.
           <div key={i} data-line className="grid gap-2 sm:grid-cols-[1fr_78px_110px_auto] sm:items-start">
-            {services ? (
+            {nameInput ? (
+              nameInput(row, (patch) => update(i, patch))
+            ) : services ? (
               <ServiceNameInput
                 value={row.name}
                 services={services}
@@ -345,7 +351,7 @@ export default function OrderCard() {
       setOrder(o);
       const next = {
         works: o.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price, masterId: w.masterId ?? null })),
-        parts: o.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price, source: p.source })),
+        parts: o.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price, source: p.source, stockItemId: p.stockItemId ?? null })),
         finish: {
           diagnosis: o.diagnosis ?? "",
           masterComment: o.masterComment ?? "",
@@ -416,11 +422,15 @@ export default function OrderCard() {
   const [smsOffer, setSmsOffer] = useState<false | "ready" | "approval">(false);
   const [smsVersion, setSmsVersion] = useState(0);
 
+  /** Что сделал склад при сохранении запчастей — показываем рядом с «Сохранено». */
+  const stockNote = useRef("");
   async function run(action: () => Promise<unknown>, message: string) {
     setSaving(true);
     setError(null);
+    stockNote.current = "";
     try {
       const result = await action();
+      if (stockNote.current) message += ` · ${stockNote.current}`;
       await load();
       // «Готов» без диагноза: сервер не мешает, но предупреждает.
       const warning = (result as { warn?: string } | undefined)?.warn;
@@ -469,7 +479,17 @@ export default function OrderCard() {
   async function saveDirty() {
     if (!order) return;
     if (dirtyWorks) await ordersApi.saveWorks(order.id, filled(works));
-    if (dirtyParts) await ordersApi.saveParts(order.id, filled(parts));
+    if (dirtyParts) {
+      const r = await ordersApi.saveParts(order.id, filled(parts));
+      // Что ушло со склада и что вернулось — дописываем к подсказке «Сохранено».
+      if (r.stock?.length) {
+        const out = r.stock.filter((m) => m.dir === "out").map((m) => `${m.name} × ${m.qty}`);
+        const back = r.stock.filter((m) => m.dir === "back").map((m) => `${m.name} × ${m.qty}`);
+        stockNote.current = [out.length ? `со склада списано: ${out.join(", ")}` : "", back.length ? `возвращено на склад: ${back.join(", ")}` : ""]
+          .filter(Boolean)
+          .join("; ");
+      }
+    }
     if (dirtyFinish) {
       const days = finish.warrantyDays.trim() ? Number(finish.warrantyDays.replace(",", ".")) : null;
       if (days !== null && (!Number.isInteger(days) || days < 0)) throw new ApiError(400, "Гарантия — целое число дней");
@@ -568,7 +588,9 @@ export default function OrderCard() {
             )}
           </div>
           <p className="mt-2 text-[15px] text-ink-muted">
-            {[order.device?.kind, order.device?.brand, order.device?.model].filter(Boolean).join(" ")}
+            <span {...copyable("device", deviceText(order.device))}>
+              {[order.device?.kind, order.device?.brand, order.device?.model].filter(Boolean).join(" ")}
+            </span>
             {order.device?.serial && (
               <>
                 {" · s/n "}
@@ -1071,7 +1093,23 @@ export default function OrderCard() {
             title="Запчасти"
             rows={parts}
             setRows={setParts}
-            empty={{ name: "", qty: 1, price: 0, source: "STOCK" }}
+            empty={{ name: "", qty: 1, price: 0, source: "STOCK", stockItemId: null }}
+            nameInput={(row, update) => (
+              <StockNameInput
+                value={row.name}
+                linked={!!row.stockItemId && row.source === "STOCK"}
+                // Название поменяли руками — это уже не та позиция склада.
+                onChange={(name) => update({ name, stockItemId: null })}
+                onPick={(s) =>
+                  update({
+                    name: s.name,
+                    stockItemId: s.id,
+                    source: "STOCK",
+                    ...(s.salePrice ? { price: s.salePrice } : {}),
+                  })
+                }
+              />
+            )}
             actions={
               <Button
                 type="button"

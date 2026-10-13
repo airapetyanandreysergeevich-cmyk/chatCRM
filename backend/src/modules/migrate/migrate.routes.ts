@@ -6,7 +6,7 @@ import { clientIp, writeAudit } from "../../lib/audit";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { originalName } from "../../lib/uploadName";
-import { actorUserId, authenticate, currentTenantId, requireTenant } from "../../middleware/auth";
+import { actorUserId, authenticate, currentTenantId, requireTenant, isOwnerLike } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { localLoginDomain } from "../relay/remoteAccess";
 import { applyMigration, isEmptyForMigration, previewMigration, type DatasetPreview } from "./migrate";
@@ -24,7 +24,7 @@ export const migrateRouter = Router();
 migrateRouter.use(authenticate, requireTenant, enforceTenantStatus);
 
 function requireOwner(req: Request, _res: Response, next: NextFunction) {
-  if (req.auth?.kind === "tenant" && req.auth.isOwner) return next();
+  if (isOwnerLike(req)) return next();
   next(forbidden("Перенос базы делает владелец мастерской"));
 }
 migrateRouter.use(requireOwner);

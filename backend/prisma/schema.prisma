@@ -122,6 +122,7 @@ model Tenant {
   purchaseItems       PurchaseRequestItem[]
   warehouses          Warehouse[]
   stockItems          StockItem[]
+  stockCategories       StockCategory[]
   stockBalances       StockBalance[]
   stockMovements      StockMovement[]
   cashRegisters       CashRegister[]
@@ -476,6 +477,8 @@ model User {
   extraRoleIds String[] @default([])
   branchId     String?
   isOwner      Boolean @default(false) // владелец мастерской: все права, не удаляется
+  /// Совладелец: права как у владельца. Назначает и снимает только владелец.
+  isCoOwner    Boolean @default(false)
   isActive     Boolean @default(true)
 
   // для мастеров — расчёт зарплаты
@@ -1043,17 +1046,51 @@ model StockItem {
   sku      String?
   name     String
   unit     String  @default("шт")
+  /// Прежняя категория текстом — осталась для старых программ и загрузки из файла.
+  /// Каталог теперь — дерево StockCategory (categoryId).
   category String?
   minQty   Decimal @default(0) @db.Decimal(12, 3)
   isActive Boolean @default(true)
 
+  categoryId    String?
+  /// Где лежит: «Шкаф 2, ячейка 14».
+  location      String?
+  /// Цена закупки — последняя, которую ввели в карточке (средняя себестоимость — в StockBalance.avgCost).
+  purchasePrice Decimal? @db.Decimal(12, 2)
+  /// Цена продажи — её подставляет заказ, когда запчасть берут со склада.
+  salePrice     Decimal? @db.Decimal(12, 2)
+  supplier      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
   tenant        Tenant                @relation(fields: [tenantId], references: [id])
+  categoryRef   StockCategory?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, categoryId])
   balances      StockBalance[]
   movements     StockMovement[]
   orderParts    OrderPart[]
   purchaseItems PurchaseRequestItem[]
 
   @@index([tenantId, name])
+}
+
+/// Каталог склада: категории и подкатегории (parentId). Удаляется только пустая —
+/// позиции и подкатегории сначала переносят (modules/stock/catalog.ts).
+model StockCategory {
+  id        String   @id @default(uuid())
+  tenantId  String
+  parentId  String?
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  parent   StockCategory?  @relation("StockCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children StockCategory[] @relation("StockCategoryTree")
+  items    StockItem[]
+
+  @@index([tenantId, parentId])
 }
 
 model StockBalance {

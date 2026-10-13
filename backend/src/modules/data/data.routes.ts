@@ -15,8 +15,7 @@ import {
   currentTenantId,
   permissionsOf,
   requirePermission,
-  requireTenant,
-} from "../../middleware/auth";
+  requireTenant, isOwnerLike } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { revokeAllForUser } from "../auth/auth.service";
 import { localLoginDomain } from "../relay/remoteAccess";
@@ -262,7 +261,7 @@ const CONFIRM_WORD = "УДАЛИТЬ";
  * не поправимо ничем, и раздавать его вместе с бланками нельзя.
  */
 function requireOwner(req: Request, _res: Response, next: NextFunction) {
-  if (req.auth?.kind === "tenant" && req.auth.isOwner) return next();
+  if (isOwnerLike(req)) return next();
   next(forbidden("Стирать базу может только владелец мастерской"));
 }
 

@@ -250,10 +250,14 @@ export default function Layout() {
     const active = stripRef.current?.querySelector<HTMLElement>("[data-active='1']");
     active?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
   }, [location.pathname]);
-  const title = me.kind === "tenant" ? (me.tenant?.name ?? "Мастерская") : (impersonating?.name ?? "Платформа");
+  // Внизу меню — кто вошёл. У владельца и совладельцев — только имя (Андрей,
+  // 13.10.2026), у остальных — имя и роль. Название мастерской есть на главной.
+  const title = me.kind === "tenant" ? me.user.fullName : (impersonating?.name ?? "Платформа");
   const subtitle =
     me.kind === "tenant"
-      ? (me.user.role?.name ?? (me.user.isOwner ? "владелец" : "сотрудник"))
+      ? me.user.isOwner || me.user.isCoOwner
+        ? ""
+        : (me.user.role?.name ?? "сотрудник")
       : me.platformUser.fullName;
 
   async function stopImpersonation() {
@@ -392,7 +396,7 @@ export default function Layout() {
             {!collapsed && (
               <div className="px-2 pb-2 pt-1">
                 <p className="truncate text-[13.5px] font-semibold">{title}</p>
-                <p className="truncate text-[12px] text-ink-dim">{subtitle}</p>
+                {subtitle && <p className="truncate text-[12px] text-ink-dim">{subtitle}</p>}
               </div>
             )}
 

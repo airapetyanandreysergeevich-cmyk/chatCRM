@@ -10,6 +10,8 @@ export interface TenantMe {
     fullName: string;
     phone: string | null;
     isOwner: boolean;
+    /** Совладелец — права как у владельца. */
+    isCoOwner?: boolean;
     role: { id: string; name: string; code: string | null } | null;
     branch: { id: string; name: string } | null;
   };

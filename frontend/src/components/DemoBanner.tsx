@@ -59,7 +59,7 @@ export function RemoveDemoModal({ state, onClose }: { state: Extract<DemoState, 
  */
 export function DemoBanner() {
   const { me } = useAuth();
-  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
   const [state, setState] = useState<DemoState | null>(null);
   const [removing, setRemoving] = useState(false);
 

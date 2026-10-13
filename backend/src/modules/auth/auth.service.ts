@@ -108,8 +108,9 @@ async function tenantPayload(tenantId: string, userId: string): Promise<TenantTo
       userId: user.id,
       tenantId,
       roleCode: user.role?.code ?? null,
-      permissions: user.isOwner ? [...ALL_PERMISSIONS] : [...permissions],
+      permissions: user.isOwner || user.isCoOwner ? [...ALL_PERMISSIONS] : [...permissions],
       isOwner: user.isOwner,
+      isCoOwner: user.isCoOwner,
     };
   });
 }

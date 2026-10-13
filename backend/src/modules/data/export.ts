@@ -213,6 +213,9 @@ async function stockSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
       category: true,
       unit: true,
       minQty: true,
+      salePrice: true,
+      location: true,
+      supplier: true,
       balances: {
         select: { qty: true, avgCost: true, warehouse: { select: { name: true } } },
       },
@@ -237,6 +240,9 @@ async function stockSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
         main ? num(main.avgCost) : 0,
         num(i.minQty),
         main?.warehouse?.name ?? "",
+        i.salePrice === null ? "" : num(i.salePrice),
+        i.location ?? "",
+        i.supplier ?? "",
       ];
     }),
   };

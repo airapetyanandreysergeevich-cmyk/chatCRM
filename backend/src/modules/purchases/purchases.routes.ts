@@ -175,6 +175,9 @@ purchasesRouter.post(
     const tenantId = tenantOf(req);
     const userId = actorUserId(req);
     if (!userId) throw badRequest("Заявку создаёт сотрудник мастерской");
+    // Кто сам утверждает закупки (владелец, совладелец, управляющий), тому
+    // согласовывать свою же заявку не с кем — она сразу утверждена.
+    const selfApproved = permissionsOf(req).includes(PERMISSIONS.PURCHASES_APPROVE);
 
     let created: { id: string; number: string } | null = null;
     for (let attempt = 0; attempt < 5 && !created; attempt += 1) {
@@ -195,7 +198,8 @@ purchasesRouter.post(
               number,
               createdById: userId,
               orderId: body.orderId ?? null,
-              status: "PENDING",
+              status: selfApproved ? "APPROVED" : "PENDING",
+              ...(selfApproved ? { approvedById: userId, approvedAt: new Date() } : {}),
               comment: body.comment ?? null,
             },
           });
@@ -234,7 +238,8 @@ purchasesRouter.post(
     }
     if (!created) throw badRequest("Не удалось выдать номер заявки, попробуйте ещё раз");
 
-    void notifyTenant(tenantId, {
+    // Утверждённую сразу просить утвердить незачем.
+    if (!selfApproved) void notifyTenant(tenantId, {
       event: "purchase.requested",
       title: `Заявка на закупку ${created.number}`,
       body: body.items

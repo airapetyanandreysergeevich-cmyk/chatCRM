@@ -35,6 +35,7 @@ interface StaffRow {
   /** Настоящая почта для связи — отдельно от логина. */
   contactEmail?: string | null;
   isOwner: boolean;
+  isCoOwner?: boolean;
   isActive: boolean;
   lastLoginAt: string | null;
   androidAppAt: string | null;
@@ -59,6 +60,7 @@ export default function Staff() {
   const [removing, setRemoving] = useState<StaffRow | null>(null);
   const { me } = useAuth();
   const myId = me?.kind === "tenant" ? me.user.id : null;
+  const iAmOwner = me?.kind === "tenant" && me.user.isOwner;
 
   const load = useCallback(async () => {
     try {
@@ -114,6 +116,7 @@ export default function Staff() {
               <>
                 <span className={u.isActive ? "truncate" : "truncate text-ink-muted line-through"}>{u.fullName}</span>
                 {u.isOwner && <Badge tone="brand">владелец</Badge>}
+                {u.isCoOwner && <Badge tone="brand">совладелец</Badge>}
                 {!u.isActive && <Badge tone="danger">отключён</Badge>}
               </>
             }
@@ -143,21 +146,27 @@ export default function Staff() {
               // Ширина колонки кнопок задана, чтобы у владельца, у которого кнопка
               // одна, остальные столбцы не разъезжались.
               <div className="flex flex-wrap gap-1.5 sm:min-w-[280px] sm:justify-end">
-                <Button
-                  variant="secondary"
-                  className="min-h-[34px] px-3 text-[13px]"
-                  onClick={() => setEditing(u)}
-                >
-                  Изменить
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="min-h-[34px] px-3 text-[13px]"
-                  onClick={() => setResetting(u)}
-                >
-                  Пароль
-                </Button>
-                {!u.isOwner && (
+                {/* Владельца правит только он сам; совладельца отключает и
+                    удаляет только владелец (сервер проверяет так же). */}
+                {(!u.isOwner || u.id === myId) && (
+                  <Button
+                    variant="secondary"
+                    className="min-h-[34px] px-3 text-[13px]"
+                    onClick={() => setEditing(u)}
+                  >
+                    Изменить
+                  </Button>
+                )}
+                {(!u.isOwner || u.id === myId) && (!u.isCoOwner || iAmOwner || u.id === myId) && (
+                  <Button
+                    variant="secondary"
+                    className="min-h-[34px] px-3 text-[13px]"
+                    onClick={() => setResetting(u)}
+                  >
+                    Пароль
+                  </Button>
+                )}
+                {!u.isOwner && (!u.isCoOwner || iAmOwner) && (
                   <Button
                     variant={u.isActive ? "danger" : "secondary"}
                     className="min-h-[34px] px-3 text-[13px]"
@@ -166,7 +175,7 @@ export default function Staff() {
                     {u.isActive ? "Отключить" : "Включить"}
                   </Button>
                 )}
-                {!u.isOwner && u.id !== myId && (
+                {!u.isOwner && u.id !== myId && (!u.isCoOwner || iAmOwner) && (
                   <Button variant="danger" className="min-h-[34px] px-3 text-[13px]" onClick={() => setRemoving(u)}>
                     Удалить
                   </Button>
@@ -265,6 +274,9 @@ function StaffModal({
   const [roleIds, setRoleIds] = useState<string[]>(
     user ? rolesOf(user).map((r) => r.id) : roles[0] ? [roles[0].id] : []
   );
+  // Совладельца назначает только владелец, и не самому себе.
+  const iAmOwner = me?.kind === "tenant" && me.user.isOwner;
+  const [coOwner, setCoOwner] = useState(!!user?.isCoOwner);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
@@ -278,7 +290,7 @@ function StaffModal({
   async function submit(e: FormEvent) {
     e.preventDefault();
     // Владельцу роль не обязательна: права у него и так все.
-    if (!roleIds.length && !user?.isOwner) {
+    if (!roleIds.length && !user?.isOwner && !coOwner) {
       setError(new ApiError(400, "Отметьте хотя бы одну роль"));
       return;
     }
@@ -303,6 +315,7 @@ function StaffModal({
         ...(rolesChanged && roleIds.length ? { roleIds } : {}),
         workPercent: percent(form.workPercent),
         partPercent: percent(form.partPercent),
+        ...(iAmOwner && !user?.isOwner && coOwner !== !!user?.isCoOwner ? { coOwner } : {}),
       };
       if (editing) {
         await api.patch(`/staff/${user.id}`, common);
@@ -330,11 +343,30 @@ function StaffModal({
           <Input value={form.fullName} onChange={set("fullName")} invalid={!!error?.field("fullName")} />
         </Field>
 
+        {iAmOwner && !user?.isOwner && (
+          <div data-coowner>
+            <Checkbox
+              checked={coOwner}
+              onChange={setCoOwner}
+              label={
+                <span>
+                  <span className="font-semibold text-ink">Совладелец</span> — все права, как у владельца
+                </span>
+              }
+            />
+            <span className="mt-1.5 block text-[12.5px] text-ink-dim">
+              Сам утверждает закупки, видит всё и меняет настройки. Отключить, удалить или снять его может только
+              владелец. Роль «Мастер» оставьте, если он чинит, — тогда он есть в списке мастеров.
+            </span>
+          </div>
+        )}
+
         <div>
           <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Роли</span>
-          {user?.isOwner && (
+          {(user?.isOwner || coOwner) && (
             <p className="mb-2 text-[12.5px] text-ink-dim">
-              У владельца все права и так — роли нужны, чтобы он попадал в списки, например мастеров.
+              У {user?.isOwner ? "владельца" : "совладельца"} все права и так — роли нужны, чтобы он попадал в списки,
+              например мастеров.
             </p>
           )}
           <div className="grid gap-2 sm:grid-cols-2">

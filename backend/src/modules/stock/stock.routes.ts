@@ -19,6 +19,7 @@ import {
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { recalcTotals } from "../orders/orders.service";
 import { applyMovement, defaultWarehouse, num } from "./stock.service";
+import { assertCategory, ensurePath, pathOf, refreshPaths, splitPath, syncTextCategories, withDescendants } from "./catalog";
 
 /**
  * Склад.
@@ -72,7 +73,190 @@ stockRouter.get(
 const MAX_SCAN = 2000;
 
 /** Порядок склада. По названию — как было: так его отдаёт база. */
-const STOCK_SORTS = ["name", "low", "qty", "category", "sku", "recent"] as const;
+const STOCK_SORTS = ["name", "low", "qty", "category", "sku", "recent", "price", "updated"] as const;
+
+// ------------------------------------------------------------ каталог (дерево)
+
+stockRouter.get(
+  "/categories",
+  requirePermission(PERMISSIONS.STOCK_VIEW),
+  ah(async (req, res) => {
+    const tenantId = tenantOf(req);
+    const out = await withTenant(tenantId, async (tx) => {
+      // Позиции с категорией текстом (старые, из файла) — сначала разложить по дереву.
+      await syncTextCategories(tx, tenantId);
+      const [cats, counts, total] = await Promise.all([
+        tx.stockCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+        tx.stockItem.groupBy({ by: ["categoryId"], where: { isActive: true }, _count: { _all: true } }),
+        tx.stockItem.count({ where: { isActive: true } }),
+      ]);
+      const n = new Map(counts.map((c) => [c.categoryId, c._count._all]));
+      return {
+        items: cats.map((c) => ({ id: c.id, parentId: c.parentId, name: c.name, count: n.get(c.id) ?? 0 })),
+        uncategorized: n.get(null) ?? 0,
+        total,
+      };
+    });
+    res.json(out);
+  })
+);
+
+const categoryName = z.string().trim().min(1, "Назовите категорию").max(80).refine((s) => !s.includes("/"), "Без «/» в названии — это знак подкатегории");
+
+stockRouter.post(
+  "/categories",
+  requirePermission(PERMISSIONS.STOCK_MOVE),
+  ah(async (req, res) => {
+    const body = z.object({ name: categoryName, parentId: z.string().uuid().nullable().optional() }).parse(req.body);
+    const tenantId = tenantOf(req);
+    const created = await withTenant(tenantId, async (tx) => {
+      const parentId = await assertCategory(tx, body.parentId);
+      const same = await tx.stockCategory.findFirst({
+        where: { parentId, name: { equals: body.name, mode: "insensitive" } },
+      });
+      if (same) throw conflict(`Категория «${same.name}» здесь уже есть`);
+      const c = await tx.stockCategory.create({ data: { tenantId, parentId, name: body.name } });
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "stockCategory", entityId: c.id, action: "CREATE", diff: { name: c.name }, ip: clientIp(req) });
+      return c;
+    });
+    res.status(201).json({ id: created.id, name: created.name, parentId: created.parentId });
+  })
+);
+
+stockRouter.patch(
+  "/categories/:id",
+  requirePermission(PERMISSIONS.STOCK_MOVE),
+  ah(async (req, res) => {
+    const body = z.object({ name: categoryName.optional(), parentId: z.string().uuid().nullable().optional() }).parse(req.body);
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const cat = await tx.stockCategory.findFirst({ where: { id: req.params.id } });
+      if (!cat) throw notFound("Категория не найдена");
+      let parentId = cat.parentId;
+      if (body.parentId !== undefined) {
+        parentId = await assertCategory(tx, body.parentId);
+        const all = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
+        if (parentId && withDescendants(cat.id, all).has(parentId)) {
+          throw badRequest("Категорию нельзя перенести внутрь неё самой");
+        }
+      }
+      const name = body.name ?? cat.name;
+      const same = await tx.stockCategory.findFirst({
+        where: { id: { not: cat.id }, parentId, name: { equals: name, mode: "insensitive" } },
+      });
+      if (same) throw conflict(`Категория «${same.name}» здесь уже есть`);
+      await tx.stockCategory.update({ where: { id: cat.id }, data: { name, parentId } });
+      await refreshPaths(tx, cat.id);
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "stockCategory", entityId: cat.id, action: "UPDATE", diff: body as Record<string, unknown>, ip: clientIp(req) });
+    });
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * Удалить категорию. Позиции и подкатегории уходят в moveTo (другую
+ * категорию) или, если не указано, — на уровень выше. Молча не теряется ничего.
+ */
+stockRouter.delete(
+  "/categories/:id",
+  requirePermission(PERMISSIONS.STOCK_MOVE),
+  ah(async (req, res) => {
+    const { moveTo } = z.object({ moveTo: z.string().uuid().optional().or(z.literal("")) }).parse(req.query);
+    const tenantId = tenantOf(req);
+    const result = await withTenant(tenantId, async (tx) => {
+      const cat = await tx.stockCategory.findFirst({ where: { id: req.params.id } });
+      if (!cat) throw notFound("Категория не найдена");
+      const all = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
+      const target = moveTo ? await assertCategory(tx, moveTo) : cat.parentId;
+      if (target && withDescendants(cat.id, all).has(target)) throw badRequest("Нельзя перенести в удаляемую категорию или её подкатегорию");
+      const moved = await tx.stockItem.findMany({ where: { categoryId: cat.id }, select: { id: true } });
+      const items = await tx.stockItem.updateMany({ where: { categoryId: cat.id }, data: { categoryId: target } });
+      const kids = await tx.stockCategory.findMany({ where: { parentId: cat.id }, select: { id: true } });
+      const children = await tx.stockCategory.updateMany({ where: { parentId: cat.id }, data: { parentId: target } });
+      await tx.stockCategory.delete({ where: { id: cat.id } });
+      // Пути у перенесённого — заново: в текстовом поле категории лежит путь.
+      if (target) await refreshPaths(tx, target);
+      else if (moved.length) await tx.stockItem.updateMany({ where: { id: { in: moved.map((m) => m.id) } }, data: { category: null } });
+      for (const k of kids) await refreshPaths(tx, k.id);
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "stockCategory", entityId: cat.id, action: "DELETE", diff: { name: cat.name, items: items.count, children: children.count }, ip: clientIp(req) });
+      return { items: items.count, children: children.count };
+    });
+    res.json({ ok: true, ...result });
+  })
+);
+
+/** Подсказки для полей позиции: поставщики и места хранения, частые — первыми. */
+stockRouter.get(
+  "/hints",
+  requirePermission(PERMISSIONS.STOCK_VIEW),
+  ah(async (req, res) => {
+    const out = await withTenant(tenantOf(req), async (tx) => {
+      const [sup, loc] = await Promise.all([
+        tx.stockItem.groupBy({ by: ["supplier"], where: { supplier: { not: null } }, _count: { _all: true } }),
+        tx.stockItem.groupBy({ by: ["location"], where: { location: { not: null } }, _count: { _all: true } }),
+      ]);
+      const list = (rows: Array<{ value: string | null; n: number }>) =>
+        rows
+          .filter((r) => r.value && r.value.trim())
+          .sort((a, b) => b.n - a.n || a.value!.localeCompare(b.value!, "ru"))
+          .slice(0, 100)
+          .map((r) => r.value!);
+      return {
+        suppliers: list(sup.map((s) => ({ value: s.supplier, n: s._count._all }))),
+        locations: list(loc.map((s) => ({ value: s.location, n: s._count._all }))),
+      };
+    });
+    res.json(out);
+  })
+);
+
+/**
+ * Подсказка в «Запчастях» заказа: от двух знаков, по словам в названии и
+ * артикуле. Остаток — по всем складам, цена — цена продажи из карточки.
+ */
+stockRouter.get(
+  "/lookup",
+  requirePermission(PERMISSIONS.STOCK_VIEW, PERMISSIONS.ORDERS_EDIT, PERMISSIONS.ORDERS_STATUS_OWN),
+  ah(async (req, res) => {
+    const { q } = z.object({ q: z.string().trim().max(120).default("") }).parse(req.query);
+    const words = searchWords(q);
+    if (q.replace(/\s+/g, "").length < 2 || !words.length) return res.json({ items: [] });
+    const rows = await withTenant(tenantOf(req), (tx) =>
+      tx.stockItem.findMany({
+        where: {
+          isActive: true,
+          AND: words.map((w) => ({
+            OR: [
+              { name: { contains: w, mode: "insensitive" as const } },
+              { sku: { contains: w, mode: "insensitive" as const } },
+            ],
+          })),
+        },
+        take: 40,
+        include: { balances: { select: { qty: true } } },
+      })
+    );
+    const items = rows
+      .map((i) => ({
+        id: i.id,
+        name: i.name,
+        sku: i.sku,
+        unit: i.unit,
+        location: i.location,
+        salePrice: i.salePrice === null ? null : num(i.salePrice),
+        qty: i.balances.reduce((n, b) => n + num(b.qty), 0),
+      }))
+      // Что есть — выше; начинается с набранного — выше.
+      .sort(
+        (a, b) =>
+          Number(b.qty > 0) - Number(a.qty > 0) ||
+          Number(b.name.toLowerCase().startsWith(words[0].toLowerCase())) - Number(a.name.toLowerCase().startsWith(words[0].toLowerCase())) ||
+          a.name.localeCompare(b.name, "ru")
+      )
+      .slice(0, 12);
+    res.json({ items });
+  })
+);
 
 stockRouter.get(
   "/",
@@ -84,9 +268,25 @@ stockRouter.get(
         filter: z.enum(["all", "low", "zero", "in"]).default("all"),
         sort: z.enum(STOCK_SORTS).catch("name").default("name"),
         layout: z.string().optional(),
+        /** id категории (вместе с подкатегориями) или «none» — без категории. */
+        category: z.string().max(60).optional(),
+        supplier: z.string().trim().max(120).optional(),
+        location: z.string().trim().max(120).optional(),
         ...pageFields,
       })
       .parse(req.query);
+    const tenantId = tenantOf(req);
+    const cats = await withTenant(tenantId, async (tx) => {
+      await syncTextCategories(tx, tenantId);
+      return tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
+    });
+    const byId = new Map(cats.map((c) => [c.id, c]));
+    const categoryWhere: Prisma.StockItemWhereInput =
+      q.category === "none"
+        ? { categoryId: null }
+        : q.category && byId.has(q.category)
+          ? { categoryId: { in: [...withDescendants(q.category, cats)] } }
+          : {};
 
     const cost = seesCost(req);
 
@@ -96,6 +296,8 @@ stockRouter.get(
         { name: { contains: w, mode: "insensitive" as const } },
         { sku: { contains: w, mode: "insensitive" as const } },
         { category: { contains: w, mode: "insensitive" as const } },
+        { location: { contains: w, mode: "insensitive" as const } },
+        { supplier: { contains: w, mode: "insensitive" as const } },
       ],
     });
     let words = searchWords(q.search);
@@ -110,7 +312,13 @@ stockRouter.get(
 
     const rows = await withTenant(tenantOf(req), (tx) =>
       tx.stockItem.findMany({
-        where: { isActive: true, AND: words.map(wordWhere) },
+        where: {
+          isActive: true,
+          AND: words.map(wordWhere),
+          ...categoryWhere,
+          ...(q.supplier ? { supplier: { equals: q.supplier, mode: "insensitive" as const } } : {}),
+          ...(q.location ? { location: { equals: q.location, mode: "insensitive" as const } } : {}),
+        },
         orderBy: { name: "asc" },
         // Постраничности на стороне базы здесь быть не может: «мало»,
         // «нет в наличии» и «есть» считаются из остатков по складам, то
@@ -135,6 +343,13 @@ stockRouter.get(
         name: i.name,
         unit: i.unit,
         category: i.category,
+        categoryId: i.categoryId,
+        categoryPath: i.categoryId ? pathOf(i.categoryId, byId) : null,
+        location: i.location,
+        supplier: i.supplier,
+        salePrice: i.salePrice === null ? null : num(i.salePrice),
+        purchasePrice: i.purchasePrice === null ? null : num(i.purchasePrice),
+        updatedAt: i.updatedAt,
         minQty,
         qty,
         low: minQty > 0 && qty < minQty,
@@ -180,6 +395,10 @@ stockRouter.get(
           return [i.sku || null, i.name];
         case "recent":
           return [desc(lastMove.get(i.id) ?? null), i.name];
+        case "price":
+          return [i.salePrice ?? null, i.name];
+        case "updated":
+          return [desc(new Date(i.updatedAt).getTime()), i.name];
         default:
           return [i.name];
       }
@@ -189,7 +408,8 @@ stockRouter.get(
 
     res.json({
       searchFixed,
-      items: page.map(({ avgCost, value, ...rest }) => (cost ? { ...rest, avgCost, value } : rest)),
+      // Закупка и себестоимость — только тем, кому видна себестоимость.
+      items: page.map(({ avgCost, value, purchasePrice, ...rest }) => (cost ? { ...rest, avgCost, value, purchasePrice } : rest)),
       // Счётчики — по всему складу, а не по отобранному: «мало у 12» это
       // свойство склада, и от того, какой фильтр включён, оно не меняется.
       totals: {
@@ -205,13 +425,38 @@ stockRouter.get(
   })
 );
 
+const money = z.coerce.number().min(0).max(10_000_000).nullable().optional();
 const itemSchema = z.object({
   sku: z.string().trim().max(60).optional(),
   name: z.string().trim().min(1, "Без названия позицию не найти").max(200),
   unit: z.string().trim().min(1).max(20).default("шт"),
-  category: z.string().trim().max(80).optional(),
+  /** Текстом — для старых программ: «Матрицы/15.6» разложится по дереву. */
+  category: z.string().trim().max(200).optional(),
+  /** Категория из дерева; null — без категории. Главнее текста. */
+  categoryId: z.string().uuid().nullable().optional(),
   minQty: z.coerce.number().min(0).max(1_000_000).default(0),
+  location: z.string().trim().max(120).optional(),
+  supplier: z.string().trim().max(120).optional(),
+  purchasePrice: money,
+  salePrice: money,
 });
+
+/** Категория позиции: из дерева (categoryId) или текстом (category) — и путь текстом рядом. */
+async function categoryData(tx: Prisma.TransactionClient, tenantId: string, body: { categoryId?: string | null; category?: string }) {
+  if (body.categoryId !== undefined) {
+    const id = await assertCategory(tx, body.categoryId);
+    if (!id) return { categoryId: null, category: null };
+    const all = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
+    return { categoryId: id, category: pathOf(id, new Map(all.map((c) => [c.id, c]))) };
+  }
+  if (body.category !== undefined) {
+    const parts = splitPath(body.category);
+    if (!parts.length) return { categoryId: null, category: null };
+    const all = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
+    return { categoryId: await ensurePath(tx, tenantId, parts, all), category: parts.join("/") };
+  }
+  return {};
+}
 
 stockRouter.post(
   "/",
@@ -231,8 +476,12 @@ stockRouter.post(
           sku: body.sku || null,
           name: body.name,
           unit: body.unit,
-          category: body.category || null,
           minQty: body.minQty,
+          location: body.location || null,
+          supplier: body.supplier || null,
+          purchasePrice: body.purchasePrice ?? null,
+          salePrice: body.salePrice ?? null,
+          ...(await categoryData(tx, tenantId, body)),
         },
       });
       await writeAudit(tx, {
@@ -261,14 +510,22 @@ stockRouter.patch(
     await withTenant(tenantId, async (tx) => {
       const item = await tx.stockItem.findFirst({ where: { id: req.params.id } });
       if (!item) throw notFound("Позиция не найдена");
+      if (body.sku) {
+        const same = await tx.stockItem.findFirst({ where: { sku: body.sku, isActive: true, id: { not: item.id } } });
+        if (same) throw conflict(`Артикул «${body.sku}» уже занят позицией «${same.name}»`);
+      }
       await tx.stockItem.update({
         where: { id: item.id },
         data: {
           ...(body.sku !== undefined ? { sku: body.sku || null } : {}),
           ...(body.name !== undefined ? { name: body.name } : {}),
           ...(body.unit !== undefined ? { unit: body.unit } : {}),
-          ...(body.category !== undefined ? { category: body.category || null } : {}),
           ...(body.minQty !== undefined ? { minQty: body.minQty } : {}),
+          ...(body.location !== undefined ? { location: body.location || null } : {}),
+          ...(body.supplier !== undefined ? { supplier: body.supplier || null } : {}),
+          ...(body.purchasePrice !== undefined ? { purchasePrice: body.purchasePrice } : {}),
+          ...(body.salePrice !== undefined ? { salePrice: body.salePrice } : {}),
+          ...(await categoryData(tx, tenantId, body)),
         },
       });
       await writeAudit(tx, {
@@ -372,7 +629,8 @@ stockRouter.post(
             orderId: order.id,
             name: item.name,
             qty: body.qty,
-            price: body.salePrice ?? cost,
+            // Цена клиенту: присланная, иначе цена продажи из карточки, иначе себестоимость.
+            price: body.salePrice ?? (item.salePrice !== null ? num(item.salePrice) : cost),
             cost,
             source: "STOCK",
             stockItemId: item.id,

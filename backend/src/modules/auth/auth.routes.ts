@@ -188,6 +188,7 @@ authRouter.get(
         fullName: data.fullName,
         phone: data.phone,
         isOwner: data.isOwner,
+        isCoOwner: data.isCoOwner,
         role: data.role ? { id: data.role.id, name: data.role.name, code: data.role.code } : null,
         branch: data.branch ? { id: data.branch.id, name: data.branch.name } : null,
       },

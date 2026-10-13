@@ -286,8 +286,15 @@ async function applyStock(
     sku: val(v["Артикул"]),
     name: val(v["Наименование"]) ?? "Без названия",
     category: val(v["Категория"]),
+    // Категория пришла текстом — связь с деревом снимаем, каталог разложит заново
+    // (modules/stock/catalog.ts, «Матрицы/15.6» — подкатегория).
+    ...(val(v["Категория"]) !== undefined ? { categoryId: null } : {}),
     unit: val(v["Единица"]) ?? "шт",
     minQty: numOrUndef(v["Минимальный остаток"]),
+    // Новые колонки: пусто в файле — не трогаем то, что уже введено.
+    ...(numOrUndef(v["Цена продажи, ₽"]) !== undefined ? { salePrice: numOrUndef(v["Цена продажи, ₽"]) } : {}),
+    ...(val(v["Место хранения"]) !== undefined ? { location: val(v["Место хранения"]) } : {}),
+    ...(val(v["Поставщик"]) !== undefined ? { supplier: val(v["Поставщик"]) } : {}),
   };
 
   const itemId = row.existingId

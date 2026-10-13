@@ -13,6 +13,7 @@ const TENANT_DELEGATES = new Set([
   "salaryEntry", "salaryPayout", "salaryMonth",
   "printStation", "printJob",
   "integration", "smsMessage", "smsPhone", "smsApproval",
+  "stockCategory",
 ]);
 
 const WHERE_OPS = new Set([

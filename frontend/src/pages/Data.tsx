@@ -202,7 +202,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
 
   // Стирание — только владельцу. Право «Настройки мастерской» бывает и у
   // старшего приёмщика: выгрузка и загрузка поправимы, стирание — нет.
-  const canWipe = me?.kind === "tenant" && me.user.isOwner;
+  const canWipe = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
   const pickedInfo = reference.datasets.filter((d) => picked.includes(d.key));
   const wipeable = pickedInfo.filter((d) => d.canWipe !== false);
 
@@ -691,7 +691,7 @@ function ImportCard({ reference }: { reference: DataReference }) {
  */
 function DemoCard() {
   const { me } = useAuth();
-  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
   const [state, setState] = useState<DemoState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
