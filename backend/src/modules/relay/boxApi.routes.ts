@@ -1,12 +1,14 @@
 import { Router, type Request } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
+import { clientIp } from "../../lib/audit";
 import { ah, badRequest, conflict, unauthorized } from "../../lib/errors";
 import { normalizeName } from "../../lib/login";
 import { prisma } from "../../lib/db";
 import { loadDictionary } from "../plate/plate.dictionary";
 import { forgetKnowledge, platformKnowledge } from "../plate/plate.learn";
 import { modelKeys } from "../plate/plate.parse";
+import { notifyPlatform } from "../feedback/feedback.delivery";
 import { authenticateBox, claimName, nameStatus } from "./boxes.service";
 
 /**
@@ -21,6 +23,9 @@ import { authenticateBox, claimName, nameStatus } from "./boxes.service";
  *
  * Ключ — тот же, с которым Основа держит туннель, и в том же заголовке.
  * Отдельного пароля у мастерской нет и не нужно.
+ *
+ * И обратная связь: обращения из Основы — единственное здесь, что принимается
+ * и без ключа.
  */
 
 export const boxApiRouter = Router();
@@ -130,5 +135,76 @@ boxApiRouter.put(
     forgetKnowledge();
     const [dictionary, known] = await Promise.all([loadDictionary(), platformKnowledge()]);
     res.json({ dictionary, learned: [...known.decided.entries()] });
+  })
+);
+
+// ---------------------------------------------------------------- обратная связь
+
+/**
+ * Обращение мастерской из Основы (feedback.delivery.ts на её стороне).
+ *
+ * Ключ не обязателен: обратную связь пишут и те, кто доступ из интернета не
+ * подключал. С ключом облако знает, какая это Основа; без него — только то,
+ * что она о себе сказала. Поэтому отдельный счётчик частоты и потолки длины:
+ * адрес открыт всем, и лента обращений не должна стать почтовым ящиком для
+ * чужих рассылок.
+ */
+const feedbackLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Слишком много обращений — подождите час" },
+});
+
+const feedbackSchema = z.object({
+  localId: z.string().uuid(),
+  kind: z.enum(["REMARK", "WISH", "BUG"]),
+  text: z.string().trim().min(10).max(4000),
+  writtenAt: z.coerce.date(),
+  workshop: z.string().trim().min(1).max(120),
+  email: z.string().trim().max(200).optional(),
+  version: z.string().trim().max(40).optional(),
+});
+
+boxApiRouter.post(
+  "/feedback",
+  feedbackLimiter,
+  ah(async (req, res) => {
+    const body = feedbackSchema.parse(req.body);
+    const key = String(req.headers["x-box-key"] ?? "");
+    // Ключ не подошёл (доступ отозвали) — обращение всё равно принимаем, как без ключа.
+    const box = key ? await authenticateBox(key) : null;
+    const now = Date.now();
+    const writtenAt = body.writtenAt.getTime() > now || Number.isNaN(body.writtenAt.getTime()) ? new Date(now) : body.writtenAt;
+
+    const existing = await prisma.boxFeedback.findUnique({ where: { localId: body.localId }, select: { id: true } });
+    if (existing) return res.json({ id: existing.id, repeated: true });
+
+    let created: { id: string };
+    try {
+      created = await prisma.boxFeedback.create({
+        data: {
+          localId: body.localId,
+          boxId: box?.id ?? null,
+          kind: body.kind,
+          text: body.text,
+          workshop: body.workshop,
+          email: body.email || null,
+          version: body.version || null,
+          ip: clientIp(req),
+          writtenAt,
+        },
+        select: { id: true },
+      });
+    } catch (err) {
+      // Две попытки одной Основы разом — вторая упирается в уникальный номер. Это не ошибка.
+      if ((err as { code?: string }).code === "P2002") return res.json({ repeated: true });
+      throw err;
+    }
+
+    const who = box?.name ? `${body.workshop} (@${box.name})` : body.workshop;
+    void notifyPlatform(created.id, body.kind, `Основа: ${who}`, body.text);
+    res.status(201).json({ id: created.id });
   })
 );

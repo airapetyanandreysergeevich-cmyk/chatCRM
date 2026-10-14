@@ -214,6 +214,7 @@ model Box {
   category    ClientCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   payments    ClientPayment[]
   plateModels PlateBoxModel[]
+  feedback    BoxFeedback[]
 
   @@index([keyHash])
   @@index([email])
@@ -563,10 +564,44 @@ model Feedback {
   handledAt DateTime?
   createdAt DateTime  @default(now())
 
+  /// Только у Основы: когда обращение дошло до облака. Пусто — ещё ждёт
+  /// отправки (Основа повторяет сама). В облаке не заполняется: там
+  /// обращение сразу лежит у владельца платформы.
+  sentAt    DateTime?
+  /// Почему последняя попытка отправки не удалась — показывается мастерской.
+  sendError String?
+
   tenant Tenant @relation(fields: [tenantId], references: [id])
   author User?  @relation(fields: [authorId], references: [id])
 
   @@index([tenantId, createdAt])
+  @@index([handledAt, createdAt])
+}
+
+/// Обращение, присланное Основой. Её мастерской в облаке нет, поэтому
+/// отдельная таблица платформы, без построчной изоляции: читает её только
+/// владелец платформы.
+model BoxFeedback {
+  id       String       @id @default(uuid())
+  /// Номер обращения в базе Основы: повторная отправка того же не плодит копий.
+  localId  String       @unique
+  /// Основа с доступом из интернета — известна по ключу. Без него — пусто.
+  boxId    String?
+  kind     FeedbackKind
+  text     String
+  /// Что написала о себе Основа: название мастерской, почта владельца, версия.
+  workshop String
+  email    String?
+  version  String?
+  ip       String?
+
+  /// Когда написано в мастерской (Основа могла отправить позже).
+  writtenAt DateTime
+  handledAt DateTime?
+  createdAt DateTime  @default(now())
+
+  box Box? @relation(fields: [boxId], references: [id], onDelete: SetNull)
+
   @@index([handledAt, createdAt])
 }
 

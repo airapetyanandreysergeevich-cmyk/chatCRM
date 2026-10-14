@@ -100,6 +100,9 @@ function cards(
   return out;
 }
 
+/** Сколько разделов каталога читаем у магазинов с поиском «сначала раздел» — самые полные. */
+const MAX_SECTIONS = 4;
+
 const stockFromButton = (t: string): Stock =>
   /нет в наличии|нет на складе/i.test(t) ? "out" : /в корзину|купить/i.test(t) ? "in" : "unknown";
 
@@ -334,6 +337,237 @@ export const SHOPS: Shop[] = [
       }));
     },
   },
+  // ---- Магазины из второго списка Андрея (14.10.2026)
+  {
+    id: "partslog",
+    name: "PartsLog",
+    site: "partslog.ru",
+    about: "Блоки питания, аккумуляторы, матрицы и клавиатуры для ноутбуков",
+    searchUrl: (q) => `https://partslog.ru/search.htm?keyword=${enc(q)}`,
+    probe: "00HM613",
+    read: (html) =>
+      cards(html, "https://partslog.ru/", ".list_showlist-good", (c) => {
+        const a = query(c, ".list_showlist-good-center a");
+        const st = textOf(query(c, ".stock-info"));
+        const bars = queryAll(c, ".product-stock-counter span.active").length;
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          article: textOf(query(c, ".list_showlist-good-code")) || undefined,
+          price: parsePrice(textOf(query(c, ".good-value"))),
+          // Наличие — «полоски» от 1 до 5; «Нет в наличии» — словами.
+          stock: /нет в наличии/i.test(st) ? "out" : bars > 0 ? "in" : "unknown",
+          stockText: bars > 0 && bars < 3 ? "мало" : undefined,
+        };
+      }),
+  },
+  {
+    id: "magzip",
+    name: "MagZip",
+    site: "magzip.ru",
+    about: "Запчасти для ноутбуков: клавиатуры, аккумуляторы, блоки питания, петли",
+    // Сайт в кодировке windows-1251 и запрос ждёт в ней же.
+    searchUrl: (q) => `https://magzip.ru/catsearch/?words=${encCp1251(q)}&set=1&pole=2`,
+    probe: "x540",
+    read: async (html, ctx) => {
+      if (queryAll(parseHtml(html), ".product-col").length) return magzipCards(html);
+      // Поиск в два шага: сначала разделы с числом найденного, потом товары раздела.
+      const cats = queryAll(parseHtml(html), "a[href]")
+        .map((a) => ({
+          id: /^\/search\/\?.*[?&]cat=(\d+)/.exec(attrOf(a, "href"))?.[1],
+          n: Number(/\((\d+)\)\s*$/.exec(textOf(a))?.[1] ?? 0),
+        }))
+        .filter((x): x is { id: string; n: number } => !!x.id)
+        .sort((a, b) => b.n - a.n)
+        .slice(0, MAX_SECTIONS);
+      const pages = await Promise.all(
+        cats.map((c) =>
+          ctx
+            .fetchText(`https://magzip.ru/search/?words=${encCp1251(ctx.q)}&set=1&pole=2&cat=${c.id}`)
+            .then(magzipCards)
+            .catch(() => [] as PartOffer[])
+        )
+      );
+      return pages.flat();
+    },
+  },
+  {
+    id: "greenspark",
+    name: "GreenSpark",
+    site: "green-spark.ru",
+    about: "Запчасти для телефонов и планшетов: дисплеи, аккумуляторы, шлейфы",
+    searchUrl: (q) => `https://green-spark.ru/search/?q=${enc(q)}`,
+    probe: "iphone 11",
+    read: (html) =>
+      cards(html, "https://green-spark.ru/", ".product-card", (c) => {
+        const a = query(c, ".product-card-name a");
+        const opt = parsePrice(textOf(query(c, ".second-price .price-value")));
+        const level = textOf(queryAll(c, ".quantity-indicator span").find((x) => /(^|\s)text-/.test(x.attrs.class ?? "")));
+        const where = /в\s+(\d+)\s+магазин/i.exec(textOf(query(c, ".quantity-indicator")));
+        const out = !!query(c, ".unavailable-btn");
+        const has = !out && /в наличии/i.test(textOf(query(c, ".quantity-indicator")));
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          price: parsePrice(textOf(query(c, ".product-price .price-value"))),
+          priceNote: opt ? `опт ${rub(opt)}` : undefined,
+          stock: out ? "out" : has ? "in" : "unknown",
+          stockText: has
+            ? [level.toLowerCase(), where ? `в ${where[1]} ${Number(where[1]) === 1 ? "магазине" : "магазинах"}` : ""]
+                .filter(Boolean)
+                .join(", ") || undefined
+            : undefined,
+        };
+      }),
+  },
+  {
+    id: "mobileparts",
+    name: "Электроникс",
+    site: "mobile-parts.ru",
+    about: "Запчасти для телефонов, наличие в Оренбурге и Сочи",
+    searchUrl: (q) => `https://mobile-parts.ru/search/?q=${enc(q)}`,
+    probe: "iphone 11",
+    read: (html) =>
+      cards(html, "https://mobile-parts.ru/", ".product-card", (c) => {
+        const title = query(c, ".content-product__title");
+        const prices = queryAll(c, ".actions-product__column_regular-price li").map((li) => parsePrice(textOf(li)));
+        // «Оренбург - в наличии» и значки других городов с подсказкой «в наличии».
+        const main = /([^:]+?)\s*-\s*(нет в наличии|в наличии)\s*$/i.exec(
+          textOf(query(c, ".content-product__availability")).replace(/^Наличие:\s*/i, "")
+        );
+        const cities = queryAll(c, ".content-product__cities span[title]")
+          .filter((s) => /^в наличии$/i.test(attrOf(s, "title")))
+          .map((s) => textOf(s));
+        const inCities = [...(main && /^в/i.test(main[2]) ? [main[1].trim()] : []), ...cities];
+        const known = !!main || queryAll(c, ".content-product__cities span[title]").length > 0;
+        return {
+          name: textOf(title),
+          href: attrOf(title?.parent?.tag === "a" ? title.parent : query(c, "a[href]"), "href"),
+          article: textOf(query(c, ".article-product__value")) || undefined,
+          price: prices[0] ?? null,
+          priceNote: prices[1] ? `опт ${rub(prices[1])}` : undefined,
+          stock: inCities.length ? "in" : known ? "out" : "unknown",
+          stockText: inCities.length ? inCities.join(", ") : undefined,
+        };
+      }),
+  },
+  {
+    id: "skymoby",
+    name: "SkyMoby",
+    site: "skymoby.ru",
+    about: "Запчасти для телефонов, сервисный центр в Сочи",
+    searchUrl: (q) => `https://skymoby.ru/catalog/all/?query=${enc(q)}`,
+    probe: "iphone 11",
+    read: (html) =>
+      cards(html, "https://skymoby.ru/", ".rs-product-item", (c) => {
+        const a = query(c, "a.item-list__title");
+        const out = /(^|\s)rs-not-avaliable(\s|$)/.test(c.attrs.class ?? "");
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          // Вторая цена у магазина бывает ниже первой — что она значит, не сказано; не показываем.
+          price: parsePrice(textOf(query(c, ".rs-price-new"))),
+          stock: out ? "out" : "in",
+        };
+      }),
+  },
+  {
+    id: "taggsm",
+    name: "TAGGSM",
+    site: "taggsm.ru",
+    about: "Запчасти для телефонов, магазины в Таганроге и Ростове-на-Дону",
+    searchUrl: (q) => `https://taggsm.ru/index.php?route=product/searcho&filter_name=${enc(q)}`,
+    probe: "iphone 11",
+    read: (html) =>
+      cards(html, "https://taggsm.ru/", ".product-thumb", (c) => {
+        const a = query(c, ".caption h4 a, .category_name a");
+        // Первая таблица — свои магазины, вторая (скрытая) — магазины в других городах.
+        const tables = queryAll(c, ".category_nalichie table");
+        const own = tables.filter((t) => !/(^|\s)ttfilial(\s|$)/.test(t.attrs.class ?? ""));
+        const other = tables.filter((t) => /(^|\s)ttfilial(\s|$)/.test(t.attrs.class ?? ""));
+        const has = (ts: HNode[]) =>
+          ts.flatMap((t) => queryAll(t, "tr")).filter((tr) => {
+            const s = textOf(queryAll(tr, "td")[1]);
+            return /наличи/i.test(s) && !/нет в наличии/i.test(s);
+          }).length;
+        const n = has(own);
+        const far = has(other);
+        const known = queryAll(c, ".category_nalichie td").some((td) => /наличи/i.test(textOf(td)));
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          article: textOf(query(c, ".cat_articul")) || undefined,
+          price: parsePrice(textOf(query(c, ".category_price"))),
+          stock: n ? "in" : far ? "order" : known ? "out" : "unknown",
+          stockText: n ? `в ${n} ${n === 1 ? "магазине" : "магазинах"}` : far ? "в других городах" : undefined,
+        };
+      }),
+  },
+  {
+    id: "hotcomputers",
+    name: "Хот Компьютерс",
+    site: "hotcomputers.ru",
+    about: "Матрицы, тачскрины и запчасти для ноутбуков",
+    searchUrl: (q) => `https://hotcomputers.ru/search/?searchstring=${enc(q)}`,
+    probe: "NV156FHM",
+    read: async (html, ctx) => {
+      // Поиск в два шага: сперва разделы каталога, где нашлось, потом товары каждого раздела.
+      // Список «Лидеры продаж» на той же странице — не результат поиска, его не берём.
+      const root = parseHtml(html);
+      if (queryAll(root, "form.product_brief_block").length) return hotCards(html);
+      const ids = [
+        ...new Set(
+          queryAll(root, "a.hcsr__cat")
+            .map((a) => /[?&]categoryID=(\d+)/.exec(attrOf(a, "href"))?.[1])
+            .filter((x): x is string => !!x)
+        ),
+      ].slice(0, MAX_SECTIONS);
+      const pages = await Promise.all(
+        ids.map((id) =>
+          ctx
+            .fetchText(
+              `https://hotcomputers.ru/category_search/?advanced_search_in_category=1&search_with_change_category_ability=1&search_name=${enc(ctx.q)}&search_in_subcategory=1&categoryID=${id}`
+            )
+            .then(hotCards)
+            .catch(() => [] as PartOffer[])
+        )
+      );
+      return pages.flat();
+    },
+  },
+  {
+    id: "4ip",
+    name: "CHIP",
+    site: "4ip.info",
+    about: "Запчасти для телефонов, склады в нескольких городах. Товар — под заказ",
+    searchUrl: (q) => `https://4ip.info/search?keyword=${enc(q)}`,
+    probe: "дисплей iphone 11",
+    read: (html) =>
+      cards(html, "https://4ip.info/", ".products-list .prd-wrapper", (c) => {
+        const a = query(c, ".prd-name a");
+        const price = parsePrice(textOf(query(c, ".prd-prices .price")));
+        const buy = !!query(c, ".add2cart");
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          article: textOf(query(c, ".prd-sku")).replace(/^артикул:\s*/i, "") || undefined,
+          price,
+          // Магазин сам пишет у таких товаров «Под заказ» — привозят со склада.
+          stock: buy && price ? "order" : /нет/i.test(textOf(query(c, ".prd-prices"))) || !buy ? "out" : "unknown",
+          stockText: buy && price ? "под заказ" : undefined,
+        };
+      }),
+  },
+  {
+    // Сайт закрыт защитой от роботов («нажмите на похожий цвет») — только ссылкой.
+    id: "liberti",
+    name: "Либерти",
+    site: "liberti.ru",
+    about: "Аксессуары и запчасти для телефонов оптом. Только ссылка на поиск",
+    searchUrl: (q) => `https://liberti.ru/search/?q=${enc(q)}`,
+    linkOnly: true,
+    probe: "",
+  },
   // Маркетплейсы: только ссылкой. Их страницы рисуются скриптами и закрыты защитой
   // от роботов; обходить её мы не станем — открываем их поиск в браузере.
   {
@@ -521,4 +755,56 @@ function aitechStock(available: string, price: number | null): { stock: Stock; s
   const n = available.match(/(\d+)/);
   if (n && Number(n[1]) > 0) return { stock: "in", stockText: `${n[1]} шт.` };
   return { stock: "out", stockText: price ? undefined : "цены нет" };
+}
+
+// ------------------------------------------------------------ два шага: MagZip и Хот Компьютерс
+
+/**
+ * Запрос в кодировке windows-1251 для адреса: «дисплей» → «%E4%E8%F1...».
+ * Латиница и цифры — как есть; то, чего в кодировке нет, — пропускаем.
+ */
+export function encCp1251(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!;
+    let b: number | null = null;
+    if (c < 0x80) b = c;
+    else if (c >= 0x410 && c <= 0x44f) b = c - 0x410 + 0xc0;
+    else if (c === 0x401) b = 0xa8;
+    else if (c === 0x451) b = 0xb8;
+    else if (c === 0x2116) b = 0xb9;
+    if (b === null) continue;
+    out += /[A-Za-z0-9\-_.~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : "%" + b.toString(16).toUpperCase().padStart(2, "0");
+  }
+  return out;
+}
+
+function magzipCards(html: string): PartOffer[] {
+  return cards(html, "https://magzip.ru/", ".product-col", (c) => {
+    const a = query(c, "h4 a");
+    const sklad = textOf(query(c, ".product-sklad"));
+    const n = /(\d+)\s*шт/i.exec(sklad);
+    const buy = !!query(c, ".addToCartList");
+    const notify = !!query(c, ".btn-notify");
+    return {
+      name: textOf(a),
+      href: attrOf(a, "href"),
+      price: parsePrice(textOf(query(c, ".price-new"))),
+      stock: buy || n ? "in" : notify ? "out" : "unknown",
+      stockText: n ? `${n[1]} шт.` : undefined,
+    };
+  });
+}
+
+function hotCards(html: string): PartOffer[] {
+  return cards(html, "https://hotcomputers.ru/", "form.product_brief_block", (c) => {
+    const a = query(c, ".hcpb__name a");
+    return {
+      name: textOf(a),
+      href: attrOf(a, "href"),
+      article: textOf(query(c, ".productCode")) || undefined,
+      price: parsePrice(textOf(query(c, ".totalPrice"))) ?? parsePrice(attrOf(query(c, "input.product_price"), "value")),
+      stock: query(c, ".hcpb__badge_in") ? "in" : query(c, ".hcpb__badge_out") ? "out" : "unknown",
+    };
+  });
 }

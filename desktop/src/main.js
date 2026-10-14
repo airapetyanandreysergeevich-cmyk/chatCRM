@@ -239,6 +239,8 @@ async function startBackend(cfg, l) {
       ...backendEnv(cfg, l),
       PORT: String(port),
       STATIC_DIR: frontendDir(),
+      // Версия программы — уходит с обращением в «Обратную связь»: видно, на чём поймали ошибку.
+      FINECRM_VERSION: app.getVersion(),
       // Распознавание шильдиков в окне программы. Нет моделей — нет кнопки.
       ...(ocrModelsDir() ? { OCR_MODELS_DIR: ocrModelsDir() } : {}),
     },

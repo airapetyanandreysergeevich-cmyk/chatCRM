@@ -41,6 +41,16 @@ ok("отрицательная и огромная цена — без цены"
 ok("цена в другой валюте — подписью", s[2].priceNote === "€17.99" && s[2].price === null);
 ok("не массив — пусто", m.sanitizeOffers(m.MARKETS.ozon, { a: 1 }).length === 0);
 ok("не больше 80", m.sanitizeOffers(m.MARKETS.ozon, Array.from({ length: 200 }, (_, i) => ({ name: "Товар " + i, price: 1, url: "https://www.ozon.ru/product/" + i }))).length === 80);
+{
+  const re = new RegExp(m.MARKETS.liberti.product);
+  ok(
+    "образец ссылки Либерти — страница товара в корне сайта",
+    re.test("/lcd-displey-dlya-samsung-galaxy-a30s-sm-a307-v-sbore-chernyy.html") &&
+      re.test("https://liberti.ru/shleyf_flc_huawei_honor_90_rea_nx9_na_sistemnyy_razyem_mikrofon.html?from=search") &&
+      !re.test("/catalog/zapchasti/") && !re.test("/kontakty/spb/") && !re.test("/about.html") && !re.test("https://evil.ru/aaaaaaaaaaaaaaaa.html")
+  );
+  ok("Либерти — свой сайт", m.hostOk(m.MARKETS.liberti, "https://liberti.ru/search/?q=x") && !m.hostOk(m.MARKETS.liberti, "https://liberti.ru.evil.com/"));
+}
 ok("образец ссылки DNS", new RegExp(m.MARKETS.dns.product).test("/product/a1b2c3d4e5/videokarta/"));
 ok("образец ссылки Авито — номер объявления", new RegExp(m.MARKETS.avito.product).test("/omsk/tovary/mikroshema_7365448552?slocation=1") && !new RegExp(m.MARKETS.avito.product).test("/omsk/tovary_dlya_kompyutera"));
 

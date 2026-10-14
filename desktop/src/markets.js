@@ -29,6 +29,9 @@ const MARKETS = {
   avito: { name: "Авито", hosts: ["avito.ru"], product: "_\\d{7,}(?:[?#]|$)" },
   aliexpress: { name: "AliExpress", hosts: ["aliexpress.com", "aliexpress.ru"], product: "/item/\\d+\\.html" },
   dns: { name: "DNS", hosts: ["dns-shop.ru"], product: "/product/[0-9a-f]{6,}/" },
+  // Магазин закрыт от роботов проверкой «нажмите на похожий цвет» — человек проходит её в этом окне.
+  // Товар — страница в корне сайта: /lcd-displey-dlya-samsung-galaxy-a30s-sm-a307-v-sbore-chernyy.html
+  liberti: { name: "Либерти", hosts: ["liberti.ru"], product: "^(?:https://(?:www\\.)?liberti\\.ru)?/[a-z0-9_-]{12,}\\.html(?:[?#]|$)" },
 };
 
 function hostOk(market, url) {

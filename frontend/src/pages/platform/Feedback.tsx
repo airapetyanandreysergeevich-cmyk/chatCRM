@@ -26,7 +26,11 @@ interface Item {
   handledAt: string | null;
   createdAt: string;
   tenant: { id: string; name: string; slug: string } | null;
-  author: { fullName: string; email: string } | null;
+  author: { fullName: string | null; email: string } | null;
+  /** cloud — облачная мастерская, box — прислала Основа с компьютера мастерской. */
+  source?: "cloud" | "box";
+  /** Что Основа сказала о себе; login — имя для входа, если доступ из интернета подключён. */
+  box?: { name: string; login: string | null; linked: boolean; version: string | null };
 }
 
 const when = (iso: string) =>
@@ -77,7 +81,7 @@ export default function PlatformFeedback() {
       <PageHeader
         eyebrow="Платформа"
         title="Замечания"
-        subtitle="Что пишут владельцы мастерских из своих настроек."
+        subtitle="Что пишут владельцы мастерских из своих настроек — в облаке и из программы на компьютере (Основа)."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -121,8 +125,21 @@ export default function PlatformFeedback() {
                   <span className={"px-2.5 py-0.5 text-[12px] " + k.chip}>
                     {k.label}
                   </span>
-                  <span className="text-[14px] font-bold">{item.tenant?.name ?? "мастерская удалена"}</span>
-                  {item.author && <span className="text-[12.5px] text-ink-muted">{item.author.fullName}</span>}
+                  {item.source === "box" && item.box ? (
+                    <>
+                      <span className="tag tag-new px-2 py-0.5 text-[11.5px]" data-source="box" title="Прислала программа на компьютере мастерской">
+                        Основа
+                      </span>
+                      <span className="text-[14px] font-bold">{item.box.name}</span>
+                      {item.box.login && <span className="text-[12.5px] text-ink-muted">@{item.box.login}</span>}
+                      {item.box.version && <span className="text-[12.5px] text-ink-dim">версия {item.box.version}</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[14px] font-bold">{item.tenant?.name ?? "мастерская удалена"}</span>
+                      {item.author?.fullName && <span className="text-[12.5px] text-ink-muted">{item.author.fullName}</span>}
+                    </>
+                  )}
                   <span className="text-[12.5px] text-ink-dim">{when(item.createdAt)}</span>
                 </div>
 

@@ -15,12 +15,17 @@ import { api } from "../lib/api";
 
 type Kind = "REMARK" | "WISH" | "BUG";
 
+/** Основа: дошло ли до облака. В облаке — null: обращение сразу у разработчика. */
+type Delivery = "sent" | "pending" | null;
+
 interface Sent {
   id: string;
   kind: Kind;
   text: string;
   handledAt: string | null;
   createdAt: string;
+  delivery?: Delivery;
+  sendError?: string | null;
 }
 
 /**
@@ -65,7 +70,7 @@ export default function Feedback() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<{ delivery: Delivery; sendError?: string | null } | null>(null);
   const [history, setHistory] = useState<Sent[] | null>(null);
 
   const load = () =>
@@ -86,9 +91,9 @@ export default function Feedback() {
     }
     setSending(true);
     try {
-      await api.post("/feedback", { kind, text: text.trim() });
+      const r = await api.post<{ delivery?: Delivery; sendError?: string | null }>("/feedback", { kind, text: text.trim() });
       setText("");
-      setSent(true);
+      setSent({ delivery: r?.delivery ?? null, sendError: r?.sendError });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось отправить");
@@ -136,7 +141,7 @@ export default function Feedback() {
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              setSent(false);
+              setSent(null);
             }}
             maxLength={4000}
             invalid={!!error}
@@ -145,7 +150,22 @@ export default function Feedback() {
           />
         </Field>
 
-        {sent && <Banner tone="info">Отправлено. Ответа в программе не будет — с вами свяжутся, если понадобятся подробности.</Banner>}
+        {sent &&
+          (sent.delivery === "pending" ? (
+            <Banner tone="warning">
+              <span data-feedback-pending>
+                Сохранено, но до разработчика пока не дошло{sent.sendError ? `: ${sent.sendError}` : ""}. Программа отправит
+                сама, как только появится связь, — писать заново не нужно.
+              </span>
+            </Banner>
+          ) : (
+            <Banner tone="info">
+              <span data-feedback-sent>
+                {sent.delivery === "sent" ? "Доставлено разработчику." : "Отправлено."} Ответа в программе не будет — с
+                вами свяжутся, если понадобятся подробности.
+              </span>
+            </Banner>
+          ))}
 
         <div className="flex items-center justify-between gap-3">
           <span className="text-[12.5px] text-ink-dim">{text.trim().length} из 4000</span>
@@ -172,7 +192,20 @@ export default function Feedback() {
                   {item.handledAt && (
                     <span className="text-[12.5px] font-semibold text-state-done">разобрано</span>
                   )}
+                  {item.delivery === "sent" && (
+                    <span className="text-[12.5px] text-state-done" data-delivery="sent">
+                      доставлено
+                    </span>
+                  )}
+                  {item.delivery === "pending" && (
+                    <span className="text-[12.5px] font-semibold text-state-waiting" data-delivery="pending">
+                      ждёт отправки
+                    </span>
+                  )}
                 </div>
+                {item.delivery === "pending" && item.sendError && (
+                  <p className="mt-1 text-[12.5px] text-ink-dim">{item.sendError}</p>
+                )}
                 <p className="mt-2 whitespace-pre-wrap text-[14px] leading-relaxed text-ink-muted">{item.text}</p>
               </Card>
             );

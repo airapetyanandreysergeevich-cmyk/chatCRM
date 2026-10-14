@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { decodeEntities, parseHtml, query, queryAll, textOf } from "../src/modules/parts/html";
 import { clearCache, compact, matches, rank, searchShop, ShopError, type Fetcher } from "../src/modules/parts/search";
-import { extractJsonAfter, parseCsv, parsePrice, readSheet, SHOPS, shopById } from "../src/modules/parts/shops";
+import { encCp1251, extractJsonAfter, parseCsv, parsePrice, readSheet, SHOPS, shopById } from "../src/modules/parts/shops";
 import { clearLogoCache, fetchLogo, imageType, logoFor } from "../src/modules/parts/logo";
 
 let fails = 0;
@@ -148,6 +148,73 @@ async function main() {
   let fetched = "";
   const vr = await searchShop("vshop", "i7-10750H", { fetcher: async (u) => { fetched = u; return fx("vshop.csv"); } });
   check(fetched === vshop.fetchUrl!("") && vr.url === vshop.searchUrl("") && vr.offers[0]?.name === "SRH8Q i7-10750H" && vr.offers[0].exact, "Vshop: сервер качает CSV, чип ведёт на таблицу", { fetched, vr });
+
+  // ---- второй список магазинов (14.10.2026)
+  const pl = await read("partslog", "partslog.html", "00HM613");
+  check(pl.length === 3 && pl[0].name.startsWith("00HM613 Блок питания для Lenovo") && pl[0].article === "000055313", "PartsLog: товары и код", pl.map((x) => x.name));
+  check(pl[0]?.price === 829 && pl[0]?.stock === "in" && !pl[0]?.stockText, "PartsLog: 5 полосок — в наличии", pl[0]);
+  check(pl[1]?.price === 1273 && pl[1]?.stock === "in" && pl[1]?.stockText === "мало", "PartsLog: 2 полоски — «мало»", pl[1]);
+  check(pl[2]?.stock === "out" && pl[2]?.url === "https://partslog.ru/category-3/category-8/category-57/product-50540.htm", "PartsLog: «Нет в наличии», ссылка", pl[2]);
+
+  check(encCp1251("дисплей Ёж №5 a b") === "%E4%E8%F1%EF%EB%E5%E9%20%A8%E6%20%B95%20a%20b", "windows-1251 для адреса", encCp1251("дисплей Ёж №5 a b"));
+  check(shopById("magzip")!.searchUrl("клавиатура x540") === "https://magzip.ru/catsearch/?words=%EA%EB%E0%E2%E8%E0%F2%F3%F0%E0%20x540&set=1&pole=2", "MagZip: запрос в windows-1251");
+  const mzAsked: string[] = [];
+  const mz = await read("magzip", "magzip-cat.html", "x540", async (u) => {
+    mzAsked.push(u);
+    return u.endsWith("cat=994") ? fx("magzip.html") : "<html><body>пусто</body></html>";
+  });
+  check(mzAsked.length === 4 && mzAsked[0] === "https://magzip.ru/search/?words=x540&set=1&pole=2&cat=103", "MagZip: разделы по числу найденного, не больше четырёх", mzAsked);
+  check(mz.length === 3 && mz[1]?.price === 1890 && mz[1]?.stock === "in" && mz[1]?.stockText === "1 шт.", "MagZip: «В наличии: 1 шт.»", mz[1]);
+  check(mz[0]?.stock === "out" && mz[0]?.price === 2050 && mz[0]?.url === "https://magzip.ru/shop/UID_1524652.html", "MagZip: «Уведомить» — нет в наличии", mz[0]);
+  const mzDirect = await read("magzip", "magzip.html", "x540", async () => { throw new Error("не должен ходить"); });
+  check(mzDirect.length === 3, "MagZip: товары сразу на странице — второй шаг не нужен");
+  const mzOne = await read("magzip", "magzip-cat.html", "x540", async (u) => {
+    if (u.endsWith("cat=103")) throw new ShopError("не ответил за 10 с");
+    return u.endsWith("cat=994") ? fx("magzip.html") : "<p>";
+  });
+  check(mzOne.length === 3, "MagZip: один раздел не ответил — остальные показаны");
+
+  const gs = await read("greenspark", "greenspark.html", "iphone 11");
+  check(gs.length === 3 && gs[0].name === "Дисплей для iPhone 11 + тачскрин с рамкой + задняя металлическая рамка черный (100% LCD)", "GreenSpark: товары", gs.map((x) => x.name));
+  check(gs[0]?.price === 2200 && gs[0]?.priceNote === "опт 1 900 ₽" && gs[0]?.stock === "in" && gs[0]?.stockText === "много, в 2 магазинах", "GreenSpark: розница, опт, «много, в 2 магазинах»", gs[0]);
+  check(gs[1]?.stockText === "мало, в 1 магазине", "GreenSpark: «мало, в 1 магазине»", gs[1]);
+  check(gs[2]?.stock === "out" && gs[2]?.price === 5950 && gs[2]?.url.startsWith("https://green-spark.ru/catalog/"), "GreenSpark: «Нет в наличии»", gs[2]);
+
+  const mp = await read("mobileparts", "mobileparts.html", "iphone 11");
+  check(mp.length === 3 && mp[0].article === "27338" && mp[0].url === "https://mobile-parts.ru/catalog/zapchasti_dlya_mobilnykh_ustroystv/displei/displei_dlya_apple/displey_apple_iphone_11_jk_lncell_fhd_v_sbore_s_sensorom_chernyy.html", "Электроникс: артикул и ссылка", mp[0]);
+  check(mp[0]?.price === 1600 && mp[0]?.priceNote === "опт 1 355 ₽" && mp[0]?.stock === "out", "Электроникс: розница, мелкий опт, нигде нет", mp[0]);
+  check(mp[1]?.stock === "in" && mp[1]?.stockText === "Оренбург", "Электроникс: «Оренбург - в наличии»", mp[1]);
+  check(mp[2]?.stock === "in" && mp[2]?.stockText === "Сочи" && mp[2]?.price === 739, "Электроникс: есть только в Сочи", mp[2]);
+
+  const sm = await read("skymoby", "skymoby.html", "iphone 11");
+  check(sm.length === 2 && sm[0].name === "Wi-Fi модуль 339S00648 iPhone 11/11 Pro/11 Pro Max" && sm[0].url === "https://skymoby.ru/product/17424/", "SkyMoby: товар и ссылка", sm[0]);
+  check(sm[0]?.price === 700 && sm[0]?.stock === "in", "SkyMoby: новая цена, в наличии (старая не берётся)", sm[0]);
+  check(sm[1]?.price === 1350 && sm[1]?.stock === "out", "SkyMoby: rs-not-avaliable — нет в наличии", sm[1]);
+
+  const tg = await read("taggsm", "taggsm.html", "iphone 11");
+  check(tg.length === 2 && tg[0].article === "zm349048" && tg[0].url === "https://taggsm.ru/index.php?route=product/product&path=900000_900017&product_id=120674", "TAGGSM: артикул и ссылка", tg[0]);
+  check(tg[0]?.price === 1100 && tg[0]?.stock === "in" && tg[0]?.stockText === "в 3 магазинах", "TAGGSM: в 3 своих магазинах (другие города не считаем)", tg[0]);
+  check(tg[1]?.price === 2450 && tg[1]?.stock === "out", "TAGGSM: всюду «нет в наличии»", tg[1]);
+
+  const hcAsked: string[] = [];
+  const hc = await read("hotcomputers", "hotcomputers-cat.html", "NV156FHM", async (u) => {
+    hcAsked.push(u);
+    return u.endsWith("categoryID=803") ? fx("hotcomputers.html") : "<html><body>пусто</body></html>";
+  });
+  check(hcAsked.length === 2 && hcAsked.every((u) => u.includes("search_name=NV156FHM")) && hcAsked[0].endsWith("categoryID=803") && hcAsked[1].endsWith("categoryID=1012"), "Хот Компьютерс: только верхние разделы, без подразделов", hcAsked);
+  check(hc.length === 2 && !hc.some((x) => /Клей/.test(x.name)), "Хот Компьютерс: «Лидеры продаж» — не результат поиска", hc.map((x) => x.name));
+  check(hc[0]?.price === 3300 && hc[0]?.stock === "in" && hc[0]?.article === "100199405V" && hc[0]?.url === "https://hotcomputers.ru/product/matritsa_nv156fhm_n22/", "Хот Компьютерс: в наличии", hc[0]);
+  check(hc[1]?.price === 3450 && hc[1]?.stock === "out", "Хот Компьютерс: нет в наличии", hc[1]);
+  const hcDirect = await read("hotcomputers", "hotcomputers.html", "NV156FHM", async () => { throw new Error("не должен ходить"); });
+  check(hcDirect.length === 2, "Хот Компьютерс: товары сразу на странице — второй шаг не нужен");
+
+  const ip = await read("4ip", "4ip.html", "дисплей iphone 11");
+  check(ip.length === 4 && ip[0].article === "109453" && ip[0].url === "https://4ip.info/products/2515256", "CHIP: артикул и ссылка", ip[0]);
+  check(ip[0]?.price === 1300 && ip[0]?.stock === "order" && ip[0]?.stockText === "под заказ", "CHIP: с ценой и «Купить» — под заказ", ip[0]);
+  check(ip[2]?.price === null && ip[2]?.stock === "out", "CHIP: «Нет в наличии» без цены", ip[2]);
+
+  const lb = await searchShop("liberti", "дисплей iphone", { fetcher: async () => { throw new Error("не должен ходить"); } });
+  check(lb.linkOnly === true && lb.url === "https://liberti.ru/search/?q=%D0%B4%D0%B8%D1%81%D0%BF%D0%BB%D0%B5%D0%B9%20iphone", "Либерти: только ссылка (защита от роботов)", lb);
 
   // Значки магазинов
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);

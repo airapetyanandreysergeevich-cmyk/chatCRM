@@ -32,6 +32,7 @@ import { quickPicksRouter } from "./modules/quickpicks/quickpicks.routes";
 import { plateRouter } from "./modules/plate/plate.routes";
 import { partsLogoRouter, partsRouter } from "./modules/parts/parts.routes";
 import { startPlateSync } from "./modules/plate/plate.sync";
+import { startFeedbackDelivery } from "./modules/feedback/feedback.delivery";
 import { servicesRouter } from "./modules/services/services.routes";
 import { settingsRouter } from "./modules/settings/settings.routes";
 import { staffRouter } from "./modules/staff/staff.routes";
@@ -195,6 +196,8 @@ const server = app.listen(env.port, env.bindHost, () => {
   startRelayAgent();
   // Основа сверяет с облаком марки моделей для распознавания шильдиков.
   startPlateSync();
+  // Основа доносит до облака обращения «Обратной связи», которые не ушли сразу.
+  startFeedbackDelivery();
 });
 
 // Облачная сторона туннеля — на том же сервере, отдельным путём.

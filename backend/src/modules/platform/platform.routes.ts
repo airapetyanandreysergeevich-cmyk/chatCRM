@@ -450,20 +450,48 @@ platformRouter.get(
     const kind = z.enum(["REMARK", "WISH", "BUG", "ALL"]).catch("ALL").parse(req.query.kind);
     const only = z.enum(["new", "handled", "all"]).catch("all").parse(req.query.status);
 
-    const items = await withPlatform((tx) =>
-      tx.feedback.findMany({
-        where: {
-          ...(kind === "ALL" ? {} : { kind }),
-          ...(only === "new" ? { handledAt: null } : only === "handled" ? { NOT: { handledAt: null } } : {}),
-        },
+    const where = {
+      ...(kind === "ALL" ? {} : { kind }),
+      ...(only === "new" ? { handledAt: null } : only === "handled" ? { NOT: { handledAt: null } } : {}),
+    };
+    const [cloud, boxes] = await Promise.all([
+      withPlatform((tx) =>
+        tx.feedback.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          take: 300,
+          include: {
+            tenant: { select: { id: true, name: true, slug: true } },
+            author: { select: { fullName: true, email: true } },
+          },
+        })
+      ),
+      // Обращения Основ: мастерской в облаке у них нет — то, что Основа сказала о себе.
+      prisma.boxFeedback.findMany({
+        where,
         orderBy: { createdAt: "desc" },
         take: 300,
-        include: {
-          tenant: { select: { id: true, name: true, slug: true } },
-          author: { select: { fullName: true, email: true } },
-        },
-      })
-    );
+        include: { box: { select: { id: true, name: true, email: true } } },
+      }),
+    ]);
+
+    const items = [
+      ...cloud.map((x) => ({ ...x, source: "cloud" as const })),
+      ...boxes.map((x) => ({
+        id: x.id,
+        kind: x.kind,
+        text: x.text,
+        handledAt: x.handledAt,
+        // Когда написано в мастерской: Основа могла донести его позже.
+        createdAt: x.writtenAt,
+        source: "box" as const,
+        tenant: null,
+        author: x.email ? { fullName: null, email: x.email } : null,
+        box: { name: x.workshop, login: x.box?.name ?? null, linked: !!x.boxId, version: x.version },
+      })),
+    ]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 300);
 
     res.json(items);
   })
@@ -474,15 +502,22 @@ platformRouter.patch(
   ah(async (req, res) => {
     const { handled } = z.object({ handled: z.boolean() }).parse(req.body);
 
-    const updated = await withPlatform(async (tx) => {
-      const item = await tx.feedback.findUnique({ where: { id: req.params.id } });
-      if (!item) throw notFound("Обращение не найдено");
-      return tx.feedback.update({
-        where: { id: item.id },
-        data: { handledAt: handled ? new Date() : null },
-        select: { id: true, handledAt: true },
-      });
-    });
+    const fromBox = await prisma.boxFeedback.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    const updated = fromBox
+      ? await prisma.boxFeedback.update({
+          where: { id: fromBox.id },
+          data: { handledAt: handled ? new Date() : null },
+          select: { id: true, handledAt: true },
+        })
+      : await withPlatform(async (tx) => {
+          const item = await tx.feedback.findUnique({ where: { id: req.params.id } });
+          if (!item) throw notFound("Обращение не найдено");
+          return tx.feedback.update({
+            where: { id: item.id },
+            data: { handledAt: handled ? new Date() : null },
+            select: { id: true, handledAt: true },
+          });
+        });
 
     await logPlatform(req, handled ? "FEEDBACK_HANDLED" : "FEEDBACK_REOPEN", null, { id: updated.id });
     res.json(updated);
@@ -624,7 +659,9 @@ platformRouter.get(
     const [pendingApplications, tenants, newFeedback, due] = await Promise.all([
       prisma.tenantApplication.count({ where: { status: "PENDING" } }),
       prisma.tenant.count({ where: { deletedAt: null } }),
-      withPlatform((tx) => tx.feedback.count({ where: { handledAt: null } })),
+      withPlatform((tx) => tx.feedback.count({ where: { handledAt: null } })).then(async (n) =>
+        n + (await prisma.boxFeedback.count({ where: { handledAt: null } }))
+      ),
       dueCount(),
     ]);
     res.json({ pendingApplications, tenants, newFeedback, due });

@@ -79,6 +79,14 @@ export const env = {
   relayPath: process.env.RELAY_PATH ?? "/relay/agent",
   relayUrl: process.env.RELAY_URL ?? "",
   relayKey: process.env.RELAY_KEY ?? "",
+  // Версия программы на компьютере (передаёт Основе программа). В облаке пусто.
+  appVersion: (process.env.FINECRM_VERSION ?? "").slice(0, 40),
 };
+
+/**
+ * Основа: сервер на компьютере мастерской со своей базой. Файлы у неё
+ * локальные, а узел связи для чужих Основ она не держит — это облако.
+ */
+export const isBox = env.storageDriver === "local" && !env.relayEnabled;
 
 export const pushConfigured = Boolean(env.vapidPublicKey && env.vapidPrivateKey);
