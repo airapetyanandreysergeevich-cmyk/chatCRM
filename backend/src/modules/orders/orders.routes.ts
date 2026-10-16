@@ -120,6 +120,7 @@ function searchWhere(search: string, withContacts: boolean): Prisma.OrderWhereIn
     { recommendation: like },
     { appearanceNote: like },
     { storageLocation: like },
+    { outsourceNumber: like },
     { statusHistory: { some: { comment: like } } },
     // История ремонта: «та самая мамка, про которую писали „ждём шлейф“» —
     // мастер помнит свою запись в ленте, а не номер заказа.
@@ -396,6 +397,8 @@ const acceptSchema = z.object({
   hasOpenTraces: z.boolean().default(false),
   hasWaterDamage: z.boolean().default(false),
   storageLocation: z.string().trim().optional(),
+  // Номер в базе заказчика — для клиентов-аутсорса.
+  outsourceNumber: z.string().trim().max(60, "Номер аутсорса — до 60 знаков").optional(),
 
   dueAt: z.string().datetime().optional().or(z.literal("")),
   estimatedCost: z.number().min(0).optional(),
@@ -595,6 +598,7 @@ ordersRouter.post(
           hasOpenTraces: body.hasOpenTraces || flagsOf(toLabels(body.appearance)).hasOpenTraces,
           hasWaterDamage: body.hasWaterDamage || flagsOf(toLabels(body.appearance)).hasWaterDamage,
           storageLocation: body.storageLocation || null,
+          outsourceNumber: body.outsourceNumber || null,
           estimatedCost: body.estimatedCost ?? null,
           approvedLimit: body.approvedLimit ?? null,
           prepayment: body.prepayment,
@@ -799,6 +803,7 @@ const patchSchema = acceptSchema
     devicePasscode: true,
     appearanceNote: true,
     storageLocation: true,
+    outsourceNumber: true,
     hasOpenTraces: true,
     hasWaterDamage: true,
   })
@@ -858,6 +863,7 @@ ordersRouter.patch(
         devicePasscode: orNull(fields.devicePasscode),
         appearanceNote: orNull(fields.appearanceNote),
         storageLocation: orNull(fields.storageLocation),
+        outsourceNumber: orNull(fields.outsourceNumber),
         dueAt: fields.dueAt === undefined ? undefined : fields.dueAt ? new Date(fields.dueAt) : null,
         completeness: fields.completeness === undefined ? undefined : toLabels(fields.completeness),
         appearance: fields.appearance === undefined ? undefined : toLabels(fields.appearance),

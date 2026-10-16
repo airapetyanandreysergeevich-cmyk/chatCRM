@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ComponentType, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import {
   IconChevronDown,
+  IconClose,
   IconSearch,
   IconStatusNew,
   IconStatusProgress,
@@ -284,11 +285,56 @@ export function Checkbox({
   );
 }
 
-export function SearchInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+/**
+ * Очистить поле так, будто человек стёр текст сам: React получает обычное
+ * событие input, и onChange владельца поля делает всё, что делает всегда
+ * (сбрасывает страницу, «искать как набрано» и т. п.).
+ */
+export function clearInput(el: HTMLInputElement | null) {
+  if (!el) return;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(el, "");
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.focus();
+}
+
+/**
+ * Поле поиска: лупа слева, «×» справа, когда в поле что-то есть, Esc — тоже
+ * очистить (16.10.2026, просьба мастерских). Esc в непустом поле не
+ * закрывает окно, в котором поле стоит: сперва очищается поле.
+ */
+export function SearchInput({ className, onKeyDown, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  const ref = useRef<HTMLInputElement>(null);
+  const filled = String(props.value ?? "").length > 0;
   return (
     <span className={cx("relative inline-flex w-full items-center", className)}>
       <IconSearch className="pointer-events-none absolute left-3.5 h-[18px] w-[18px] text-ink-dim" />
-      <input className={cx(control, "border-line pl-11")} {...props} />
+      <input
+        ref={ref}
+        className={cx(control, "border-line pl-11", filled && "pr-11")}
+        onKeyDown={(e) => {
+          onKeyDown?.(e);
+          if (!e.defaultPrevented && e.key === "Escape" && e.currentTarget.value) {
+            e.preventDefault();
+            e.stopPropagation();
+            clearInput(e.currentTarget);
+          }
+        }}
+        {...props}
+      />
+      {filled && !props.disabled && (
+        <button
+          type="button"
+          data-search-clear
+          aria-label="Очистить поиск"
+          title="Очистить (Esc)"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => clearInput(ref.current)}
+          className="absolute right-2 flex h-8 w-8 items-center justify-center rounded-[9px] text-ink-dim transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-4 [&>svg]:w-4"
+        >
+          <IconClose />
+        </button>
+      )}
     </span>
   );
 }

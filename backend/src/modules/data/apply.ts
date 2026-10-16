@@ -425,6 +425,7 @@ async function applyOrder(
     // кнопки на бланке. Пустая ячейка ничего не трогает.
     ...(v["Внешнее состояние"] ? flagsOf(toLabels(v["Внешнее состояние"])) : {}),
     receptionNote: val(v["Примечание приёмщика"]),
+    outsourceNumber: val(v["Номер аутсорса"]),
     diagnosis: val(v["Диагноз"]),
     isUrgent: /^(да|1|true|yes)$/i.test(v["Срочный"] ?? "") || undefined,
     dueAt: parseDate(v["Срок готовности"]),

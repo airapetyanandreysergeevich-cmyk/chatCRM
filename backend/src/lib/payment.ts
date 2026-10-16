@@ -19,7 +19,14 @@ export type PaidBy = "CASH" | "CARD";
  * сама, когда первый раз приняли картой, а не требуем сходить в настройки —
  * приёмщик в этот момент стоит с клиентом у стойки.
  */
-async function registerFor(tx: Prisma.TransactionClient, tenantId: string, how: PaidBy) {
+export async function registerFor(tx: Prisma.TransactionClient, tenantId: string, how: PaidBy | "TRANSFER") {
+  // Перевод на счёт (продажа со склада) — в банковскую кассу; нет её — заводим «Переводы».
+  if (how === "TRANSFER") {
+    return (
+      (await tx.cashRegister.findFirst({ where: { isActive: true, kind: "BANK" }, orderBy: { name: "asc" } })) ??
+      (await tx.cashRegister.create({ data: { tenantId, name: "Переводы", kind: "BANK" } }))
+    );
+  }
   if (how === "CASH") {
     return (
       (await tx.cashRegister.findFirst({ where: { isActive: true, kind: "CASH" }, orderBy: { name: "asc" } })) ??
@@ -36,14 +43,16 @@ async function registerFor(tx: Prisma.TransactionClient, tenantId: string, how: 
   );
 }
 
-/** Статья прихода. Заводится по надобности — как и везде в кассе. */
-async function paymentCategory(tx: Prisma.TransactionClient, tenantId: string) {
-  const name = "Оплата заказа";
+/** Статья кассы по имени. Заводится по надобности — как и везде в кассе. */
+export async function categoryNamed(tx: Prisma.TransactionClient, tenantId: string, name: string, direction: "IN" | "OUT") {
   return (
-    (await tx.transactionCategory.findFirst({ where: { name, direction: "IN" } })) ??
-    (await tx.transactionCategory.create({ data: { tenantId, name, direction: "IN" } }))
+    (await tx.transactionCategory.findFirst({ where: { name, direction } })) ??
+    (await tx.transactionCategory.create({ data: { tenantId, name, direction } }))
   );
 }
+
+/** Статья прихода за заказ. */
+const paymentCategory = (tx: Prisma.TransactionClient, tenantId: string) => categoryNamed(tx, tenantId, "Оплата заказа", "IN");
 
 /**
  * Провести оплату по заказу.

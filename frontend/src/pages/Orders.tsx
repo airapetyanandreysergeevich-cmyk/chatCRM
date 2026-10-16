@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { copyable, deviceText } from "../components/CopyMenu";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { backState, useScrollMemory, useUrlSearch } from "../lib/listState";
 import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
 import {
   Badge,
@@ -85,6 +86,8 @@ export default function Orders() {
   const { can, me } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState<Order[] | null>(null);
+  // Вернулись из заказа — список на той же строке.
+  useScrollMemory("orders", rows !== null);
   const [pageInfo, setPageInfo] = useState({ page: 1, pages: 1, total: 0, pageSize: 50 });
   // Группа берётся из адреса: со сводки сюда приходят по ссылке
   // «3 просрочено», и фильтр должен уже стоять, а не сбрасываться.
@@ -93,11 +96,9 @@ export default function Orders() {
   const stagesParam = params.get("stages") ?? params.get("group") ?? "";
   const stages = stagesParam ? stagesParam.split(",").filter(Boolean) : [];
   // ?search= — со сканера наклейки (Layout): несколько заказов с такими цифрами или ни одного.
-  const [search, setSearch] = useState(() => params.get("search") ?? "");
-  const urlSearch = params.get("search");
-  useEffect(() => {
-    if (urlSearch !== null) setSearch(urlSearch);
-  }, [urlSearch]);
+  // Набранное тоже живёт в адресе: «← Заказы» из карточки возвращает к тем же результатам.
+  const [search, setSearch] = useUrlSearch("search");
+  const location = useLocation();
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
   const [exact, setExact] = useState(false);
   const [searchFixed, setSearchFixed] = useState<string | null>(null);
@@ -322,6 +323,7 @@ export default function Orders() {
                 // Нашлось в истории — открываем заказ сразу на ленте и с
                 // запросом: карточка подсветит ту самую запись.
                 to={o.foundMessage ? `/orders/${o.id}?found=${o.foundMessage.id}#history` : `/orders/${o.id}`}
+                state={backState(location.pathname, location.search)}
                 className="block"
                 data-order-row={o.id}
                 {...om.bind(menuFromOrder(o))}

@@ -23,6 +23,8 @@ export const PERMISSIONS = {
   STOCK_MOVE: "stock.move",
   STOCK_WRITE_OFF_OWN: "stock.write_off.own",
   STOCK_INVENTORY: "stock.inventory",
+  /** Продажа со склада без ремонта: товар — покупателю, деньги — в кассу. */
+  STOCK_SELL: "stock.sell",
 
   PURCHASES_VIEW: "purchases.view",
   PURCHASES_CREATE: "purchases.create",
@@ -57,7 +59,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
       P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_STATUS, P.ORDERS_ISSUE,
       P.ORDERS_DELETE, P.ORDERS_CUSTOMER_CONTACTS, P.ORDERS_COST,
       P.CUSTOMERS_VIEW, P.CUSTOMERS_EDIT,
-      P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_INVENTORY,
+      P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_INVENTORY, P.STOCK_SELL,
       P.PURCHASES_VIEW, P.PURCHASES_CREATE, P.PURCHASES_APPROVE,
       P.FINANCE_VIEW, P.FINANCE_PAYMENT, P.FINANCE_MANAGE,
       P.SALARY_VIEW_ALL, P.SALARY_MANAGE,
@@ -72,7 +74,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
       P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_STATUS, P.ORDERS_ISSUE,
       P.ORDERS_CUSTOMER_CONTACTS,
       P.CUSTOMERS_VIEW, P.CUSTOMERS_EDIT,
-      P.STOCK_VIEW, P.STOCK_MOVE,
+      P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_SELL,
       P.PURCHASES_VIEW, P.PURCHASES_CREATE,
       P.FINANCE_PAYMENT,
       P.SALARY_VIEW_OWN,
@@ -153,6 +155,7 @@ export const PERMISSION_GROUPS: Array<{ group: string; items: Array<{ code: Perm
       { code: P.STOCK_MOVE, label: "Приход, перемещение, списание" },
       { code: P.STOCK_WRITE_OFF_OWN, label: "Списывает запчасти в свой заказ" },
       { code: P.STOCK_INVENTORY, label: "Проводит инвентаризацию" },
+      { code: P.STOCK_SELL, label: "Продаёт со склада", hint: "Товар без ремонта: расход со склада и приход в кассу одним действием, возврат продажи" },
     ],
   },
   {

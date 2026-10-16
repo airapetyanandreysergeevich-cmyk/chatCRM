@@ -14,6 +14,7 @@ const TENANT_DELEGATES = new Set([
   "printStation", "printJob",
   "integration", "smsMessage", "smsPhone", "smsApproval",
   "stockCategory",
+  "sale", "saleItem",
 ]);
 
 const WHERE_OPS = new Set([

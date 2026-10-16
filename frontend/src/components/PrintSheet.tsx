@@ -227,6 +227,8 @@ export function PrintSheet({
                 items={[
                   ["Клиент", order.customer.name ?? "—"],
                   ["Телефон", order.customer.phone ?? "—"],
+                  // Заказчику-аутсорсу — его номер: по нему он сверяет квитанцию со своей базой.
+                  ...(order.outsourceNumber ? ([["Номер аутсорса", order.outsourceNumber]] as Array<[string, string]>) : []),
                 ]}
               />
             </Section>

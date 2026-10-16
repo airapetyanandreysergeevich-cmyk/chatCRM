@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { copyable } from "../components/CopyMenu";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useScrollMemory, useUrlSearch } from "../lib/listState";
 import { Modal } from "../components/Modal";
 import { IconAdd, IconClients, IconCompany, IconEdit, IconPerson } from "../components/icons";
 import {
@@ -128,7 +129,9 @@ export default function Clients() {
     fallback: "",
     allowed: COLOR_FILTER_VALUES,
   });
-  const [search, setSearch] = useState("");
+  // Набранное — в адресе: «Назад» из карточки клиента возвращает к тем же результатам.
+  const [search, setSearch] = useUrlSearch("search");
+  useScrollMemory("clients", rows !== null);
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
   const [exact, setExact] = useState(false);
   const [searchFixed, setSearchFixed] = useState<string | null>(null);

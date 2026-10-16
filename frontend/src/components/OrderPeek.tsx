@@ -121,6 +121,7 @@ function PeekBody({ order: o, onPhoto }: { order: PeekOrder; onPhoto: (i: number
           ["Техника", <span key="d" className="font-semibold" {...copyable("device", deviceText(o.device))}>{device}</span>],
           ["Серийный номер", o.device?.serial ? <span className="font-mono" {...copyable("serial", o.device.serial)}>{o.device.serial}</span> : null],
           ["Клиент", o.customer.name ?? null],
+          ["Номер аутсорса", o.outsourceNumber ?? null],
           ["Мастер", o.assignedMaster?.fullName ?? null],
           ["Готов", o.completedAt ? formatDate(o.completedAt) : null],
           ["Выдан", o.issuedAt ? formatDate(o.issuedAt) : null],

@@ -172,6 +172,8 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
         width: 34,
       },
       { title: "Примечание приёмщика", width: 30 },
+      // Номер заказа в базе заказчика — у клиентов-аутсорса.
+      { title: "Номер аутсорса", aliases: ["Номер в базе заказчика", "Внешний номер"], width: 18 },
       { title: "Диагноз", aliases: ["Выполненные работы", "Что сделано"], width: 34 },
       { title: "Мастер", aliases: ["Исполнитель"], width: 24 },
       { title: "Срок готовности", width: 18, kind: "date" },

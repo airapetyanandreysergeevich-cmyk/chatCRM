@@ -541,3 +541,36 @@ export const IconTag = (p: IconProps) => (
     <circle cx="8" cy="8" r="1.4" />
   </Icon>
 );
+
+/** Продажа со склада: тележка. */
+export const IconCart = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 8H6" />
+    <circle cx="10" cy="20" r="1.3" />
+    <circle cx="17" cy="20" r="1.3" />
+  </Icon>
+);
+
+/** Оплата картой. */
+export const IconCard = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.5" y="5" width="19" height="14" rx="2" />
+    <path d="M2.5 10h19M6.5 15h3" />
+  </Icon>
+);
+
+/** Перевод на счёт: телефон с банком. */
+export const IconTransfer = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+    <path d="M11 18h2" />
+  </Icon>
+);
+
+/** Возврат: стрелка назад по кругу. */
+export const IconReturn = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </Icon>
+);

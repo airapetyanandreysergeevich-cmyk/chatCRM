@@ -21,7 +21,7 @@ import { recalcTotals } from "../orders/orders.service";
 import { applyMovement, defaultWarehouse, num } from "./stock.service";
 import { stockSheet } from "../data/export";
 import { contentDisposition, writeXlsx } from "../data/tableFile";
-import { assertCategory, ensurePath, pathOf, refreshPaths, splitPath, syncTextCategories, withDescendants } from "./catalog";
+import { assertCategory, ensurePath, lockCatalog, pathOf, refreshPaths, splitPath, tidyCatalog, withDescendants } from "./catalog";
 
 /**
  * Склад.
@@ -86,7 +86,7 @@ stockRouter.get(
     const tenantId = tenantOf(req);
     const out = await withTenant(tenantId, async (tx) => {
       // Позиции с категорией текстом (старые, из файла) — сначала разложить по дереву.
-      await syncTextCategories(tx, tenantId);
+      await tidyCatalog(tx, tenantId);
       const [cats, counts, total] = await Promise.all([
         tx.stockCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
         tx.stockItem.groupBy({ by: ["categoryId"], where: { isActive: true }, _count: { _all: true } }),
@@ -284,7 +284,7 @@ stockRouter.get(
       .parse(req.query);
     const tenantId = tenantOf(req);
     const cats = await withTenant(tenantId, async (tx) => {
-      await syncTextCategories(tx, tenantId);
+      await tidyCatalog(tx, tenantId);
       return tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
     });
     const byId = new Map(cats.map((c) => [c.id, c]));
@@ -486,6 +486,7 @@ async function categoryData(tx: Prisma.TransactionClient, tenantId: string, body
   if (body.category !== undefined) {
     const parts = splitPath(body.category);
     if (!parts.length) return { categoryId: null, category: null };
+    await lockCatalog(tx, tenantId);
     const all = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true } });
     return { categoryId: await ensurePath(tx, tenantId, parts, all), category: parts.join("/") };
   }

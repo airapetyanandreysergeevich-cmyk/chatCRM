@@ -32,7 +32,8 @@ DECLARE
     'SalaryEntry','SalaryPayout','SalaryMonth',
     'PrintStation','PrintJob',
     'Integration','SmsMessage','SmsPhone','SmsApproval',
-    'StockCategory'
+    'StockCategory',
+    'Sale','SaleItem'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

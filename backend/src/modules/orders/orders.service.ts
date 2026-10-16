@@ -26,6 +26,8 @@ export const orderInclude = {
       type: true,
       // Цветная метка клиента: по ней его узнают в списке заказов, не открывая карточку.
       color: true,
+      // Аутсорс: у заказа есть «Номер аутсорса» — поле правки показываем таким клиентам.
+      isOutsource: true,
     },
   },
   device: { select: { id: true, kind: true, brand: true, model: true, serial: true } },
@@ -126,6 +128,7 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
     hasOpenTraces: order.hasOpenTraces,
     hasWaterDamage: order.hasWaterDamage,
     storageLocation: order.storageLocation,
+    outsourceNumber: order.outsourceNumber,
     approvedLimit: num(order.approvedLimit),
 
     diagnosis: order.diagnosis,
@@ -179,7 +182,7 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
       ? order.customer
       : // Мастеру имя клиента не нужно для работы, а лишний доступ к базе контактов —
         // это то, что уносят при увольнении.
-        { id: order.customer.id, type: order.customer.type },
+        { id: order.customer.id, type: order.customer.type, isOutsource: order.customer.isOutsource },
     ...(opts.money
       ? {
           estimatedCost: num(order.estimatedCost),

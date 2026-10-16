@@ -28,6 +28,7 @@ import RemoteAccess from "./pages/RemoteAccess";
 import OrderCard from "./pages/OrderCard";
 import OrderNew from "./pages/OrderNew";
 import OrderPrint from "./pages/OrderPrint";
+import SalePrint from "./pages/SalePrint";
 import OrderLabel from "./pages/OrderLabel";
 import PrintTest from "./pages/PrintTest";
 import PeripheralsPage from "./pages/Peripherals";
@@ -74,6 +75,7 @@ export default function App() {
         {/* Бланк печатается на бумагу, поэтому идёт мимо Layout: боковое меню
             и шапка на квитанции клиенту не нужны. */}
         <Route path="/orders/:id/print" element={<OrderPrint />} />
+        <Route path="/sales/:id/print" element={<SalePrint />} />
         <Route path="/print-test" element={<PrintTest />} />
         <Route path="/orders/:id/label" element={<OrderLabel />} />
         <Route path="/label-test" element={<OrderLabel test />} />

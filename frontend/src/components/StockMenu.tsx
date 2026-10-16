@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { IconChevronLeft, IconChevronRight, IconPlus, IconSearch } from "./icons";
+import { IconChevronLeft, IconChevronRight, IconClose, IconPlus, IconSearch } from "./icons";
 import { Button } from "./ui";
 import { flatTree, type TreeNode } from "./StockTree";
 
@@ -408,8 +408,24 @@ export function CategoryPicker({
               e.preventDefault();
               onPick(shown[0].id);
             }
+            if (e.key === "Escape" && q) {
+              e.preventDefault();
+              e.stopPropagation();
+              setQ("");
+            }
           }}
         />
+        {q && (
+          <button
+            type="button"
+            data-search-clear
+            aria-label="Очистить поиск"
+            onClick={() => setQ("")}
+            className="-mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-ink-dim hover:bg-surface-raised hover:text-ink [&>svg]:h-3.5 [&>svg]:w-3.5"
+          >
+            <IconClose />
+          </button>
+        )}
       </label>
       <div className="max-h-[300px] overflow-y-auto">
         {none && !needle && (

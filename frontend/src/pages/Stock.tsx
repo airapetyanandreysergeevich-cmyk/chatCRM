@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { copyable, copyText } from "../components/CopyMenu";
 import { fixLayoutEnabled } from "../lib/searchPrefs";
 import { SearchFixedHint } from "../components/SearchFixedHint";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useUrlSearch } from "../lib/listState";
+import { SaleDialog } from "../components/SaleDialog";
+import { SalesJournal } from "../components/SalesJournal";
 import { Modal } from "../components/Modal";
 import {
   IconChevronDown,
@@ -17,6 +20,8 @@ import {
   IconSearch,
   IconStock,
   IconUpload,
+  IconCart,
+  IconJournal,
 } from "../components/icons";
 import { PartsSearch } from "../components/PartsSearch";
 import { SuggestInput } from "../components/SuggestInput";
@@ -95,11 +100,13 @@ type MenuState = { at: MenuAt; entries: MenuEntry[] } | null;
 
 export default function Stock() {
   const { can, me } = useAuth();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<StockList | null>(null);
   const [catalog, setCatalog] = useState<StockCatalog | null>(null);
   const [hints, setHints] = useState<{ suppliers: string[]; locations: string[] }>({ suppliers: [], locations: [] });
-  const [search, setSearch] = useState("");
+  // Набранное — в адресе: вернулись на склад — тот же поиск.
+  const [search, setSearch] = useUrlSearch("q");
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
   const [exact, setExact] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +116,9 @@ export default function Stock() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   // Поиск у поставщиков: с тем, что набрано в поиске склада, — чего нет у себя, ищут у них.
   const [suppliers, setSuppliers] = useState<string | null>(null);
+  /** Окно продажи: что уже в чеке при открытии. */
+  const [selling, setSelling] = useState<StockItem[] | null>(null);
+  const [salesOpen, setSalesOpen] = useState(false);
   const [catDialog, setCatDialog] = useState<{ d: CategoryDialogKind; then?: (id?: string) => void } | null>(null);
   const [locationFor, setLocationFor] = useState<string[] | null>(null);
   const [deleteFor, setDeleteFor] = useState<string[] | null>(null);
@@ -134,6 +144,9 @@ export default function Stock() {
   const memoryKey = `finecrm.stock.filters.${me?.kind === "tenant" ? me.user.id : "platform"}`;
   const canMove = can("stock.move");
   const canCount = can("stock.inventory");
+  // Продажа со склада без ремонта (окно-чек, components/SaleDialog.tsx).
+  const canSell = can("stock.sell");
+  const canSeeSales = canSell || can("finance.view");
   const seesCost = can("orders.cost", "finance.view", "stock.move");
 
   const apply = useCallback(
@@ -548,6 +561,15 @@ export default function Stock() {
     const ico = "h-[17px] w-[17px]";
     const entries: MenuEntry[] = [
       ...(one ? [{ label: "Открыть карточку", icon: <IconStock className={ico} />, onClick: () => openItem(item.id) }] : []),
+      ...(canSell
+        ? [{
+            label: one ? "Продать…" : "Продать выбранное…",
+            icon: <IconCart className={ico} />,
+            disabled: one ? item.qty <= 0 : false,
+            hint: one && item.qty <= 0 ? "нет на складе" : undefined,
+            onClick: () => setSelling(one ? [item] : (data?.items ?? []).filter((i) => ids.includes(i.id))),
+          }]
+        : []),
       ...(one && canMove ? [{ label: "Изменить…", icon: <IconEdit className={ico} />, hint: sheet ? undefined : "2× щелчок", onClick: () => setEditing({ item, categoryId: null }) }] : []),
       ...(one && canMove ? [{ label: "Приход…", icon: <IconDownload className={ico} />, onClick: () => setMoving({ item, type: "IN" }) }] : []),
       ...(one && (canMove || canCount) ? [{ label: "Списать…", icon: <IconUpload className={ico} />, onClick: () => setMoving({ item, type: "WRITE_OFF" }) }] : []),
@@ -917,9 +939,19 @@ export default function Stock() {
         subtitle="Остатки запчастей и расходников. Любое изменение остатка — движение с автором и причиной."
         actions={
           <>
+            {canSeeSales && (
+              <Button variant="secondary" icon={<IconJournal />} onClick={() => setSalesOpen(true)} data-sales-open>
+                Продажи
+              </Button>
+            )}
             <Button variant="secondary" icon={<IconSearch />} onClick={() => setSuppliers(search.trim())}>
               Найти у поставщиков
             </Button>
+            {canSell && (
+              <Button icon={<IconCart />} onClick={() => setSelling([])} className="!bg-state-done !text-[#0E2A1C] hover:!brightness-105" data-sell>
+                Продать
+              </Button>
+            )}
             {canMove && (
               <Button icon={<IconPlus />} onClick={() => setEditing({ item: null, categoryId: null })}>
                 Новая позиция
@@ -929,6 +961,21 @@ export default function Stock() {
         }
       />
       {suppliers !== null && <PartsSearch initialQuery={suppliers} onClose={() => setSuppliers(null)} />}
+      {selling !== null && (
+        <SaleDialog
+          initial={selling}
+          canPickCustomer={can("customers.view")}
+          onClose={() => setSelling(null)}
+          onSold={(sale, print) => {
+            setSelling(null);
+            setSel(new Set());
+            reloadAll();
+            say({ text: `Продано: ${sale.number} на ${money(sale.total)}${sale.items.length > 1 ? ` (${sale.items.length} поз.)` : ""}` });
+            if (print) navigate(`/sales/${sale.id}/print?print=1`);
+          }}
+        />
+      )}
+      {salesOpen && <SalesJournal canReturn={canSell} onClose={() => setSalesOpen(false)} onChanged={reloadAll} />}
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-3">
@@ -1070,6 +1117,7 @@ export default function Stock() {
             <div className="pointer-events-none sticky bottom-[calc(var(--bottom-nav,0px)+12px)] z-30 flex justify-center lg:bottom-4" data-bulk-bar>
               <div className="pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto rounded-[16px] bg-ink py-1.5 pl-4 pr-1.5 text-surface shadow-modal">
                 <b className="mr-2 whitespace-nowrap text-[13.5px]">Выбрано: {sel.size}</b>
+                {canSell && <BarBtn icon={<IconCart className="h-4 w-4" />} label="Продать" onClick={() => setSelling((data?.items ?? []).filter((i) => sel.has(i.id)))} />}
                 {canMove && (
                   <>
                     <BarBtn icon={<IconFolder className="h-4 w-4" />} label="Переместить" onClick={(el) => fromButton(el, (x, y, sheet) => setMenu({ at: { x, y: y - 8, sheet, title: `Переместить ${plural(sel.size, "позицию", "позиции", "позиций")}` }, entries: [{ node: movePicker(selIds, undefined, sheet)(() => setMenu(null)) }] }))} />

@@ -92,3 +92,7 @@ desktop/ocr-models/*.mjs
 
 # Программа для Mac, скачанная со сборки GitHub перед publish-mac.
 desktop/dist-mac/
+
+# архивы партий правок (batchNN.tgz и суммы) — распаковываются сюда, но сами в репозиторий не идут
+batch*.tgz
+batch*.sha256

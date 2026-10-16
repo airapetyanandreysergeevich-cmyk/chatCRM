@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { PAYMENT_LABEL, salesApi, type SalesPage } from "../lib/salesApi";
 import { IconChevronLeft, IconCompany, IconEdit, IconOrders, IconPerson, IconUrgent, IconWarranty } from "../components/icons";
 import {
   Badge,
@@ -257,6 +258,8 @@ export default function ClientCard() {
         )}
       </div>
 
+      <ClientPurchases customerId={c.id} />
+
       {editing && (
         <ClientModal
           client={{ ...c, orderCount: s.orders, deviceCount: data.devices.length }}
@@ -290,6 +293,52 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: Rea
       <SectionLabel>{label}</SectionLabel>
       <p className="mt-2 text-[22px] font-extrabold leading-none tracking-tight">{value}</p>
       {hint && <p className="mt-1.5 text-[12.5px] text-ink-dim">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * Покупки клиента со склада (продажи без ремонта). Нет покупок — блока нет:
+ * у большинства клиентов мастерской их и не будет.
+ */
+function ClientPurchases({ customerId }: { customerId: string }) {
+  const navigate = useNavigate();
+  const [page, setPage] = useState<SalesPage | null>(null);
+  useEffect(() => {
+    salesApi
+      .list({ customerId, pageSize: 20 })
+      .then(setPage)
+      .catch(() => setPage(null));
+  }, [customerId]);
+  if (!page || page.total === 0) return null;
+  return (
+    <div className="space-y-2.5" data-client-purchases>
+      <SectionLabel>
+        {plural(page.total, "покупка", "покупки", "покупок")} со склада
+        {page.total > page.rows.length ? ` · показаны последние ${page.rows.length}` : ""}
+      </SectionLabel>
+      <List>
+        {page.rows.map((sale) => (
+          <button key={sale.id} type="button" onClick={() => navigate(`/sales/${sale.id}/print`)} className="block w-full text-left">
+            <ListRow
+              title={
+                <>
+                  <span className="font-mono text-[14px] text-ink-soft">{sale.number}</span>
+                  <span className="truncate">{sale.items.map((i) => (i.qty > 1 ? `${i.name} ×${i.qty}` : i.name)).join(", ")}</span>
+                  {sale.returnedAt && <Badge tone="danger">возврат</Badge>}
+                </>
+              }
+              subtitle={`${PAYMENT_LABEL[sale.payment]}${sale.warrantyDays ? ` · гарантия до ${formatDateShort(sale.warrantyUntil)}` : ""}`}
+              meta={
+                <>
+                  <span className="whitespace-nowrap lg:w-[96px] lg:text-right">{formatDateShort(sale.createdAt)}</span>
+                  <span className="whitespace-nowrap font-semibold text-ink-soft lg:w-[88px] lg:text-right">{money(sale.total)}</span>
+                </>
+              }
+            />
+          </button>
+        ))}
+      </List>
     </div>
   );
 }

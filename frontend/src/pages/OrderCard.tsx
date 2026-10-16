@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { backTarget } from "../lib/listState";
 import { PrintDialog } from "../components/PrintDialog";
 import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
@@ -399,6 +400,9 @@ export default function OrderCard() {
   // настроил сотрудник в «Периферии»). Метка в истории браузера снимается,
   // чтобы обновление страницы не предлагало печать второй раз.
   const location = useLocation();
+  // Куда ведёт «‹ К списку заказов»: в список, откуда пришли, — с тем же поиском и фильтрами.
+  // Запоминаем сразу: ниже состояние перехода сбрасывается.
+  const [backTo] = useState(() => backTarget(location.state, "/orders"));
   const justAccepted = !!(location.state as { printOffer?: boolean } | null)?.printOffer;
   useEffect(() => {
     if (!justAccepted) return;
@@ -563,7 +567,7 @@ export default function OrderCard() {
   return (
     // Пока видна плавающая «Сохранить» — запас снизу, чтобы она не закрывала последние поля.
     <div className={"space-y-5 " + (canEditWork && dirty ? "pb-24" : "")}>
-      <button onClick={() => (dirty ? setLeaveTo("/orders") : navigate("/orders"))} className="text-[13.5px] font-semibold text-ink-muted hover:text-ink">
+      <button data-back-to-list onClick={() => (dirty ? setLeaveTo(backTo) : navigate(backTo))} className="text-[13.5px] font-semibold text-ink-muted hover:text-ink">
         ‹ К списку заказов
       </button>
 
@@ -571,6 +575,16 @@ export default function OrderCard() {
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
             <h1 className="font-mono text-[26px] font-extrabold tracking-tight" {...copyable("order", order.number)}>{order.number}</h1>
+            {order.outsourceNumber && (
+              <span
+                data-outsource-chip
+                title="Номер этого заказа в базе заказчика-аутсорса"
+                className="rounded-pill border border-line bg-surface-raised px-2.5 py-1 text-[12.5px] font-semibold text-ink-muted"
+                {...copyable("outsource", order.outsourceNumber)}
+              >
+                Аутсорс № <span className="font-mono text-ink">{order.outsourceNumber}</span>
+              </span>
+            )}
             <StatusPill tone={statusPill(order).tone} className="text-[13px]">
               {statusPill(order).label}
             </StatusPill>

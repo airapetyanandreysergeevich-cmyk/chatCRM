@@ -99,6 +99,7 @@ export interface Order {
     phone2?: string | null;
     email?: string | null;
     address?: string | null;
+    isOutsource?: boolean;
   };
   device: { id: string; kind: string; brand: string | null; model: string | null; serial: string | null } | null;
 
@@ -112,6 +113,8 @@ export interface Order {
   hasOpenTraces: boolean;
   hasWaterDamage: boolean;
   storageLocation: string | null;
+  /** Номер заказа в базе заказчика-аутсорса. */
+  outsourceNumber?: string | null;
   approvedLimit: number | null;
 
   diagnosis: string | null;
@@ -237,6 +240,8 @@ export interface CustomerHit {
   address: string | null;
   source: string | null;
   color?: string | null;
+  /** Клиент-аутсорс: на приёме спрашиваем номер заказа в его базе. */
+  isOutsource?: boolean;
   discountPercent: number;
   orderCount: number;
 }

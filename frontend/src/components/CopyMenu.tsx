@@ -17,7 +17,7 @@ import { searchUrl, type Engine } from "./WebSearch";
  * хуже, чем оставить.
  */
 
-export type CopyKind = "phone" | "name" | "order" | "serial" | "device";
+export type CopyKind = "phone" | "name" | "order" | "serial" | "device" | "outsource";
 
 const WHAT: Record<CopyKind, string> = {
   phone: "телефон",
@@ -25,6 +25,7 @@ const WHAT: Record<CopyKind, string> = {
   order: "номер заказа",
   serial: "серийный номер",
   device: "марку и модель",
+  outsource: "номер аутсорса",
 };
 
 /**

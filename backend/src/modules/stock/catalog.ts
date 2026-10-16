@@ -53,7 +53,7 @@ export function withDescendants(id: string, all: Cat[]): Set<string> {
   return out;
 }
 
-/** Найти или завести цепочку категорий по пути. Сравнение без регистра. */
+/** Найти или завести цепочку категорий по пути. Сравнение без регистра. Вызывать под lockCatalog. */
 export async function ensurePath(tx: Prisma.TransactionClient, tenantId: string, parts: string[], all: Cat[]): Promise<string | null> {
   let parentId: string | null = null;
   for (const name of parts) {
@@ -74,7 +74,74 @@ export async function ensurePath(tx: Prisma.TransactionClient, tenantId: string,
   return parentId;
 }
 
-/** Разложить по дереву позиции, у которых категория есть только текстом. */
+/**
+ * Дерево категорий меняет кто-то один за раз.
+ *
+ * Склад при открытии спрашивает дерево и список одновременно, и оба запроса
+ * раскладывают по дереву позиции, пришедшие из файла. Без очереди каждый
+ * заводил свою копию одних и тех же категорий: позиции оставались в одной,
+ * вторая — пустая (16.10.2026, загрузка склада из VLAPP). Блокировка живёт до
+ * конца транзакции; второй запрос дождётся первого и увидит уже готовое дерево.
+ */
+export async function lockCatalog(tx: Prisma.TransactionClient, tenantId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"stock-catalog:" + tenantId}))`;
+}
+
+/**
+ * Склеить одинаковые категории: одно имя (без учёта регистра) под одним
+ * родителем. Руками такие не заводятся — их оставила гонка выше. Остаётся та,
+ * где больше позиций (при равенстве — старшая); позиции и подкатегории копий
+ * переходят к ней, цвет — если у неё своего нет. Склейка родителей может
+ * породить двойников среди детей — поэтому по кругу, пока есть что склеивать.
+ */
+export async function mergeDuplicateCategories(tx: Prisma.TransactionClient): Promise<number> {
+  let merged = 0;
+  for (let round = 0; round < 10; round++) {
+    const cats = await tx.stockCategory.findMany({ select: { id: true, parentId: true, name: true, color: true, createdAt: true } });
+    const groups = new Map<string, typeof cats>();
+    for (const c of cats) {
+      const k = `${c.parentId ?? ""}|${c.name.trim().toLocaleLowerCase("ru-RU")}`;
+      groups.set(k, [...(groups.get(k) ?? []), c]);
+    }
+    const dupes = [...groups.values()].filter((g) => g.length > 1);
+    if (!dupes.length) break;
+    const counts = await tx.stockItem.groupBy({ by: ["categoryId"], _count: { _all: true } });
+    const n = new Map(counts.map((c) => [c.categoryId, c._count._all]));
+    for (const g of dupes) {
+      const [keep, ...rest] = [...g].sort(
+        (a, b) => (n.get(b.id) ?? 0) - (n.get(a.id) ?? 0) || a.createdAt.getTime() - b.createdAt.getTime()
+      );
+      const ids = rest.map((r) => r.id);
+      await tx.stockItem.updateMany({ where: { categoryId: { in: ids } }, data: { categoryId: keep.id } });
+      await tx.stockCategory.updateMany({ where: { parentId: { in: ids } }, data: { parentId: keep.id } });
+      const color = keep.color ?? rest.find((r) => r.color)?.color ?? null;
+      if (color !== keep.color) await tx.stockCategory.update({ where: { id: keep.id }, data: { color } });
+      await tx.stockCategory.deleteMany({ where: { id: { in: ids } } });
+      merged += ids.length;
+    }
+  }
+  return merged;
+}
+
+/**
+ * Привести каталог в порядок перед показом: разложить текстовые категории и
+ * склеить двойников. Без работы блокировку не берём — склад открывают часто.
+ */
+export async function tidyCatalog(tx: Prisma.TransactionClient, tenantId: string) {
+  const loose = await tx.stockItem.findFirst({ where: { categoryId: null, category: { not: null } }, select: { id: true } });
+  const dupe = await tx.$queryRaw<Array<{ one: number }>>`
+    SELECT 1 AS one FROM "StockCategory" GROUP BY "parentId", lower(btrim(name)) HAVING count(*) > 1 LIMIT 1`;
+  if (!loose && !dupe.length) return;
+  await lockCatalog(tx, tenantId);
+  await syncTextCategories(tx, tenantId);
+  if (dupe.length && (await mergeDuplicateCategories(tx))) {
+    // Пути текстом у позиций — по новому дереву.
+    const roots = await tx.stockCategory.findMany({ where: { parentId: null }, select: { id: true } });
+    for (const r of roots) await refreshPaths(tx, r.id);
+  }
+}
+
+/** Разложить по дереву позиции, у которых категория есть только текстом. Вызывать под lockCatalog. */
 export async function syncTextCategories(tx: Prisma.TransactionClient, tenantId: string) {
   const loose = await tx.stockItem.findMany({
     where: { categoryId: null, category: { not: null } },

@@ -50,6 +50,9 @@ const ORDER: readonly string[] = [
   "cashRegister",
   // склад
   "stockMovement",
+  // продажи: на них ссылались движения и деньги — после них
+  "saleItem",
+  "sale",
   "stockBalance",
   "stockItem",
   "stockCategory",

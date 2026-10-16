@@ -96,7 +96,7 @@ export default function OrderNew() {
   const canEditPicks = can("settings.manage");
   const [editingPicks, setEditingPicks] = useState<QuickPickField | null>(null);
   const [scanning, setScanning] = useState(false);
-  /** Серийный номер пришёл с камеры — раскрыть блок, где он лежит, чтобы его было видно. */
+  /** Серийный номер пришёл с камеры — подсказать сверить его. */
   const [scannedSerial, setScannedSerial] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -136,6 +136,7 @@ export default function OrderNew() {
     receptionNote: "",
     devicePasscode: "",
     storageLocation: "",
+    outsourceNumber: "",
     dueAt: "",
     estimatedCost: "",
     approvedLimit: "",
@@ -372,6 +373,7 @@ export default function OrderNew() {
         completeness,
         appearance,
         storageLocation: form.storageLocation || undefined,
+        outsourceNumber: (picked?.isOutsource && form.outsourceNumber.trim()) || undefined,
         dueAt: form.dueAt ? new Date(form.dueAt).toISOString() : undefined,
         estimatedCost: num(form.estimatedCost),
         approvedLimit: num(form.approvedLimit),
@@ -559,6 +561,19 @@ export default function OrderNew() {
             </div>
           </div>
 
+          {picked?.isOutsource && (
+            <div className="mt-4 rounded-card border border-line bg-surface-input/40 p-3" data-outsource-number>
+              <Field label="Номер аутсорса" hint="Номер этого заказа в базе заказчика — по нему с ним сверяетесь">
+                <Input
+                  value={form.outsourceNumber}
+                  onChange={(e) => setForm({ ...form, outsourceNumber: e.target.value })}
+                  maxLength={60}
+                  placeholder="Например, 2026-1184"
+                />
+              </Field>
+            </div>
+          )}
+
           <More
             filled={countFilled(
               customer.type === "COMPANY",
@@ -666,26 +681,32 @@ export default function OrderNew() {
                 />
               </Field>
             </div>
-            <Field label="Модель" interactive>
-              <SuggestInput
-                value={device.model}
-                // Модели показываем только для выбранной марки: IdeaPad
-                // незачем подсказывать, когда в бренде стоит ASUS.
-                onChange={(model) => setDevice({ ...device, model })}
-                items={matchHints(hints.model, device.model, device.brand)}
-                onForget={forget}
-                placeholder="IdeaPad 5, VivoBook 15…"
-              />
-            </Field>
+            {/* Серийный номер — на виду, рядом с моделью: его вписывают почти
+                всегда, а в «Дополнительно» его не находили (16.10.2026). */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Модель" interactive>
+                <SuggestInput
+                  value={device.model}
+                  // Модели показываем только для выбранной марки: IdeaPad
+                  // незачем подсказывать, когда в бренде стоит ASUS.
+                  onChange={(model) => setDevice({ ...device, model })}
+                  items={matchHints(hints.model, device.model, device.brand)}
+                  onForget={forget}
+                  placeholder="IdeaPad 5, VivoBook 15…"
+                />
+              </Field>
+              <Field label="Серийный номер" hint={scannedSerial ? "Прочитан с шильдика — сверьте" : undefined}>
+                <Input
+                  data-serial
+                  value={device.serial}
+                  onChange={(e) => setDevice({ ...device, serial: e.target.value })}
+                  placeholder="S/N с наклейки"
+                />
+              </Field>
+            </div>
           </div>
 
-          <More
-            filled={countFilled(device.serial, form.devicePasscode, form.storageLocation)}
-            forceOpen={scannedSerial}
-          >
-            <Field label="Серийный номер">
-              <Input value={device.serial} onChange={(e) => setDevice({ ...device, serial: e.target.value })} />
-            </Field>
+          <More filled={countFilled(form.devicePasscode, form.storageLocation)}>
             <Field label="Пароль, PIN или графический ключ" hint="Без него мастер не сможет проверить работу">
               <Input
                 value={form.devicePasscode}

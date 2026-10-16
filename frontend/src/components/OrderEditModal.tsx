@@ -53,6 +53,7 @@ export function OrderEditModal({
     receptionNote: order.receptionNote ?? "",
     devicePasscode: order.devicePasscode ?? "",
     storageLocation: order.storageLocation ?? "",
+    outsourceNumber: order.outsourceNumber ?? "",
     completeness: joinItems(order.completeness ?? []),
     appearance: joinItems(order.appearance ?? []),
     estimatedCost: numText(order.estimatedCost),
@@ -90,6 +91,7 @@ export function OrderEditModal({
     text("receptionNote");
     text("devicePasscode");
     text("storageLocation");
+    text("outsourceNumber");
     if (form.completeness !== initial.completeness) out.completeness = form.completeness;
     if (form.appearance !== initial.appearance) out.appearance = form.appearance;
     if (seesMoney && form.estimatedCost !== initial.estimatedCost) out.estimatedCost = num(form.estimatedCost);
@@ -172,6 +174,11 @@ export function OrderEditModal({
             <Field label="Место хранения">
               <Input value={form.storageLocation} onChange={(e) => set("storageLocation", e.target.value)} />
             </Field>
+            {(order.customer.isOutsource || !!order.outsourceNumber) && (
+              <Field label="Номер аутсорса" hint="Номер заказа в базе заказчика">
+                <Input value={form.outsourceNumber} maxLength={60} onChange={(e) => set("outsourceNumber", e.target.value)} data-outsource-edit />
+              </Field>
+            )}
           </div>
         </section>
 
