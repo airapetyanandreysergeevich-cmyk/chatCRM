@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { migrateApi, type MigrateResult, type MigrateSummary } from "../lib/migrateApi";
+import { migrateApi, type MigrateResult, type MigrateSource, type MigrateSummary } from "../lib/migrateApi";
 import { IconUpload } from "./icons";
 import { Banner, Button, Checkbox } from "./ui";
 
@@ -27,8 +27,10 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
 export function MigrateCard() {
   const { me } = useAuth();
   const navigate = useNavigate();
-  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
-  const [state, setState] = useState<{ canMigrate: boolean; sources: string[] } | null>(null);
+  const isOwner = me?.kind === "tenant" && me.user.isOwner;
+  const [state, setState] = useState<{ canMigrate: boolean; sources: MigrateSource[] } | null>(null);
+  // Из какой программы: от выбора зависят подсказка и какой файл предложит окно.
+  const [sourceId, setSourceId] = useState<string>("");
   const [busy, setBusy] = useState<"parse" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [parsed, setParsed] = useState<{ token: string | null; fileName: string; summary: MigrateSummary } | null>(null);
@@ -47,7 +49,7 @@ export function MigrateCard() {
     setError(null);
     setParsed(null);
     try {
-      setParsed(await migrateApi.parse(file));
+      setParsed(await migrateApi.parse(file, sourceId || undefined));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось прочитать базу");
     } finally {
@@ -70,6 +72,7 @@ export function MigrateCard() {
   }
 
   const s = parsed?.summary;
+  const source = state.sources.find((x) => x.id === sourceId) ?? null;
   const issues = s ? s.previews.reduce((k, p) => k + p.issuesTotal, 0) : 0;
   const titleOf = { customers: "Клиенты", stock: "Склад", orders: "Заказы" } as const;
 
@@ -121,14 +124,39 @@ export function MigrateCard() {
       ) : !s ? (
         <>
           <p className="mt-2 text-[13.5px] leading-relaxed text-ink-muted">
-            Выберите файл базы старой программы. Сначала покажем, что и куда переедет, и только после
-            подтверждения перенесём — клиентов, заказы с суммами и историей, склад и мастеров. Умеем:{" "}
-            {state.sources.join(", ")}. Другая программа — пришлите нам её базу, добавим.
+            Выберите программу и её файл. Сначала покажем, что и куда переедет, и только после подтверждения
+            перенесём — клиентов, заказы с суммами, оплаты и мастеров. Другая программа — пришлите нам её
+            базу или выгрузку, добавим.
           </p>
+          <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="Из какой программы" data-migrate-sources>
+            {state.sources.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                role="radio"
+                aria-checked={sourceId === x.id}
+                data-migrate-source={x.id}
+                onClick={() => setSourceId(x.id)}
+                className={
+                  "min-h-[44px] rounded-field border px-4 text-left text-[14px] font-semibold transition-colors duration-150 " +
+                  (sourceId === x.id ? "border-brand bg-brand-tint text-brand-ink" : "border-line bg-surface-input hover:border-line-strong")
+                }
+              >
+                {x.title}
+              </button>
+            ))}
+          </div>
+          {source && (
+            <p className="mt-2 text-[13px] text-ink-dim" data-migrate-hint>
+              Нужен {source.file}.
+              {source.id === "helloclient" &&
+                " В HelloClient это отчёт «Прибыль по заказам» за всё время, выгруженный в Excel. В него попадают только закрытые заказы."}
+            </p>
+          )}
           <input
             ref={input}
             type="file"
-            accept=".sqlite,.sqlite3,.db,.db3"
+            accept={source?.accept ?? state.sources.map((x) => x.accept).join(",")}
             hidden
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -138,8 +166,8 @@ export function MigrateCard() {
           />
           {error && <div className="mt-3"><Banner tone="error">{error}</Banner></div>}
           <div className="mt-4">
-            <Button variant="secondary" icon={<IconUpload />} disabled={busy !== null} onClick={() => input.current?.click()}>
-              {busy === "parse" ? "Читаем базу…" : "Выбрать файл базы"}
+            <Button variant="secondary" icon={<IconUpload />} disabled={busy !== null || !source} onClick={() => input.current?.click()}>
+              {busy === "parse" ? "Читаем файл…" : source ? `Выбрать ${source.accept === ".xlsx" ? "файл Excel" : "файл базы"}` : "Сначала выберите программу"}
             </Button>
           </div>
         </>
@@ -151,7 +179,11 @@ export function MigrateCard() {
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <Tile label="Клиенты" value={n(s.customers)} />
-            <Tile label="Заказы" value={n(s.orders)} hint={s.statuses.filter((x) => x.name !== "Выдан").reduce((k, x) => k + x.count, 0) + " в работе"} />
+            <Tile
+              label="Заказы"
+              value={n(s.orders)}
+              hint={s.statuses.filter((x) => x.name !== "Выдан" && x.name !== "Возврат без ремонта").reduce((k, x) => k + x.count, 0) + " в работе"}
+            />
             <Tile label="Склад" value={n(s.stock)} />
             <Tile label="Мастера" value={n(s.staff.length)} />
             <Tile label="Оплаты" value={`${n(s.paymentsSum)} ₽`} hint={`${n(s.payments)} платежей`} />
@@ -160,8 +192,10 @@ export function MigrateCard() {
 
           <ul className="space-y-1.5 text-[13px] leading-relaxed text-ink-muted">
             <li>
-              • Выданные заказы считаются оплаченными: деньги лягут в отдельную выключенную кассу «Старая
-              программа». Обычная касса не изменится, долгов из ниоткуда не появится.
+              • Оплаты лягут в отдельную выключенную кассу «Старая программа»: обычная касса не изменится.
+              {s.debts
+                ? ` Долги переедут: ${n(s.debts.count)} заказ(ов) на ${n(s.debts.sum)} ₽ — они появятся у должников.`
+                : " Выданные заказы считаются оплаченными, долгов из ниоткуда не появится."}
             </li>
             {s.staff.length > 0 && (
               <li>

@@ -47,6 +47,7 @@ const SAMPLE: BoardCard = {
   master: { id: "m", fullName: "Олег Иванов" },
   customer: { id: "c", type: "INDIVIDUAL", name: "Мария Кузнецова", color: "green" },
   complaint: "Не включается после залития, клиент просит сохранить данные",
+  note: "Царапина на крышке, без зарядки",
   total: 4500,
 };
 

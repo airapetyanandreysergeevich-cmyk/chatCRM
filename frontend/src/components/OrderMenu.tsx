@@ -5,7 +5,7 @@ import { useAuth } from "../lib/auth";
 import { masterLabel, ordersApi, type Order, type OrderStatus, type Reference, type StatusGroup } from "../lib/orders";
 import { smsApi, type ApprovalHint, type ReadyHint, type SmsKind } from "../lib/sms";
 import type { BoardCard } from "../lib/workshop";
-import { copyText } from "./CopyMenu";
+import { copyText, ORDER_MENU_EVENT } from "./CopyMenu";
 import {
   IconCamera,
   IconFolder,
@@ -60,6 +60,26 @@ export interface MenuOrder {
   completed: boolean;
   issued: boolean;
   phone?: string | null;
+  /** Что предложить скопировать: «номер заказа» — «Р-…», «клиента» — имя… */
+  copy?: Array<[string, string]>;
+}
+
+/** Что копировать из заказа — пункты «Копировать» в меню и строка целиком. */
+export function orderCopyItems(o: {
+  number: string;
+  customer?: { name?: string | null; phone?: string | null } | null;
+  device?: { kind?: string | null; brand?: string | null; model?: string | null } | null;
+  serial?: string | null;
+}): Array<[string, string]> {
+  const device = [o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ");
+  const items: Array<[string, string | null | undefined]> = [
+    ["номер заказа", o.number],
+    ["клиента", o.customer?.name],
+    ["телефон", o.customer?.phone],
+    ["технику", device],
+    ["серийный номер", o.serial],
+  ];
+  return items.map(([w, v]) => [w, (v ?? "").trim()] as [string, string]).filter(([, v]) => v);
 }
 
 export const menuFromBoard = (c: BoardCard): MenuOrder => ({
@@ -70,6 +90,7 @@ export const menuFromBoard = (c: BoardCard): MenuOrder => ({
   isUrgent: c.isUrgent,
   completed: c.status.group === "DONE",
   issued: false,
+  copy: orderCopyItems({ number: c.number, customer: c.customer, device: c.device }),
 });
 
 export const menuFromOrder = (o: Order): MenuOrder => ({
@@ -81,6 +102,7 @@ export const menuFromOrder = (o: Order): MenuOrder => ({
   completed: !!o.completedAt,
   issued: !!o.issuedAt,
   phone: o.customer.phone ?? null,
+  copy: orderCopyItems({ number: o.number, customer: o.customer, device: o.device, serial: o.device?.serial }),
 });
 
 type Dialog =
@@ -197,13 +219,29 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
   }, []);
 
   /** Обработчики для элемента заказа: правая кнопка, долгое нажатие, кнопка «⋯». */
+  // Заказы, на которые повешено меню, — чтобы открыть его из меню копирования.
+  const bound = useRef(new Map<string, MenuOrder>());
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; x: number; y: number }>).detail;
+      const o = d && bound.current.get(d.id);
+      if (o) show(o, d.x, d.y, false);
+    };
+    document.addEventListener(ORDER_MENU_EVENT, onAsk);
+    return () => document.removeEventListener(ORDER_MENU_EVENT, onAsk);
+  }, [show]);
+
   const bind = useCallback(
-    (o: MenuOrder) => ({
+    (o: MenuOrder) => {
+      bound.current.set(o.id, o);
+      return {
+      "data-order-menu": o.id,
       onContextMenu: (e: React.MouseEvent) => {
-        // Правая кнопка по технике и серийному номеру — их меню (копировать и
-        // поиск, components/CopyMenu.tsx), а не меню заказа.
+        // Правая кнопка по полю, которое можно скопировать (номер, клиент,
+        // телефон, техника…), — меню копирования (components/CopyMenu.tsx);
+        // в нём же «Меню заказа…». По остальному месту — меню заказа.
         const mouse = !(lastPointer.current === "touch" || lastPointer.current === "pen");
-        if (mouse && (e.target as Element).closest?.('[data-copy-kind="device"],[data-copy-kind="serial"]')) return;
+        if (mouse && (e.target as Element).closest?.("[data-copy]")) return;
         e.preventDefault();
         e.stopPropagation();
         const touch = lastPointer.current === "touch" || lastPointer.current === "pen";
@@ -257,7 +295,8 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
         }
       },
       style: { WebkitTouchCallout: "none" } as React.CSSProperties,
-    }),
+      };
+    },
     [show]
   );
 
@@ -410,6 +449,8 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
                   .catch((err) => fail(err, "Не получилось"));
               case "copy":
                 return void copyText(o.number).then((ok) => say({ text: ok ? `Скопировано: ${o.number}` : "Не удалось скопировать", tone: ok ? undefined : "error" }));
+              case "copyText":
+                return void copyText(a.text).then((ok) => say({ text: ok ? `Скопировано: ${a.text}` : "Не удалось скопировать", tone: ok ? undefined : "error" }));
               case "repeat":
                 return navigate("/orders/new", { state: { repeatFrom: o.id } });
               case "folder":
@@ -459,6 +500,7 @@ type Action =
   | { kind: "open" | "peek" | "labels" | "edit" | "sms" | "approve" | "photo" | "issue" | "reopen" | "delete" | "urgent" | "copy" | "repeat" | "warranty" | "folder" }
   | { kind: "print"; doc: "intake" | "act" }
   | { kind: "status"; status: OrderStatus }
+  | { kind: "copyText"; text: string }
   | { kind: "master"; masterId: string | null; name: string };
 
 const GROUP_LABEL: Partial<Record<StatusGroup, string>> = {
@@ -484,7 +526,7 @@ function OrderMenu({
   onClose: () => void;
 }) {
   const o = at.o;
-  const [view, setView] = useState<"main" | "status" | "master">("main");
+  const [view, setView] = useState<"main" | "status" | "master" | "copy">("main");
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: at.x, top: at.y, ready: at.sheet });
   const [sms, setSms] = useState<{ send: boolean; ask: boolean } | null>(null);
@@ -605,6 +647,24 @@ function OrderMenu({
         </p>
       </>
     );
+  } else if (view === "copy") {
+    const items = o.copy ?? [];
+    body = (
+      <>
+        <MenuItem big={big} icon={<IconChevronLeft className={ico} />} onClick={() => setView("main")}>
+          Копировать
+        </MenuItem>
+        <Sep />
+        {items.map(([w, v]) => (
+          <MenuItem big={big} key={w} icon={<CopyIcon />} hint={v} onClick={() => act({ kind: "copyText", text: v })}>
+            {w.charAt(0).toUpperCase() + w.slice(1)}
+          </MenuItem>
+        ))}
+        <MenuItem big={big} icon={<CopyIcon />} onClick={() => act({ kind: "copyText", text: items.map(([, v]) => v).join(", ") })}>
+          Всё строкой
+        </MenuItem>
+      </>
+    );
   } else if (view === "master") {
     body = (
       <>
@@ -692,9 +752,15 @@ function OrderMenu({
             Позвонить клиенту
           </a>
         )}
-        <MenuItem big={big} icon={<CopyIcon />} onClick={() => act({ kind: "copy" })}>
-          Копировать номер
-        </MenuItem>
+        {(o.copy?.length ?? 0) > 1 ? (
+          <MenuItem big={big} icon={<CopyIcon />} sub onClick={() => setView("copy")}>
+            Копировать
+          </MenuItem>
+        ) : (
+          <MenuItem big={big} icon={<CopyIcon />} onClick={() => act({ kind: "copy" })}>
+            Копировать номер
+          </MenuItem>
+        )}
         {perms.folder && (
           <MenuItem big={big} icon={<IconFolder className={ico} />} onClick={() => act({ kind: "folder" })}>
             Открыть папку заказа

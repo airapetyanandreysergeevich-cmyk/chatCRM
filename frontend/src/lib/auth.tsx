@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, setAccessToken, setLogoutHandler } from "./api";
+import { releasePush, syncPushOwner } from "./push";
 import { boxToOpen, forgetBox, rememberBox } from "./lastBox";
 
 export interface TenantMe {
@@ -51,6 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(data);
     setStatus("ready");
     rememberBox();
+    // Оповещения этого устройства — тому, кто вошёл (см. lib/push.ts).
+    void syncPushOwner();
   }, []);
 
   const reset = useCallback(() => {
@@ -112,6 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
+      // Сначала снять оповещения этого устройства с уходящего — пока он ещё вошёл.
+      await releasePush();
       await api.post("/auth/logout");
     } finally {
       forgetBox();

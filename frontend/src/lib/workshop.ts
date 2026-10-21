@@ -21,6 +21,8 @@ export interface BoardCard {
   customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string; color?: string | null };
   /** Неисправность со слов клиента (до 300 знаков) — для «Редактора панелей заказа». */
   complaint?: string;
+  /** Примечание приёмщика (до 300 знаков). */
+  note?: string | null;
   /** Итог заказа — только тем, кто видит деньги. */
   total?: number;
 }
@@ -66,6 +68,47 @@ export interface DashboardPrefs {
   order: ColumnKey[];
   hidden: string[];
   panels: Partial<Record<ColumnKey, PanelPrefs>>;
+  /** Свой вид главной. Нет — как у мастерской (workshopView). */
+  view?: DashboardView | null;
+  table?: TablePrefs;
+}
+
+export type DashboardView = "board" | "table";
+
+/** Столбцы таблицы на главной — те же, что на сервере (summary/prefs.ts). */
+export const TABLE_COLS = ["number", "created", "device", "status", "customer", "complaint", "master", "due", "total", "serial", "note", "since"] as const;
+export type TableCol = (typeof TABLE_COLS)[number];
+export const TABLE_OFF: readonly TableCol[] = ["serial", "note", "since"];
+export type TableSort = "created" | "-created" | "number" | "-number" | "due" | "-due" | "total" | "-total" | "since" | "-since";
+
+export interface TablePrefs {
+  hidden?: TableCol[];
+  shown?: TableCol[];
+  dense?: boolean;
+  sort?: TableSort;
+}
+
+/** Заказ строкой таблицы на главной. */
+export interface TableRow {
+  id: string;
+  number: string;
+  isUrgent: boolean;
+  acceptedAt: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  issuedAt: string | null;
+  /** С какого момента в нынешнем статусе. */
+  statusSince: string;
+  status: OrderStatus;
+  device: { kind: string; brand: string | null; model: string | null; serial: string | null } | null;
+  master: { id: string; fullName: string } | null;
+  customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string; phone?: string; color?: string | null };
+  complaint: string;
+  completeness: string[];
+  receptionNote: string | null;
+  total?: number;
+  /** Долг по выданному — только у строк «С долгом». */
+  debt?: number;
 }
 
 export const STAGE_SORT_LABELS: Record<StageSort, string> = {
@@ -110,6 +153,13 @@ export interface Summary {
   money: boolean;
   /** Пусто, если панель выключена или человеку не положено её видеть. */
   debtors: { rows: Debtor[]; total: number; sum: number } | null;
+  /** Какой вид главной сейчас: свой или мастерской. */
+  view?: DashboardView;
+  workshopView?: DashboardView;
+  /** Строки таблицы — только когда вид «таблица». */
+  table?: TableRow[];
+  /** Видит ли деньги заказов: столбец «Сумма» и фильтр «С долгом». */
+  tableMoney?: boolean;
 }
 
 // ------------------------------------------------------------------- склад
@@ -295,7 +345,9 @@ const qs = (params: Record<string, string | number | undefined>) => {
 
 export const summaryApi = {
   get: () => api.get<Summary>("/summary"),
-  prefs: () => api.get<{ prefs: DashboardPrefs; money: boolean; personal: boolean }>("/summary/prefs"),
+  prefs: () =>
+    api.get<{ prefs: DashboardPrefs; money: boolean; personal: boolean; workshopView: DashboardView; canShare: boolean }>("/summary/prefs"),
+  setWorkshopView: (view: DashboardView) => api.put<{ workshopView: DashboardView }>("/summary/view/workshop", { view }),
   savePrefs: (prefs: DashboardPrefs) => api.put<{ prefs: DashboardPrefs }>("/summary/prefs", { prefs }),
   kinds: () => api.get<{ kinds: DeviceKindOption[] }>("/summary/kinds"),
 };

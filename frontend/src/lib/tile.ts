@@ -5,7 +5,7 @@ import { api } from "./api";
  * Те же правила, что на сервере: backend/src/modules/summary/tile.ts.
  */
 
-export const TILE_KEYS = ["number", "urgent", "color", "status", "device", "customer", "complaint", "due", "master", "total"] as const;
+export const TILE_KEYS = ["number", "urgent", "color", "status", "device", "customer", "complaint", "note", "due", "master", "total"] as const;
 export type TileKey = (typeof TILE_KEYS)[number];
 export type TileAlign = "left" | "center" | "right";
 export type TileWidth = "full" | "half" | "auto";
@@ -35,13 +35,14 @@ export const TILE_LABEL: Record<TileKey, string> = {
   device: "Техника",
   customer: "Клиент",
   complaint: "Неисправность",
+  note: "Примечание приёмщика",
   due: "Срок",
   master: "Мастер",
   total: "Сумма",
 };
 
 /** У каких элементов есть смысл в «строках» — у остальных текст короткий всегда. */
-export const MULTILINE: ReadonlySet<TileKey> = new Set<TileKey>(["device", "customer", "complaint", "status", "master"]);
+export const MULTILINE: ReadonlySet<TileKey> = new Set<TileKey>(["device", "customer", "complaint", "note", "status", "master"]);
 
 export const WIDTH_LABEL: Record<TileWidth, string> = { full: "Вся строка", half: "Половина", auto: "По тексту" };
 
@@ -67,6 +68,7 @@ export const DEFAULT_TILE: TileLayout = {
     el("device", true, 14, true, "left", 1, "full"),
     el("customer", false, 13, false, "left", 1, "full"),
     el("complaint", false, 12, false, "left", 2, "full"),
+    el("note", false, 12, false, "left", 2, "full"),
     el("due", true, 12, false, "left", 1, "half"),
     el("master", true, 12, false, "right", 1, "half"),
     el("total", false, 12, true, "right", 1, "half"),

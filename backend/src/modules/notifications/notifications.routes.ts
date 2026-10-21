@@ -84,6 +84,33 @@ pushRouter.post(
   })
 );
 
+/**
+ * Для кого это устройство получает оповещения. Подписка браузера живёт
+ * дольше входа: включили на общем компьютере или телефоне за одного человека
+ * — и приходили его оповещения, кто бы потом ни входил (21.10.2026, мастерская
+ * с владельцем и совладельцем). Теперь при входе программа перепривязывает
+ * подписку, а здесь можно проверить, что так и есть.
+ */
+pushRouter.post(
+  "/whom",
+  ah(async (req, res) => {
+    const { endpoint } = z.object({ endpoint: z.string().max(1000) }).parse(req.body);
+    const auth = req.auth!;
+    const sub = await withPlatform((tx) =>
+      tx.pushSubscription.findUnique({
+        where: { endpoint },
+        select: { userId: true, platformUserId: true, tenantId: true, user: { select: { fullName: true } } },
+      })
+    );
+    if (!sub) return res.json({ state: "none" });
+    const mine = auth.kind === "tenant" ? sub.userId === auth.userId : sub.platformUserId === auth.platformUserId;
+    if (mine) return res.json({ state: "mine" });
+    // Имя — только своего сотрудника: чужую мастерскую и её людей не называем.
+    const sameTenant = auth.kind === "tenant" && sub.tenantId === auth.tenantId;
+    res.json({ state: "other", name: sameTenant ? sub.user?.fullName ?? null : null });
+  })
+);
+
 pushRouter.post(
   "/unsubscribe",
   ah(async (req, res) => {
@@ -249,7 +276,8 @@ notificationsRouter.get(
     res.json({
       // Владелец — псевдороль: строкой в справочнике ролей он может и не быть,
       // а оповещения получать должен.
-      roles: [{ id: OWNER_ROLE, name: "Владелец" }, ...data.roles],
+      // Совладельцы — в том же столбце: у них те же права, что у владельца.
+      roles: [{ id: OWNER_ROLE, name: "Владелец и совладельцы" }, ...data.roles],
       events: NOTIFICATION_EVENTS.map((e) => ({
         code: e.code,
         title: e.title,

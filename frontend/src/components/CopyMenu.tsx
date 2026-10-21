@@ -17,7 +17,7 @@ import { searchUrl, type Engine } from "./WebSearch";
  * хуже, чем оставить.
  */
 
-export type CopyKind = "phone" | "name" | "order" | "serial" | "device" | "outsource";
+export type CopyKind = "phone" | "name" | "order" | "serial" | "device" | "outsource" | "text";
 
 const WHAT: Record<CopyKind, string> = {
   phone: "телефон",
@@ -26,6 +26,7 @@ const WHAT: Record<CopyKind, string> = {
   serial: "серийный номер",
   device: "марку и модель",
   outsource: "номер аутсорса",
+  text: "текст",
 };
 
 /**
@@ -40,11 +41,27 @@ export function deviceText(d: { kind?: string | null; brand?: string | null; mod
   return bm || (d?.kind ?? "").trim();
 }
 
-/** Пометка для элемента: по правому щелчку на нём появится «Копировать …». */
-export function copyable(kind: CopyKind, value: string | null | undefined) {
+/**
+ * Пометка для элемента: по правому щелчку на нём появится «Копировать …».
+ * what — как назвать в меню, если не подходит название вида («неисправность»).
+ */
+export function copyable(kind: CopyKind, value: string | null | undefined, what?: string) {
   const text = (value ?? "").trim();
-  return text ? { "data-copy": text, "data-copy-kind": kind } : {};
+  if (!text) return {};
+  return what ? { "data-copy": text, "data-copy-kind": kind, "data-copy-what": what } : { "data-copy": text, "data-copy-kind": kind };
 }
+
+/**
+ * Строка целиком (заказ в таблице, плитка на доске): в меню любого поля под
+ * ней — ещё и остальное из строки и «всё строкой». Пары «что — значение».
+ */
+export function copyRow(items: Array<[string, string | null | undefined]>) {
+  const clean = items.map(([w, v]) => [w, (v ?? "").trim()] as [string, string]).filter(([, v]) => v);
+  return clean.length ? { "data-copy-row": JSON.stringify(clean) } : {};
+}
+
+/** Открыть меню заказа там, где щёлкнули (пункт «Меню заказа…» в меню копирования). */
+export const ORDER_MENU_EVENT = "finecrm:order-menu";
 
 /**
  * Положить текст в буфер обмена.
@@ -86,6 +103,10 @@ interface Open {
   y: number;
   text: string;
   kind: CopyKind;
+  what: string;
+  row: Array<[string, string]>;
+  /** id заказа, если поле лежит внутри заказа с меню (useOrderMenu). */
+  order: string | null;
 }
 
 export function CopyMenu() {
@@ -108,7 +129,15 @@ export function CopyMenu() {
       if (!text) return;
       e.preventDefault();
       e.stopPropagation();
-      setOpen({ x: e.clientX, y: e.clientY, text, kind });
+      let row: Array<[string, string]> = [];
+      try {
+        const raw = (el.closest("[data-copy-row]") as HTMLElement | null)?.dataset.copyRow;
+        if (raw) row = (JSON.parse(raw) as Array<[string, string]>).filter((x) => Array.isArray(x) && typeof x[1] === "string");
+      } catch {
+        row = [];
+      }
+      const order = (el.closest("[data-order-menu]") as HTMLElement | null)?.dataset.orderMenu ?? null;
+      setOpen({ x: e.clientX, y: e.clientY, text, kind, what: el.dataset.copyWhat || WHAT[kind], row, order });
     };
     document.addEventListener("pointerdown", pointer, true);
     document.addEventListener("contextmenu", context);
@@ -146,11 +175,18 @@ export function CopyMenu() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  async function run() {
+  async function run(text = open?.text ?? "") {
     if (!open) return;
-    const ok = await copyText(open.text);
+    const ok = await copyText(text);
     setOpen(null);
-    setToast(ok ? `Скопировано: ${open.text}` : "Не удалось скопировать — выделите и нажмите Ctrl+C");
+    setToast(ok ? `Скопировано: ${text}` : "Не удалось скопировать — выделите и нажмите Ctrl+C");
+  }
+
+  function orderMenu() {
+    if (!open?.order) return;
+    const { x, y, order } = open;
+    setOpen(null);
+    document.dispatchEvent(new CustomEvent(ORDER_MENU_EVENT, { detail: { id: order, x, y } }));
   }
 
   /** Заказы с такой же техникой: поиск по словам ищет во всех стадиях, выданные тоже. */
@@ -170,7 +206,14 @@ export function CopyMenu() {
 
   // Меню не должно уезжать за край окна: у правого и нижнего края — открываем влево и вверх.
   const W = 290;
-  const H = open && SEARCHABLE.has(open.kind) ? 48 + 9 + 3 * 42 : 48;
+  // Остальное из строки — без того, что уже скопирует первый пункт.
+  const others = open ? open.row.filter(([, v]) => v !== open.text) : [];
+  const whole = open && open.row.length > 1 ? open.row.map(([, v]) => v).join(", ") : null;
+  const H =
+    48 +
+    (open && SEARCHABLE.has(open.kind) ? 9 + 3 * 42 : 0) +
+    (others.length || whole ? 9 + (others.length + (whole ? 1 : 0)) * 42 : 0) +
+    (open?.order ? 9 + 42 : 0);
   // Чуть ниже и правее курсора, как системное меню, — чтобы не закрывать то, что копируем.
   const left = open ? Math.min(open.x + 2, window.innerWidth - W - 8) : 0;
   const top = open ? (open.y + H + 12 > window.innerHeight ? open.y - H - 4 : open.y + 6) : 0;
@@ -193,8 +236,23 @@ export function CopyMenu() {
             className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[14px] text-ink transition-colors duration-100 hover:bg-surface-input focus:bg-surface-input focus:outline-none"
           >
             <CopyIcon />
-            <span className="min-w-0 truncate">Копировать {WHAT[open.kind]}</span>
+            <span className="min-w-0 truncate">Копировать {open.what}</span>
           </button>
+          {(others.length > 0 || whole) && (
+            <>
+              <div className="my-1 h-px bg-line" />
+              {others.map(([w, v]) => (
+                <MenuButton key={w} onClick={() => void run(v)} icon={<CopyIcon />}>
+                  Копировать {w}
+                </MenuButton>
+              ))}
+              {whole && (
+                <MenuButton onClick={() => void run(whole)} icon={<CopyIcon />}>
+                  Копировать всё строкой
+                </MenuButton>
+              )}
+            </>
+          )}
           {SEARCHABLE.has(open.kind) && (
             <>
               <div className="my-1 h-px bg-line" />
@@ -206,6 +264,14 @@ export function CopyMenu() {
               </MenuButton>
               <MenuButton onClick={() => web("yandex")} icon={<WebIcon />}>
                 Искать в Яндексе
+              </MenuButton>
+            </>
+          )}
+          {open.order && (
+            <>
+              <div className="my-1 h-px bg-line" />
+              <MenuButton onClick={orderMenu} icon={<MoreIcon />}>
+                Меню заказа…
               </MenuButton>
             </>
           )}
@@ -251,6 +317,16 @@ function WebIcon() {
     <svg aria-hidden viewBox="0 0 20 20" className="h-[16px] w-[16px] shrink-0 text-ink-dim" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
       <circle cx="10" cy="10" r="7" />
       <path d="M3 10h14M10 3c2 2.2 2.8 4.5 2.8 7s-.8 4.8-2.8 7c-2-2.2-2.8-4.5-2.8-7S8 5.2 10 3Z" />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 20 20" className="h-[16px] w-[16px] shrink-0 text-ink-dim" fill="currentColor">
+      <circle cx="4.5" cy="10" r="1.6" />
+      <circle cx="10" cy="10" r="1.6" />
+      <circle cx="15.5" cy="10" r="1.6" />
     </svg>
   );
 }

@@ -22,7 +22,18 @@ export interface MigrateSummary {
   passcodes: number;
   lastNumber: number | null;
   notes: string[];
+  /** Долги, которые переедут. null — долгов нет: выданные считаются оплаченными. */
+  debts: { count: number; sum: number } | null;
   previews: MigratePreview[];
+}
+
+/** Программа, из которой умеем переносить. */
+export interface MigrateSource {
+  id: string;
+  title: string;
+  /** Какой файл выбрать. */
+  file: string;
+  accept: string;
 }
 
 export interface MigrateResult {
@@ -41,9 +52,11 @@ export interface MigrateResult {
 }
 
 export const migrateApi = {
-  state: () => api.get<{ canMigrate: boolean; sources: string[] }>("/migrate"),
-  parse: (file: File) => {
+  state: () => api.get<{ canMigrate: boolean; sources: MigrateSource[] }>("/migrate"),
+  parse: (file: File, source?: string) => {
     const form = new FormData();
+    // Поле — до файла: сервер читает поля формы по порядку.
+    if (source) form.append("source", source);
     form.append("file", file);
     return api.upload<{ token: string | null; empty: boolean; fileName: string; summary: MigrateSummary }>(
       "/migrate/parse",

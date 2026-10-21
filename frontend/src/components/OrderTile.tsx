@@ -1,7 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { copyable } from "./CopyMenu";
+import { copyable, deviceText } from "./CopyMenu";
 import { customerColor, nameStyle } from "../lib/customerColor";
-import { dueLabel, shortName } from "../lib/format";
+import { dueLabel, formatDate, shortName } from "../lib/format";
 import { money } from "../lib/orders";
 import { STAGES } from "../lib/stages";
 import { DEFAULT_TILE, TILE_LABEL, tileRows, type TileElement, type TileKey, type TileLayout } from "../lib/tile";
@@ -51,28 +51,31 @@ function valueOf(k: TileKey, card: BoardCard): { node: ReactNode; tone?: string;
     }
     case "status": {
       const stage = STAGES.find((s) => s.key === card.status.group);
-      return { node: card.status.name, tone: stage?.text ?? "text-ink-muted" };
+      return { node: card.status.name, tone: stage?.text ?? "text-ink-muted", copy: copyable("text", card.status.name, "статус") };
     }
     case "device": {
       const d = [card.device?.kind, card.device?.brand, card.device?.model].filter(Boolean).join(" ");
-      return { node: d || "Техника не указана" };
+      return { node: d || "Техника не указана", copy: copyable("device", deviceText(card.device)) };
     }
     case "customer":
-      return card.customer.name ? { node: card.customer.name, style: nameStyle(card.customer.color) } : null;
+      return card.customer.name ? { node: card.customer.name, style: nameStyle(card.customer.color), copy: copyable("name", card.customer.name) } : null;
     case "complaint":
-      return card.complaint?.trim() ? { node: card.complaint.trim(), tone: "text-ink-soft" } : null;
+      return card.complaint?.trim() ? { node: card.complaint.trim(), tone: "text-ink-soft", copy: copyable("text", card.complaint.trim(), "неисправность") } : null;
+    case "note":
+      return card.note?.trim() ? { node: card.note.trim(), tone: "text-ink-dim italic", copy: copyable("text", card.note.trim(), "примечание") } : null;
     case "due": {
       const due = dueLabel(card.dueAt);
       if (!due) return null;
       return {
         node: due.text,
         tone: due.overdue ? "font-semibold text-state-off" : due.soon ? "font-semibold text-state-waiting" : "text-ink-dim",
+        copy: copyable("text", formatDate(card.dueAt), "срок"),
       };
     }
     case "master":
-      return card.master ? { node: shortName(card.master.fullName), tone: "text-ink-dim" } : null;
+      return card.master ? { node: shortName(card.master.fullName), tone: "text-ink-dim", copy: copyable("text", card.master.fullName, "мастера") } : null;
     case "total":
-      return card.total !== undefined && card.total > 0 ? { node: money(card.total), tone: "text-ink" } : null;
+      return card.total !== undefined && card.total > 0 ? { node: money(card.total), tone: "text-ink", copy: copyable("text", money(card.total), "сумму") } : null;
   }
 }
 
@@ -85,6 +88,7 @@ const GHOST: Record<TileKey, string> = {
   device: "техника",
   customer: "клиент",
   complaint: "неисправность",
+  note: "примечание приёмщика",
   due: "срок",
   master: "мастер",
   total: "сумма",

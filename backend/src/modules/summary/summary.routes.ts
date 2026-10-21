@@ -14,7 +14,7 @@ import { seesCustomerContacts, seesMoney } from "../orders/orders.service";
 import { effectiveTile, normalizeTile } from "./tile";
 import { forbidden } from "../../lib/errors";
 import { clientIp, writeAudit } from "../../lib/audit";
-import { debts } from "../../lib/debt";
+import { debtList, debts } from "../../lib/debt";
 import { badRequest } from "../../lib/errors";
 import { Prisma } from "@prisma/client";
 import {
@@ -26,7 +26,9 @@ import {
   prefsSchema,
   stageSortOf,
   STAGE_KEYS,
+  DASHBOARD_VIEWS,
   type DashboardPrefs,
+  type DashboardView,
   type DebtorSort,
   type StageKey,
   type StageSort,
@@ -75,6 +77,8 @@ const cardSelect = {
   assignedMaster: { select: { id: true, fullName: true } },
   // Для «Редактора панелей заказа»: неисправность и сумма — если их включат на карточке.
   complaint: true,
+  // «Примечание приёмщика» — элемент карточки (Андрей, 21.10.2026).
+  receptionNote: true,
   total: true,
 } as const;
 
@@ -121,6 +125,80 @@ async function prefsOf(req: Request): Promise<DashboardPrefs> {
     tx.user.findFirst({ where: { id: userId }, select: { dashboardPrefs: true } })
   );
   return normalizePrefs(row?.dashboardPrefs ?? null);
+}
+
+/** Вид главной у мастерской по умолчанию (tenant.settings.dashboardView). */
+async function workshopViewOf(req: Request): Promise<DashboardView> {
+  const t = await withTenant(tenantOf(req), (tx) =>
+    tx.tenant.findUnique({ where: { id: tenantOf(req) }, select: { settings: true } })
+  );
+  const v = (t?.settings as Record<string, unknown> | null)?.dashboardView;
+  return v === "table" ? "table" : "board";
+}
+
+/** Заказ строкой таблицы на главной: всё, что есть в столбцах. */
+const tableSelect = {
+  ...cardSelect,
+  completedAt: true,
+  issuedAt: true,
+  completeness: true,
+  receptionNote: true,
+  customer: { select: { id: true, name: true, type: true, color: true, phone: true } },
+  device: { select: { kind: true, brand: true, model: true, serial: true } },
+} as const;
+
+type TableRow = Prisma.OrderGetPayload<{ select: typeof tableSelect }>;
+
+/**
+ * Строки таблицы: все заказы в работе (четыре стадии) и — тому, кто видит
+ * деньги, — выданные с долгом, для быстрого фильтра «С долгом». Фильтры,
+ * поиск и сортировка — в браузере: открытых заказов десятки, от силы сотни,
+ * и щелчок по фильтру не должен ждать сервер.
+ */
+async function tableOf(req: Request, mineWhere: Prisma.OrderWhereInput, contacts: boolean, money: boolean) {
+  const tenantId = tenantOf(req);
+  return withTenant(tenantId, async (tx) => {
+    const active = await tx.order.findMany({
+      where: { deletedAt: null, ...mineWhere, status: { group: { in: [...STAGE_KEYS] } } },
+      orderBy: { acceptedAt: "desc" },
+      take: STAGE_SCAN,
+      select: tableSelect,
+    });
+    const owed = money ? await debtList(tx, tenantId) : new Map<string, { due: number; debtDueAt: Date | null }>();
+    const owedRows = owed.size
+      ? await tx.order.findMany({
+          where: { id: { in: [...owed.keys()].slice(0, 1000) }, deletedAt: null, ...mineWhere },
+          orderBy: { issuedAt: "desc" },
+          select: tableSelect,
+        })
+      : [];
+    const rows: TableRow[] = [...active, ...owedRows.filter((o) => !active.some((a) => a.id === o.id))];
+    // С какого момента заказ в нынешнем статусе — для «Статус дольше нормы».
+    const since = new Map<string, Date>();
+    for (let i = 0; i < active.length; i += 500) {
+      const part = active.slice(i, i + 500).map((o) => o.id);
+      const last = await tx.orderStatusHistory.groupBy({ by: ["orderId"], where: { orderId: { in: part } }, _max: { createdAt: true } });
+      for (const l of last) if (l._max.createdAt) since.set(l.orderId, l._max.createdAt);
+    }
+    return rows.map((o) => ({
+      id: o.id,
+      number: o.number,
+      isUrgent: o.isUrgent,
+      acceptedAt: o.acceptedAt,
+      dueAt: o.dueAt,
+      completedAt: o.completedAt,
+      issuedAt: o.issuedAt,
+      statusSince: since.get(o.id) ?? o.acceptedAt,
+      status: o.status,
+      device: o.device,
+      master: o.assignedMaster,
+      customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type, color: o.customer.color },
+      complaint: o.complaint.length > 300 ? o.complaint.slice(0, 300) : o.complaint,
+      completeness: o.completeness,
+      receptionNote: o.receptionNote ? o.receptionNote.slice(0, 300) : null,
+      ...(money ? { total: Number(o.total), ...(owed.has(o.id) ? { debt: owed.get(o.id)!.due } : {}) } : {}),
+    }));
+  });
 }
 
 interface Debtor {
@@ -223,17 +301,22 @@ summaryRouter.get(
     const money = seesMoney(req);
     const prefs = await prefsOf(req);
     const tile = (await tileOf(req)).effective;
+    const workshopView = await workshopViewOf(req);
+    const view: DashboardView = prefs.view ?? workshopView;
 
     // Мастер видит на доске только свои заказы — ровно то же, что и в списке.
     // Доска, не совпадающая со списком, читается как поломка.
     const mineWhere = onlyMine ? { assignedMasterId: me } : {};
+
+    // Таблица: доску не собираем — её всё равно не видно.
+    const table = view === "table" ? await tableOf(req, mineWhere, contacts, money) : null;
 
     const stages = await withTenant(tenantOf(req), async (tx) => {
       const out: Array<{ key: StageKey; total: number; filtered: number; items: unknown[] }> = [];
 
       for (const key of STAGE_KEYS) {
         // Выключенную колонку не считаем вовсе: её не видно, а время — идёт.
-        if (prefs.hidden.includes(key)) {
+        if (prefs.hidden.includes(key) || table) {
           out.push({ key, total: 0, filtered: 0, items: [] });
           continue;
         }
@@ -267,6 +350,7 @@ summaryRouter.get(
             // Цветная метка — не контакт: её видят все, кто видит заказ.
             customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type, color: o.customer.color },
             complaint: o.complaint.length > 300 ? o.complaint.slice(0, 300) : o.complaint,
+            note: o.receptionNote ? o.receptionNote.slice(0, 300) : null,
             // Сумма — только тем, кто видит деньги заказа.
             ...(money ? { total: Number(o.total) } : {}),
           })),
@@ -296,6 +380,10 @@ summaryRouter.get(
       stages,
       scope: onlyMine ? "mine" : "all",
       prefs,
+      view,
+      workshopView,
+      // Сумма и «С долгом» в таблице — тому, кто видит деньги заказов.
+      ...(table ? { table, tableMoney: money } : {}),
       tile,
       // Может ли человек вообще видеть деньги клиентов: от этого зависит,
       // есть ли в его настройках «Должники» и полоса просрочки.
@@ -317,7 +405,41 @@ summaryRouter.get(
 summaryRouter.get(
   "/prefs",
   ah(async (req, res) => {
-    res.json({ prefs: await prefsOf(req), money: seesCustomerContacts(req), personal: userOf(req) !== null });
+    res.json({
+      prefs: await prefsOf(req),
+      money: seesCustomerContacts(req),
+      personal: userOf(req) !== null,
+      workshopView: await workshopViewOf(req),
+      canShare: has(req, PERMISSIONS.SETTINGS_MANAGE),
+    });
+  })
+);
+
+/** Вид главной у мастерской по умолчанию — у кого свой не выбран. */
+summaryRouter.put(
+  "/view/workshop",
+  ah(async (req, res) => {
+    if (!has(req, PERMISSIONS.SETTINGS_MANAGE)) throw forbidden("Вид по умолчанию меняет тот, кто правит настройки мастерской");
+    const { view } = z.object({ view: z.enum(DASHBOARD_VIEWS) }).parse(req.body ?? {});
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const t = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const before = (t?.settings as Record<string, unknown> | null) ?? {};
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { settings: { ...before, dashboardView: view } as unknown as Prisma.InputJsonObject },
+      });
+      await writeAudit(tx, {
+        tenantId,
+        userId: userOf(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        diff: { dashboardView: view === "table" ? "главная таблицей" : "главная доской" },
+        ip: clientIp(req),
+      });
+    });
+    res.json({ workshopView: view });
   })
 );
 

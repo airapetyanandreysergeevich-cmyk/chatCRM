@@ -15,7 +15,7 @@ import {
   currentTenantId,
   permissionsOf,
   requirePermission,
-  requireTenant, isOwnerLike } from "../../middleware/auth";
+  requireTenant, isRealOwner } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { revokeAllForUser } from "../auth/auth.service";
 import { localLoginDomain } from "../relay/remoteAccess";
@@ -50,6 +50,17 @@ dataRouter.get(
     res.json(readBackupStatus());
   })
 );
+
+/**
+ * Остальное в «Базах» — только владельцу. Совладелец и старший приёмщик с
+ * «Настройками мастерской» правят статусы и бланки, но клиентскую базу
+ * целиком не выгружают и не заливают. Поддержка платформы (вход «от имени»)
+ * выгружает и загружает, как и раньше, — стирать и переносить не может.
+ */
+dataRouter.use((req: Request, _res: Response, next: NextFunction) => {
+  if (isRealOwner(req) || req.auth?.kind === "platform") return next();
+  next(forbidden("Базы доступны только владельцу мастерской"));
+});
 
 /** Раздел доступен, если у человека есть его собственное право (если оно у раздела есть). */
 const mayUse = (req: Request, key: DatasetKey): boolean => {
@@ -261,7 +272,7 @@ const CONFIRM_WORD = "УДАЛИТЬ";
  * не поправимо ничем, и раздавать его вместе с бланками нельзя.
  */
 function requireOwner(req: Request, _res: Response, next: NextFunction) {
-  if (isOwnerLike(req)) return next();
+  if (isRealOwner(req)) return next();
   next(forbidden("Стирать базу может только владелец мастерской"));
 }
 

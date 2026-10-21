@@ -18,6 +18,8 @@ interface Section {
    * со своим замечанием идёт к владельцу.
    */
   ownerOnly?: boolean;
+  /** Только самому владельцу (и поддержке «от имени»), без совладельцев. */
+  realOwnerOnly?: boolean;
   /** Только в коробочной версии — в облаке такого раздела нет. */
   boxOnly?: boolean;
 }
@@ -76,7 +78,7 @@ const SECTIONS: Section[] = [
     title: "Базы",
     text: "Выгрузить клиентов, заказы, склад и прайс в Excel или CSV. Загрузить свои данные из файла.",
     icon: <IconDatabase />,
-    need: "settings.manage",
+    realOwnerOnly: true,
   },
   {
     to: "/settings/remote-access",
@@ -99,6 +101,7 @@ const SECTIONS: Section[] = [
 export default function Settings() {
   const { can, me } = useAuth();
   const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
+  const isRealOwner = me?.kind === "platform" || (me?.kind === "tenant" && me.user.isOwner);
   // Раздел виден всем, но внутри у каждого своё: мастеру — только
   // оповещения, владельцу ещё и базы. Показывать недоступное с замочком
   // бессмысленно: сотрудник всё равно ничего с этим не сделает.
@@ -112,7 +115,7 @@ export default function Settings() {
   }, []);
 
   const visible = SECTIONS.filter(
-    (s) => (!s.need || can(s.need)) && (!s.ownerOnly || isOwner) && (!s.boxOnly || isBox)
+    (s) => (!s.need || can(s.need)) && (!s.ownerOnly || isOwner) && (!s.realOwnerOnly || isRealOwner) && (!s.boxOnly || isBox)
   );
 
   return (

@@ -1,4 +1,4 @@
-import { copyable } from "../components/CopyMenu";
+import { copyable, copyRow } from "../components/CopyMenu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { IconOrders } from "../components/icons";
@@ -12,6 +12,7 @@ import { IconMore } from "../components/icons";
 import { STAGES, type Stage } from "../lib/stages";
 import { GearButton, PanelMenu } from "../components/PanelMenu";
 import { TileBody } from "../components/OrderTile";
+import { DashboardTable } from "../components/DashboardTable";
 import { DEFAULT_TILE, type TileLayout } from "../lib/tile";
 import { columnsFor, isShown, panelLabel, withPanel } from "../lib/dashboard";
 import {
@@ -98,7 +99,7 @@ function OverduePanel({ rows, total }: { rows: OverdueDebt[]; total: number }) {
             <Link to={`/orders/${r.orderId}`} className="font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
               {r.number}
             </Link>
-            <span className="min-w-0 flex-1 truncate text-[14px]" {...copyable("name", r.customer?.name)}>
+            <span className="min-w-[45%] flex-1 truncate text-[14px] sm:min-w-0" {...copyable("name", r.customer?.name)}>
               {r.customer?.name ?? "Клиент не указан"}
             </span>
             {r.customer?.phone && (
@@ -147,6 +148,7 @@ function OrderCardTile({
       to={`/orders/${card.id}`}
       data-card={card.id}
       {...om.bind(menu)}
+      {...copyRow(menu.copy ?? [])}
       draggable={canDrag}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -754,7 +756,10 @@ export default function Dashboard() {
           «Интерфейсе» — тогда сервер её и не присылает. */}
       {overdue.length > 0 && <OverduePanel rows={overdue} total={data.overdueTotal} />}
 
-      {columns.length === 0 ? (
+      {/* Вид «Таблица» (Настройки → Интерфейс → Главный экран). */}
+      {data.view === "table" && data.table ? (
+        <DashboardTable rows={data.table} prefs={prefs} seesMoney={!!data.tableMoney} om={om} onPrefs={changePrefs} />
+      ) : columns.length === 0 ? (
         <EmptyState icon={<IconOrders />} title="Все панели выключены">
           Включить их и расставить по порядку можно в{" "}
           <Link to="/settings/interface" className="font-semibold text-brand-ink hover:underline">

@@ -2,7 +2,7 @@ import { Panel } from "./Panel";
 import { useEffect, useState } from "react";
 import { ApiError } from "../lib/api";
 import { columnsFor, isShown, panelLabel } from "../lib/dashboard";
-import { OVERDUE_KEY, summaryApi, type ColumnKey, type DashboardPrefs } from "../lib/workshop";
+import { OVERDUE_KEY, summaryApi, type ColumnKey, type DashboardPrefs, type DashboardView } from "../lib/workshop";
 import { IconChevronDown } from "./icons";
 import { Banner } from "./ui";
 
@@ -54,6 +54,9 @@ export function HomeScreenCard() {
   const [prefs, setPrefs] = useState<DashboardPrefs | null>(null);
   const [money, setMoney] = useState(false);
   const [personal, setPersonal] = useState(true);
+  const [workshopView, setWorkshopView] = useState<DashboardView>("board");
+  const [canShare, setCanShare] = useState(false);
+  const [shared, setShared] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,6 +66,8 @@ export function HomeScreenCard() {
         setPrefs(r.prefs);
         setMoney(r.money);
         setPersonal(r.personal);
+        setWorkshopView(r.workshopView ?? "board");
+        setCanShare(!!r.canShare);
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Не удалось загрузить настройки главного экрана"));
   }, []);
@@ -108,14 +113,62 @@ export function HomeScreenCard() {
   };
 
   const tuned = Object.keys(prefs.panels).length > 0;
+  const view: DashboardView = prefs.view ?? workshopView;
+  const VIEW_LABEL: Record<DashboardView, string> = { board: "Доска", table: "Таблица" };
+
+  const shareView = () => {
+    summaryApi
+      .setWorkshopView(view)
+      .then((r) => {
+        setWorkshopView(r.workshopView);
+        setShared(`У всех, кто не выбирал сам, главная — «${VIEW_LABEL[r.workshopView]}»`);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Не удалось сохранить"));
+  };
 
   return (
-    <Panel id="interface:Главный экран" title="Главный экран">
-      <p className="mt-2 text-[13px] text-ink-dim">
+    <Panel id="interface:Главный экран" title="Главный экран" summary={`Вид: ${VIEW_LABEL[view].toLowerCase()}`}>
+      <p className="mt-2 text-[13px] font-semibold text-ink-soft">Вид</p>
+      <div className="mt-2 inline-flex rounded-field border border-line bg-surface-input p-1" role="radiogroup" aria-label="Вид главного экрана">
+        {(["board", "table"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            role="radio"
+            aria-checked={view === v}
+            disabled={!personal}
+            data-view={v}
+            onClick={() => save({ ...prefs, view: v === workshopView ? null : v })}
+            className={
+              "min-h-[40px] rounded-[9px] px-4 text-[14px] font-semibold transition-colors duration-150 " +
+              (view === v ? "bg-surface-raised text-ink shadow-sm" : "text-ink-muted hover:text-ink")
+            }
+          >
+            {VIEW_LABEL[v]}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[12.5px] text-ink-dim">
+        {view === "table"
+          ? "Строка на заказ: быстрые фильтры, статус меняется щелчком, любое поле копируется правой кнопкой. Столбцы — кнопкой «Столбцы» над таблицей."
+          : "Колонки по стадиям с карточками заказов. Ниже — какие колонки и в каком порядке."}
+        {prefs.view ? "" : " Сейчас — как у всей мастерской."}
+      </p>
+      {canShare && personal && view !== workshopView && (
+        <button type="button" onClick={shareView} className="mt-2 text-[13px] font-semibold text-brand-ink hover:underline" data-view-share>
+          Сделать «{VIEW_LABEL[view]}» видом по умолчанию у всех
+        </button>
+      )}
+      {shared && <p className="mt-2 text-[12.5px] text-state-done">{shared}</p>}
+
+      {view === "board" && (
+      <p className="mt-5 border-t border-line pt-4 text-[13px] text-ink-dim">
         Какие панели показывать и в каком порядке. Сортировка, сколько карточек показывать и какую технику
         прятать — в шестерёнке на самой панели. Настройки ваши личные: у каждого сотрудника свои, на всех
         устройствах одинаковые.
       </p>
+      )}
 
       {error && (
         <div className="mt-3">
@@ -128,6 +181,7 @@ export function HomeScreenCard() {
         </div>
       )}
 
+      {view === "board" && (
       <ol className="mt-4 space-y-2 sm:max-w-[560px]">
         {columns.map((key, i) => {
           const on = isShown(prefs, key);
@@ -156,6 +210,7 @@ export function HomeScreenCard() {
           );
         })}
       </ol>
+      )}
 
       {money && (
         <div className="mt-4 sm:max-w-[560px]">
@@ -181,7 +236,7 @@ export function HomeScreenCard() {
         </div>
       )}
 
-      {tuned && personal && (
+      {tuned && personal && view === "board" && (
         <button
           type="button"
           onClick={() => save({ ...prefs, panels: {} })}

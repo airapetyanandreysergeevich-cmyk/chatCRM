@@ -11,6 +11,7 @@ import { formatDateTime } from "../lib/format";
 import {
   disablePush,
   enablePush,
+  pushOwner,
   isIos,
   pushState,
   testPush,
@@ -67,9 +68,14 @@ function DeviceCard() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [whom, setWhom] = useState<{ state: "mine" | "other" | "none"; name?: string | null } | null>(null);
   useEffect(() => {
     pushState().then(setState).catch(() => setState("unsupported"));
   }, []);
+  useEffect(() => {
+    if (state === "on") void pushOwner().then(setWhom);
+    else setWhom(null);
+  }, [state]);
 
   async function run(fn: () => Promise<PushState>) {
     setBusy(true);
@@ -115,6 +121,34 @@ function DeviceCard() {
             <li>Выберите «На экран „Домой“».</li>
             <li>Откройте FineCRM с домашнего экрана и вернитесь сюда.</li>
           </ol>
+        </div>
+      )}
+
+      {state === "on" && whom?.state === "mine" && (
+        <p className="mt-3 text-[13px] text-ink-muted" data-push-owner="mine">
+          Оповещения на это устройство приходят вам. Войдёт другой сотрудник — они перейдут к нему, а при выходе снимаются.
+        </p>
+      )}
+      {state === "on" && whom && whom.state !== "mine" && (
+        <div className="mt-3" data-push-owner="other">
+          <Banner tone="warning">
+            {whom.state === "other"
+              ? `Это устройство получает оповещения ${whom.name ? `для «${whom.name}»` : "другого сотрудника"}, а не ваши.`
+              : "Сервер не знает это устройство — оповещения сюда не приходят."}{" "}
+            Нажмите «Получать мне».
+          </Banner>
+          <div className="mt-2">
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={async () => {
+                await run(enablePush);
+                setWhom(await pushOwner());
+              }}
+            >
+              Получать мне
+            </Button>
+          </div>
         </div>
       )}
 

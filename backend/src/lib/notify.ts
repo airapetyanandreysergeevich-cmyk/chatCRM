@@ -105,11 +105,27 @@ async function resolveRecipients(
   const byRole = or.length
     ? await tx.user.findMany({
         where: { deletedAt: null, isActive: true, OR: or },
-        select: { id: true },
+        select: { id: true, isOwner: true, isCoOwner: true, roleId: true, extraRoleIds: true },
       })
     : [];
 
-  const recipients = new Set(byRole.map((u) => u.id));
+  // Личные события (назначен заказ, сообщение, ответ на согласование) — про
+  // конкретный заказ. Отмеченная роль получает их, только если её люди видят
+  // все заказы: иначе галочка «Мастер» у «Назначен заказ» раздавала каждому
+  // мастеру чужие назначения, а открыть такой заказ он всё равно не мог.
+  let allowed = byRole;
+  if (definition?.hasDirectTarget && byRole.length) {
+    const roleIds = [...new Set(byRole.flatMap((u) => [u.roleId, ...(u.extraRoleIds ?? [])]).filter((x): x is string => !!x))];
+    const roles = roleIds.length
+      ? await tx.role.findMany({ where: { id: { in: roleIds } }, select: { id: true, permissions: true } })
+      : [];
+    const seesAll = new Set(roles.filter((r) => r.permissions.includes("orders.view.all")).map((r) => r.id));
+    allowed = byRole.filter(
+      (u) => u.isOwner || u.isCoOwner || [u.roleId, ...(u.extraRoleIds ?? [])].some((id) => !!id && seesAll.has(id))
+    );
+  }
+
+  const recipients = new Set(allowed.map((u) => u.id));
   if (definition?.hasDirectTarget && notice.targetUserId) recipients.add(notice.targetUserId);
   if (definition?.hasDirectTarget) for (const id of notice.targetUserIds ?? []) recipients.add(id);
   if (notice.exceptUserId) recipients.delete(notice.exceptUserId);

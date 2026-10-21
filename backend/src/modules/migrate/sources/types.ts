@@ -55,12 +55,18 @@ export interface Converted {
   colors: Map<string, string>;
   /** Что сказать человеку до переноса: что склеено, что пропущено, что странно. */
   notes: string[];
+  /** Долги, которые переедут (выдан, а оплачен не весь). Нет — долгов нет. */
+  debts?: { count: number; sum: number };
 }
 
 export interface MigrationSource {
   id: string;
   /** Как назвать программу человеку. */
   title: string;
+  /** Какой файл выбрать — подсказка у выбора программы. */
+  file: string;
+  /** Расширения для окна выбора файла. */
+  accept: string;
   /** Узнать свою базу по набору таблиц. */
   detect(tables: Record<string, SqlTable>): boolean;
   convert(tables: Record<string, SqlTable>): Converted;

@@ -41,12 +41,21 @@ export function permissionsOf(req: Request): string[] {
 }
 
 /**
- * Владелец или совладелец: всё, что раньше было «только владельцу» (стирание
- * баз, тестовые данные, перенос, обратная связь), им одинаково доступно.
- * Отличия совладельца — только в «Сотрудниках»: владельца он не трогает.
+ * Владелец или совладелец: обратная связь и прочее «для хозяев» им одинаково
+ * доступно. Отличия совладельца — в «Сотрудниках» (владельца он не трогает)
+ * и в «Базах» (они только у владельца, см. isRealOwner).
  */
 export function isOwnerLike(req: Request): boolean {
   return req.auth?.kind === "tenant" && (req.auth.isOwner || !!req.auth.isCoOwner);
+}
+
+/**
+ * Только сам владелец — без совладельцев. «Базы» (выгрузка, загрузка, перенос,
+ * стирание, тестовые данные): вся клиентская база целиком, такое владелец
+ * оставляет за собой.
+ */
+export function isRealOwner(req: Request): boolean {
+  return req.auth?.kind === "tenant" && req.auth.isOwner;
 }
 
 export function requirePermission(...codes: string[]) {

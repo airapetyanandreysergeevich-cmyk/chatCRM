@@ -202,7 +202,7 @@ function ExportCard({ reference, onWiped }: { reference: DataReference; onWiped:
 
   // Стирание — только владельцу. Право «Настройки мастерской» бывает и у
   // старшего приёмщика: выгрузка и загрузка поправимы, стирание — нет.
-  const canWipe = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
+  const canWipe = me?.kind === "tenant" && me.user.isOwner;
   const pickedInfo = reference.datasets.filter((d) => picked.includes(d.key));
   const wipeable = pickedInfo.filter((d) => d.canWipe !== false);
 
@@ -691,7 +691,7 @@ function ImportCard({ reference }: { reference: DataReference }) {
  */
 function DemoCard() {
   const { me } = useAuth();
-  const isOwner = me?.kind === "tenant" && (me.user.isOwner || !!me.user.isCoOwner);
+  const isOwner = me?.kind === "tenant" && me.user.isOwner;
   const [state, setState] = useState<DemoState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -809,6 +809,9 @@ function ColumnsCard({ reference }: { reference: DataReference }) {
 }
 
 export default function Data() {
+  const { me } = useAuth();
+  // Базы — только у владельца: совладелец сюда попадает разве что по старой ссылке.
+  const allowed = me?.kind === "platform" || (me?.kind === "tenant" && me.user.isOwner);
   const [reference, setReference] = useState<DataReference | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -821,9 +824,20 @@ export default function Data() {
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (allowed) void load();
+  }, [load, allowed]);
 
+  if (!allowed)
+    return (
+      <div className="space-y-5">
+        <PageHeader eyebrow="Настройки" title="Базы" />
+        <div data-data-owner-only>
+          <Banner tone="info">Выгрузка, загрузка и перенос баз — только у владельца мастерской.</Banner>
+        </div>
+        {/* Резервные копии посмотреть можно: на них ведёт значок Основы у часов. */}
+        <BackupsCard />
+      </div>
+    );
   if (error) return <Banner tone="error">{error}</Banner>;
   if (!reference) return <Spinner label="Открываем раздел" />;
 

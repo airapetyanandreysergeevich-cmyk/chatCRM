@@ -6,13 +6,14 @@ import { clientIp, writeAudit } from "../../lib/audit";
 import { prisma, withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { originalName } from "../../lib/uploadName";
-import { actorUserId, authenticate, currentTenantId, requireTenant, isOwnerLike } from "../../middleware/auth";
+import { actorUserId, authenticate, currentTenantId, requireTenant, isRealOwner } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { localLoginDomain } from "../relay/remoteAccess";
 import { applyMigration, isEmptyForMigration, previewMigration, type DatasetPreview } from "./migrate";
 import { SOURCES, detectSource } from "./sources";
 import type { Converted } from "./sources/types";
 import { BadFile, readTables } from "./sqlite";
+import { isXlsx, readXlsxTables } from "./xlsx";
 
 /**
  * Перенос из другой программы: «Настройки → Базы → Перенос».
@@ -24,7 +25,7 @@ export const migrateRouter = Router();
 migrateRouter.use(authenticate, requireTenant, enforceTenantStatus);
 
 function requireOwner(req: Request, _res: Response, next: NextFunction) {
-  if (isOwnerLike(req)) return next();
+  if (isRealOwner(req)) return next();
   next(forbidden("Перенос базы делает владелец мастерской"));
 }
 migrateRouter.use(requireOwner);
@@ -63,7 +64,7 @@ migrateRouter.get(
   "/",
   ah(async (req, res) => {
     const empty = await withTenant(tenantOf(req), (tx) => isEmptyForMigration(tx));
-    res.json({ canMigrate: empty, sources: SOURCES.map((s) => s.title) });
+    res.json({ canMigrate: empty, sources: SOURCES.map((s) => ({ id: s.id, title: s.title, file: s.file, accept: s.accept })) });
   })
 );
 
@@ -75,14 +76,28 @@ migrateRouter.post(
     if (!file) throw badRequest("Файл не приложен");
     const name = originalName(file.originalname);
 
+    // Какую программу выбрал человек — чтобы на чужой файл ответить по делу.
+    const chosen = SOURCES.find((s) => s.id === String(req.body?.source ?? "")) ?? null;
+
     let tables;
     try {
-      tables = readTables(file.buffer);
+      // Книга Excel — это zip: узнаём по первым байтам, а не по имени файла.
+      tables = isXlsx(file.buffer) ? await readXlsxTables(file.buffer) : readTables(file.buffer);
     } catch (err) {
-      if (err instanceof BadFile) throw badRequest(`Не получилось прочитать «${name}»: ${err.message}`);
+      if (err instanceof BadFile) {
+        throw badRequest(`Не получилось прочитать «${name}»: ${err.message}${chosen ? `. Для ${chosen.title} нужен ${chosen.file}` : ""}`);
+      }
       throw err;
     }
     const source = detectSource(tables);
+    if (chosen && source && source.id !== chosen.id) {
+      throw badRequest(`«${name}» — это не ${chosen.title}, а ${source.title}. Выберите эту программу или другой файл`);
+    }
+    if (!source && chosen) {
+      throw badRequest(
+        `«${name}» не похож на ${chosen.file}. ` + `Листы и таблицы в нём: ${Object.keys(tables).slice(0, 12).join(", ")}`
+      );
+    }
     if (!source) {
       throw badRequest(
         `База «${name}» прочиталась, но программу мы не узнали. Пришлите её нам — добавим. ` +
@@ -124,6 +139,7 @@ function summarize(c: Converted, previews: DatasetPreview[]) {
     passcodes: c.passcodes.size,
     lastNumber: c.lastNumber,
     notes: c.notes,
+    debts: c.debts ?? null,
     previews,
   };
 }

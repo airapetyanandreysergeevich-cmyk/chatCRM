@@ -512,6 +512,8 @@ const serialOf = (v: unknown): string => realSerial(asIs(v)) ?? "";
 export const SOURCE: MigrationSource = {
   id: "catalog-clientsmap",
   title: "Старая программа учёта ремонтов (baza.sqlite)",
+  file: "файл базы baza.sqlite",
+  accept: ".sqlite,.sqlite3,.db,.db3",
   detect: (t) => !!t.Catalog && !!t.ClientsMap && t.Catalog.columns.includes("Status_remonta"),
   convert,
 };

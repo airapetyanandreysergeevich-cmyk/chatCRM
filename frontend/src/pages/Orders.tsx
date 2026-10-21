@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { copyable, deviceText } from "../components/CopyMenu";
+import { copyable, copyRow, deviceText } from "../components/CopyMenu";
+import { StatusPicker } from "../components/StatusPicker";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { backState, useScrollMemory, useUrlSearch } from "../lib/listState";
 import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
@@ -15,20 +16,18 @@ import {
   SearchInput,
   Spinner,
   StatusGlyph,
-  StatusPill,
   DebtBadge,
 } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Pager } from "../components/Pager";
 import { customerColor, nameStyle } from "../lib/customerColor";
-import { dueLabel, formatDateShort, plural, shortName } from "../lib/format";
+import { dueLabel, formatDate, formatDateShort, plural, shortName } from "../lib/format";
 import {
   money,
   ORDER_KIND_LABEL,
   ordersApi,
   statusGlyphTone,
-  statusPill,
   type Order,
 } from "../lib/orders";
 import { STAGES } from "../lib/stages";
@@ -327,6 +326,7 @@ export default function Orders() {
                 className="block"
                 data-order-row={o.id}
                 {...om.bind(menuFromOrder(o))}
+                {...copyRow(menuFromOrder(o).copy ?? [])}
               >
                 <ListRow
                   glyph={<StatusGlyph tone={statusGlyphTone(o.status.group)} title={o.status.name} />}
@@ -363,7 +363,7 @@ export default function Orders() {
                         </span>
                       )}
                       {o.customer.name && " · "}
-                      {o.complaint || "без описания"}
+                      <span {...copyable("text", o.complaint, "неисправность")}>{o.complaint || "без описания"}</span>
                       {/* Нашлось в истории ремонта: показываем саму запись —
                           иначе непонятно, почему заказ оказался в выдаче. */}
                       {o.foundMessage && (
@@ -380,11 +380,17 @@ export default function Orders() {
                           без этого колонки съезжают у заказов без мастера
                           или без суммы, и список перестаёт читаться сверху вниз. */}
                       <span className="whitespace-nowrap lg:flex lg:w-[156px] lg:justify-end">
-                        <StatusPill tone={statusPill(o).tone}>{statusPill(o).label}</StatusPill>
+                        <StatusPicker
+                          order={o}
+                          statuses={om.reference?.statuses}
+                          canChange={om.canStatus(menuFromOrder(o))}
+                          onPick={(st) => void om.changeStatus(menuFromOrder(o), st)}
+                        />
                       </span>
                       <span
                         className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[104px] lg:text-right"
                         title={o.assignedMaster?.fullName}
+                        {...copyable("text", o.assignedMaster?.fullName, "мастера")}
                       >
                         {o.assignedMaster ? shortName(o.assignedMaster.fullName) : ""}
                       </span>
@@ -393,10 +399,14 @@ export default function Orders() {
                           "empty:hidden lg:empty:block whitespace-nowrap lg:w-[126px] lg:text-right " +
                           (due?.overdue ? "font-semibold text-state-off" : due?.soon ? "text-state-waiting" : "")
                         }
+                        {...copyable("text", due ? formatDate(o.dueAt) : formatDate(o.acceptedAt), due ? "срок" : "дату приёма")}
                       >
                         {due ? due.text : formatDateShort(o.acceptedAt)}
                       </span>
-                      <span className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[88px] lg:text-right font-semibold text-ink-soft">
+                      <span
+                        className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[88px] lg:text-right font-semibold text-ink-soft"
+                        {...copyable("text", o.total ? money(o.total) : null, "сумму")}
+                      >
                         {o.total !== undefined && o.total !== null && o.total > 0 ? money(o.total) : ""}
                       </span>
                     </>

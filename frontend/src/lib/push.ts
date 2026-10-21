@@ -82,6 +82,59 @@ export async function enablePush(): Promise<PushState> {
   return "on";
 }
 
+/**
+ * Подписка этого браузера — за того, кто сейчас вошёл.
+ *
+ * Подписка браузера переживает выход: включили оповещения за владельца на
+ * общем компьютере, вошёл совладелец — и ему продолжали приходить
+ * оповещения владельца, о чужих заказах (21.10.2026). Поэтому при каждом
+ * входе подписка, если она есть, перепривязывается к вошедшему, а при выходе
+ * снимается с сервера (сам браузер подписку хранит — следующий вход её
+ * подхватит). Ничего не спрашиваем и окно разрешения не открываем.
+ */
+async function currentSubscription(): Promise<PushSubscription | null> {
+  if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window)) return null;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return (await reg?.pushManager.getSubscription()) ?? null;
+}
+
+export async function syncPushOwner(): Promise<void> {
+  try {
+    const sub = await currentSubscription();
+    if (!sub) return;
+    const json = sub.toJSON() as { keys?: { p256dh?: string; auth?: string } };
+    await api.post("/push/subscribe", {
+      endpoint: sub.endpoint,
+      p256dh: json.keys?.p256dh ?? "",
+      auth: json.keys?.auth ?? "",
+      userAgent: navigator.userAgent.slice(0, 300),
+    });
+  } catch {
+    // Не вышло — оповещения этого устройства останутся как были; вход это не ломает.
+  }
+}
+
+export async function releasePush(): Promise<void> {
+  try {
+    const sub = await currentSubscription();
+    if (sub) await api.post("/push/unsubscribe", { endpoint: sub.endpoint });
+  } catch {
+    // Выходим всё равно.
+  }
+}
+
+/** Для кого сервер шлёт оповещения на это устройство. */
+export async function pushOwner(): Promise<{ state: "mine" | "other" | "none"; name?: string | null } | null> {
+  try {
+    const sub = await currentSubscription();
+    if (!sub) return null;
+    return await api.post<{ state: "mine" | "other" | "none"; name?: string | null }>("/push/whom", { endpoint: sub.endpoint });
+  } catch {
+    return null;
+  }
+}
+
 export async function disablePush(): Promise<PushState> {
   const reg = await ensureWorker();
   const sub = await reg.pushManager.getSubscription();
