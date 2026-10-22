@@ -51,6 +51,18 @@ function Badge({ count }: { count: number }) {
   );
 }
 
+/**
+ * Ширина страницы. Формы (настройки, приём) — 1240: длинные строки читать
+ * неудобно. Карточки заказа и клиента — до 1600: шире выпадающие списки
+ * расползаются на полэкрана. Остальное — списки, сводка, касса — во всё окно.
+ */
+function pageWidth(path: string): "narrow" | "card" | "wide" {
+  if (path.startsWith("/settings") || path === "/orders/new") return "narrow";
+  if (/^\/(orders|clients)\/[^/]+$/.test(path)) return "card";
+  return "wide";
+}
+const PAGE_MAX = { narrow: "max-w-[1240px]", card: "max-w-[1600px]", wide: "max-w-none" } as const;
+
 export default function Layout() {
   const { me, can, logout, applyToken } = useAuth();
   const [pending, setPending] = useState(0);
@@ -456,8 +468,14 @@ export default function Layout() {
             </div>
           </header>
 
-          <main className="flex-1 p-4 pb-28 sm:p-6 lg:p-8 lg:pb-8">
-            <div className="mx-auto max-w-[1240px]">
+          <main className="min-w-0 flex-1 p-4 pb-28 sm:p-6 lg:p-8 lg:pb-8">
+            {/*
+              Рабочие экраны — во всю ширину окна (Андрей, 22.10.2026: «у кого
+              мониторы широкие»; свернули меню слева — сводка растянулась,
+              развернули — сдвинулась обратно). Настройки и приём заказа — формы,
+              их растягивать незачем: строки становятся длинными и неудобными.
+            */}
+            <div className={"mx-auto " + PAGE_MAX[pageWidth(location.pathname)]} data-page-width={pageWidth(location.pathname)}>
               <Outlet />
             </div>
           </main>

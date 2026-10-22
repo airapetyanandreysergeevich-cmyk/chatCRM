@@ -1,6 +1,6 @@
 import { formatDate, shortName } from "./format";
 import { ORDER_KIND_LABEL, money } from "./orders";
-import type { ColWidth, TableRow, TableViewPrefs } from "./workshop";
+import type { ColWidth, TableColPrefs, TableRow, TableViewPrefs } from "./workshop";
 
 /**
  * Каталог столбцов главной-таблицы — для конфигуратора (Андрей, 22.10.2026:
@@ -114,6 +114,89 @@ export function colPx(key: string, w: ColWidth | undefined): number {
 
 /** Резиновый столбец — без ширины в <col>, забирает свободное место. */
 export const colFlex = (key: string, w: ColWidth | undefined) => !SPECIAL.has(key) && (w ?? COL.get(key)?.w ?? "m") === "l";
+
+/** Пределы своей ширины — те же, что на сервере (summary/prefs.ts). */
+export const MIN_PX = 48;
+export const MAX_PX = 1000;
+
+/** Отступ у крайних столбцов: у первого и последнего поля ячейки шире (pl-4/pr-4). */
+const EDGE = 8;
+
+/** Уже этого столбец не сжимается вместе с окном — дальше прокрутка внутри таблицы. */
+function floorPx(key: string, pref: number) {
+  const f =
+    key === "number" ? 118 // «Р-2026-00113» целиком
+    : key === "status" ? 120 // таблетка статуса читается
+    : key === "labels" ? 56
+    : key === "created" || key === "due" || key === "ready" ? 84
+    : key === "master" ? 88
+    : COL.get(key)?.money ? 72
+    : 72;
+  return Math.min(pref, f);
+}
+
+export interface ColsLayout {
+  /** Ширина каждого столбца; null — резиновый, делит свободное место. */
+  widths: Array<number | null>;
+  /** Ширина таблицы, если она шире окна (тогда прокрутка внутри); null — по окну. */
+  table: number | null;
+  /** Во сколько раз сжаты столбцы под окно (1 — не сжаты). */
+  scale: number;
+}
+
+/**
+ * Ширины столбцов под ширину окна (Андрей, 22.10.2026: «таблицу бы чтобы она
+ * с окном браузера расширялась или сужалась»).
+ *
+ * Места хватает — у столбцов их ширина, резиновые («широкие» без своей
+ * ширины) забирают остальное. Не хватает — все сжимаются в одной пропорции,
+ * но не уже floorPx; только когда и так не влезает — прокрутка внутри таблицы.
+ * live — столбец, который сейчас тянут мышью: его ширина ровно такая, как тянут.
+ */
+export function layoutCols(cols: TableColPrefs[], avail: number, live?: { k: string; px: number } | null): ColsLayout {
+  const last = cols.length - 1;
+  const edge = (i: number) => (i === 0 ? EDGE : 0) + (i === last ? EDGE : 0);
+  const items = cols.map((c, i) => {
+    const isLive = live?.k === c.k;
+    const flex = !isLive && !c.px && colFlex(c.k, c.w);
+    const pref = isLive ? live!.px : c.px ?? colPx(c.k, c.w);
+    return { k: c.k, flex, live: isLive, pref, edge: edge(i) };
+  });
+  const total = items.reduce((n, x) => n + x.pref + x.edge, 0) + 2;
+  // Резиновых нет — свободное место забирает самый широкий (не тот, что тянут):
+  // иначе браузер раздаёт его всем поровну, и тянутый столбец «отстаёт» от мыши.
+  if (!items.some((x) => x.flex)) {
+    const big = items.filter((x) => !x.live && !SPECIAL.has(x.k)).sort((a, b) => b.pref - a.pref)[0];
+    if (big) big.flex = true;
+  }
+  if (!avail || total <= avail) return { widths: items.map((x) => (x.flex ? null : x.pref + x.edge)), table: null, scale: 1 };
+  // Сжимаем в одной пропорции; кто упёрся в наименьшую ширину — стоит на ней,
+  // остальные сжимаются чуть сильнее (пара проходов). Округляем вниз: копейки
+  // от округления иначе давали прокрутку на 5 пикселей.
+  const pinned = new Set<number>();
+  let scale = 1;
+  let widths: number[] = [];
+  for (let pass = 0; pass < 4; pass++) {
+    const fixed = items.reduce((n, x, i) => n + x.edge + (x.live ? x.pref : pinned.has(i) ? floorPx(x.k, x.pref) : 0), 0);
+    const rest = items.reduce((n, x, i) => n + (x.live || pinned.has(i) ? 0 : x.pref), 0);
+    scale = Math.max(0.05, Math.min(1, (avail - 2 - fixed) / Math.max(1, rest)));
+    let changed = false;
+    widths = items.map((x, i) => {
+      if (x.live) return x.pref + x.edge;
+      const f = floorPx(x.k, x.pref);
+      const w = pinned.has(i) ? f : Math.floor(x.pref * scale);
+      if (!pinned.has(i) && w < f) {
+        pinned.add(i);
+        changed = true;
+        return f + x.edge;
+      }
+      return w + x.edge;
+    });
+    if (!changed) break;
+  }
+  const sum = widths.reduce((n, w) => n + w, 0) + 2;
+  return { widths, table: sum > avail ? sum : null, scale };
+}
 
 /** Деньги в ячейке и в «Итого». */
 export const moneyText = (v: number | null | undefined) => (v === null || v === undefined ? "" : money(v));

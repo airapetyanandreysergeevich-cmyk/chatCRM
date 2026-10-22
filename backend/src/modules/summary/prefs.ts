@@ -85,6 +85,8 @@ export type ColWidth = "s" | "m" | "l";
 export interface TableColPrefs {
   k: TableCol;
   w?: ColWidth;
+  /** Своя ширина в пикселях — потянули за край заголовка в таблице. Важнее w. */
+  px?: number;
   /** Переносить текст на вторую строку. */
   wrap?: boolean;
 }
@@ -105,6 +107,10 @@ export interface TablePrefs {
 
 export const MAX_VIEWS = 8;
 const MAX_COLS = TABLE_COLS.length;
+
+/** Пределы своей ширины столбца. */
+export const MIN_PX = 48;
+export const MAX_PX = 1000;
 
 export const defaultView = (): TableViewPrefs => ({ id: "main", name: "Все в работе", cols: DEFAULT_COLS.map((k) => ({ k })) });
 
@@ -131,6 +137,7 @@ export function normalizeTable(raw: unknown): TablePrefs | null {
         seen.add(c.k);
         const col: TableColPrefs = { k: c.k };
         if (c.w === "s" || c.w === "m" || c.w === "l") col.w = c.w;
+        if (typeof c.px === "number" && Number.isFinite(c.px)) col.px = Math.round(Math.min(MAX_PX, Math.max(MIN_PX, c.px)));
         if (c.wrap === true) col.wrap = true;
         cols.push(col);
       }

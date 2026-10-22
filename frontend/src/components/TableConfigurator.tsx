@@ -124,7 +124,7 @@ export function TableConfigurator({
 
           {/* Выбранные столбцы */}
           <div data-field-chosen>
-            <p className="text-[12.5px] text-ink-dim">Порядок — перетаскиванием за ⋮⋮ или стрелками. Ширина и перенос — у каждого столбца.</p>
+            <p className="text-[12.5px] text-ink-dim">Порядок — перетаскиванием за ⋮⋮ или стрелками. Ширина и перенос — у каждого столбца; ширину можно тянуть и прямо в таблице за край заголовка.</p>
             <div className="mt-2 space-y-1.5">
               {visible.map((c, i) => {
                 const spec = COL.get(c.k)!;
@@ -171,14 +171,19 @@ export function TableConfigurator({
                           key={k}
                           type="button"
                           role="radio"
-                          aria-checked={w === k}
+                          aria-checked={!c.px && w === k}
                           data-col-width={`${c.k}:${k}`}
-                          onClick={() => patch(c.k, { w: k === spec.w ? undefined : k })}
-                          className={"px-2 py-0.5 " + (w === k ? "bg-surface-raised font-semibold text-ink" : "text-ink-muted hover:text-ink")}
+                          onClick={() => patch(c.k, { w: k === spec.w ? undefined : k, px: undefined })}
+                          className={"px-2 py-0.5 " + (!c.px && w === k ? "bg-surface-raised font-semibold text-ink" : "text-ink-muted hover:text-ink")}
                         >
                           {label}
                         </button>
                       ))}
+                      {!!c.px && (
+                        <span role="radio" aria-checked className="bg-surface-raised px-2 py-0.5 font-semibold text-ink" title="Ширина, до которой дотянули в таблице" data-col-px={c.k}>
+                          {c.px} пкс
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"

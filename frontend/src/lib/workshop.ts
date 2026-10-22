@@ -83,6 +83,8 @@ export type ColWidth = "s" | "m" | "l";
 export interface TableColPrefs {
   k: TableCol;
   w?: ColWidth;
+  /** Своя ширина в пикселях — потянули за край заголовка. Важнее w. */
+  px?: number;
   wrap?: boolean;
 }
 /** Вид таблицы — вкладка над ней: свои столбцы, сортировка, плотность, «Итого». */

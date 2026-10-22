@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { copyable, copyRow, deviceText } from "./CopyMenu";
 import { orderCopyItems, type MenuOrder, type useOrderMenu } from "./OrderMenu";
@@ -14,7 +14,7 @@ import { dueLabel, formatDate, plural, shortName } from "../lib/format";
 import { LabelDot } from "../lib/labelIcons";
 import { money, type OrderStatus } from "../lib/orders";
 import { STAGES } from "../lib/stages";
-import { COL, DEFAULT_VIEW, colFlex, colPx, deviceLine, moneyText, type ColSpec } from "../lib/tableCols";
+import { COL, DEFAULT_VIEW, MAX_PX, MIN_PX, colFlex, colPx, deviceLine, layoutCols, moneyText, type ColSpec } from "../lib/tableCols";
 import { summaryApi, type DashboardPrefs, type TablePrefs, type TableRow, type TableViewPrefs } from "../lib/workshop";
 
 /**
@@ -173,6 +173,21 @@ export function DashboardTable({
   const [shown, setShown] = useState(PAGE);
   const [config, setConfig] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Ширина места под таблицу — столбцы подстраиваются под окно.
+  const [wrapEl, setWrapEl] = useState<HTMLDivElement | null>(null);
+  const [avail, setAvail] = useState(0);
+  // Столбец, который сейчас тянут за край заголовка.
+  const [live, setLive] = useState<{ k: string; px: number } | null>(null);
+  const scaleRef = useRef(1);
+
+  useEffect(() => {
+    if (!wrapEl) return;
+    const measure = () => setAvail(wrapEl.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrapEl);
+    return () => ro.disconnect();
+  }, [wrapEl]);
 
   // Свои виды — из настроек, что уже на экране (правка видна сразу, до
   // ответа сервера); нет своих — мастерской или стандартный.
@@ -458,7 +473,9 @@ export function DashboardTable({
     try {
       await summaryApi.exportTable({
         name: view.name,
-        columns: cols.filter((c) => c.k !== "labels").map((c) => ({ title: COL.get(c.k)!.label, width: Math.round((colFlex(c.k, c.w) ? 240 : colPx(c.k, c.w)) / 7) })),
+        columns: cols
+          .filter((c) => c.k !== "labels")
+          .map((c) => ({ title: COL.get(c.k)!.label, width: Math.round((c.px ?? (colFlex(c.k, c.w) ? 240 : colPx(c.k, c.w))) / 7) })),
         rows: filtered.slice(0, 5000).map((r) =>
           cols
             .filter((c) => c.k !== "labels")
@@ -485,7 +502,46 @@ export function DashboardTable({
     : null;
 
   const nothing = rows.length === 0;
-  const minWidth = cols.reduce((n, c) => n + colPx(c.k, c.w), 24);
+  const layout = layoutCols(cols, avail, live);
+  scaleRef.current = layout.scale;
+
+  /** Потянули за край заголовка — своя ширина столбца. */
+  function startResize(e: React.PointerEvent<HTMLSpanElement>, k: string, edge: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.currentTarget;
+    const th = handle.parentElement as HTMLElement;
+    const start = th.getBoundingClientRect().width - edge;
+    const x0 = e.clientX;
+    let px = Math.round(start);
+    let moved = false;
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      px = Math.round(Math.min(MAX_PX, Math.max(MIN_PX, start + ev.clientX - x0)));
+      moved = moved || Math.abs(ev.clientX - x0) > 2;
+      if (moved) setLive({ k, px });
+    };
+    const done = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", done);
+      handle.removeEventListener("pointercancel", done);
+      if (moved) {
+        // Окно узкое и столбцы сжаты — запоминаем ширину «без сжатия», чтобы
+        // на этом экране она осталась такой, как дотянули.
+        const want = Math.round(Math.min(MAX_PX, Math.max(MIN_PX, px / (scaleRef.current < 1 ? scaleRef.current : 1))));
+        saveView({ ...view, cols: view.cols.map((c) => (c.k === k ? { ...c, px: want } : c)) });
+      }
+      setLive(null);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", done);
+    handle.addEventListener("pointercancel", done);
+  }
+
+  /** Двойной щелчок по краю — ширина как была (узкий/средний/широкий). */
+  const resetWidth = (k: string) =>
+    saveView({ ...view, cols: view.cols.map((c) => (c.k === k ? { k: c.k, ...(c.w ? { w: c.w } : {}), ...(c.wrap ? { wrap: true } : {}) } : c)) });
 
   return (
     <div className="space-y-3" data-dashboard-table>
@@ -602,20 +658,25 @@ export function DashboardTable({
         <>
           {/* Компьютер: таблица. */}
           <div className="hidden overflow-hidden rounded-panel border border-line bg-surface md:block">
-            <div className="overflow-x-auto">
-              <table className={"w-full table-fixed border-collapse " + (dense ? "text-[13px]" : "text-[13.5px]")} style={{ minWidth }} data-table>
+            <div className="overflow-x-auto" ref={setWrapEl}>
+              <table
+                className={"table-fixed border-collapse " + (layout.table ? "" : "w-full ") + (dense ? "text-[13px]" : "text-[13.5px]") + (live ? " select-none" : "")}
+                style={layout.table ? { width: layout.table } : undefined}
+                data-table
+              >
                 <colgroup>
                   {cols.map((c, i) => (
-                    <col key={c.k} style={colFlex(c.k, c.w) ? undefined : { width: colPx(c.k, c.w) + (i === 0 || i === cols.length - 1 ? 8 : 0) }} />
+                    <col key={c.k} style={layout.widths[i] === null ? undefined : { width: layout.widths[i]! }} />
                   ))}
                 </colgroup>
                 <thead>
-                  <tr className="border-b border-line text-left text-[11px] font-bold uppercase tracking-[0.07em] text-ink-dim">
-                    {cols.map((c) => {
+                  <tr className="group/head border-b border-line text-left text-[11px] font-bold uppercase tracking-[0.07em] text-ink-dim">
+                    {cols.map((c, i) => {
                       const spec = COL.get(c.k)!;
                       const active = sort.replace(/^-/, "") === c.k;
+                      const edge = i === cols.length - 1 ? 8 : 0;
                       return (
-                        <th key={c.k} className={"truncate px-2 py-2.5 font-bold first:pl-4 last:pr-4 " + (spec.right ? "text-right" : "")} title={spec.label}>
+                        <th key={c.k} className={"relative truncate px-2 py-2.5 font-bold first:pl-4 last:pr-4 " + (spec.right ? "text-right" : "")} title={spec.label} data-th={c.k}>
                           {spec.sort ? (
                             <button
                               type="button"
@@ -629,6 +690,20 @@ export function DashboardTable({
                           ) : (
                             spec.head ?? spec.label
                           )}
+                          <span
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label={`Ширина столбца «${spec.label}»`}
+                            title="Потяните, чтобы изменить ширину. Двойной щелчок — как было"
+                            onPointerDown={(e) => startResize(e, c.k, edge + (i === 0 ? 8 : 0))}
+                            onDoubleClick={() => resetWidth(c.k)}
+                            onClick={(e) => e.stopPropagation()}
+                            data-col-resize={c.k}
+                            className={
+                              "absolute right-0 top-0 z-[1] h-full w-2.5 cursor-col-resize touch-none select-none after:absolute after:right-[4px] after:top-1/4 after:h-1/2 after:w-[2px] after:rounded-full after:transition-colors " +
+                              (live?.k === c.k ? "after:bg-brand" : "after:bg-transparent group-hover/head:after:bg-line-strong hover:after:!bg-brand")
+                            }
+                          />
                         </th>
                       );
                     })}
