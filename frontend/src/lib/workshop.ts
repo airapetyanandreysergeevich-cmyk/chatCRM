@@ -23,6 +23,8 @@ export interface BoardCard {
   complaint?: string;
   /** Примечание приёмщика (до 300 знаков). */
   note?: string | null;
+  /** Ярлыки заказа — «Индивидуальные оповещения». */
+  labels?: Array<{ id: string; setAt: string; setBy: string | null }>;
   /** Итог заказа — только тем, кто видит деньги. */
   total?: number;
 }
@@ -75,17 +77,26 @@ export interface DashboardPrefs {
 
 export type DashboardView = "board" | "table";
 
-/** Столбцы таблицы на главной — те же, что на сервере (summary/prefs.ts). */
-export const TABLE_COLS = ["number", "created", "device", "status", "customer", "complaint", "master", "due", "total", "serial", "note", "since"] as const;
-export type TableCol = (typeof TABLE_COLS)[number];
-export const TABLE_OFF: readonly TableCol[] = ["serial", "note", "since"];
-export type TableSort = "created" | "-created" | "number" | "-number" | "due" | "-due" | "total" | "-total" | "since" | "-since";
-
-export interface TablePrefs {
-  hidden?: TableCol[];
-  shown?: TableCol[];
+/** Столбцы таблицы на главной — ключи те же, что на сервере (summary/prefs.ts); что в них — lib/tableCols. */
+export type TableCol = string;
+export type ColWidth = "s" | "m" | "l";
+export interface TableColPrefs {
+  k: TableCol;
+  w?: ColWidth;
+  wrap?: boolean;
+}
+/** Вид таблицы — вкладка над ней: свои столбцы, сортировка, плотность, «Итого». */
+export interface TableViewPrefs {
+  id: string;
+  name: string;
+  cols: TableColPrefs[];
+  sort?: string;
   dense?: boolean;
-  sort?: TableSort;
+  totals?: boolean;
+}
+export interface TablePrefs {
+  views: TableViewPrefs[];
+  active?: string;
 }
 
 /** Заказ строкой таблицы на главной. */
@@ -102,11 +113,39 @@ export interface TableRow {
   status: OrderStatus;
   device: { kind: string; brand: string | null; model: string | null; serial: string | null } | null;
   master: { id: string; fullName: string } | null;
-  customer: { id: string; type: "INDIVIDUAL" | "COMPANY"; name?: string; phone?: string; color?: string | null };
+  customer: {
+    id: string;
+    type: "INDIVIDUAL" | "COMPANY";
+    name?: string;
+    phone?: string;
+    color?: string | null;
+    phone2?: string | null;
+    email?: string | null;
+    address?: string | null;
+    source?: string | null;
+    /** Сколько всего заказов у клиента. */
+    orders?: number;
+  };
+  kind?: "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT";
+  acceptedBy?: string | null;
+  labels?: Array<{ id: string; setAt: string; setBy: string | null }>;
   complaint: string;
   completeness: string[];
+  appearance?: string[];
   receptionNote: string | null;
+  passcode?: string | null;
+  storage?: string | null;
+  outsource?: string | null;
+  diagnosis?: string | null;
+  masterComment?: string | null;
+  lastMessage?: string | null;
   total?: number;
+  estimate?: number | null;
+  prepay?: number | null;
+  works?: number | null;
+  parts?: number | null;
+  discount?: number | null;
+  paid?: number;
   /** Долг по выданному — только у строк «С долгом». */
   debt?: number;
 }
@@ -160,6 +199,10 @@ export interface Summary {
   table?: TableRow[];
   /** Видит ли деньги заказов: столбец «Сумма» и фильтр «С долгом». */
   tableMoney?: boolean;
+  /** Виды таблицы: свои → мастерской → стандартный. */
+  tableViews?: TablePrefs;
+  /** Виды свои (а не мастерской). */
+  tableViewsOwn?: boolean;
 }
 
 // ------------------------------------------------------------------- склад
@@ -348,6 +391,20 @@ export const summaryApi = {
   prefs: () =>
     api.get<{ prefs: DashboardPrefs; money: boolean; personal: boolean; workshopView: DashboardView; canShare: boolean }>("/summary/prefs"),
   setWorkshopView: (view: DashboardView) => api.put<{ workshopView: DashboardView }>("/summary/view/workshop", { view }),
+  /** «Сделать так у всех» в конфигураторе таблицы. null — у всех стандартная. */
+  shareTable: (table: TablePrefs | null) => api.put<{ ok: true }>("/summary/table/workshop", { table }),
+  /** Вид таблицы в Excel — то, что видно на экране. */
+  exportTable: async (body: { name: string; columns: Array<{ title: string; width?: number }>; rows: Array<Array<string | number | null>> }) => {
+    const { blob, fileName } = await api.download("/summary/table/export", body);
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 30_000);
+  },
   savePrefs: (prefs: DashboardPrefs) => api.put<{ prefs: DashboardPrefs }>("/summary/prefs", { prefs }),
   kinds: () => api.get<{ kinds: DeviceKindOption[] }>("/summary/kinds"),
 };

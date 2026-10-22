@@ -15,6 +15,7 @@ const TENANT_DELEGATES = new Set([
   "integration", "smsMessage", "smsPhone", "smsApproval",
   "stockCategory",
   "sale", "saleItem",
+  "orderLabel", "orderLabelMark", "orderEvent",
 ]);
 
 const WHERE_OPS = new Set([

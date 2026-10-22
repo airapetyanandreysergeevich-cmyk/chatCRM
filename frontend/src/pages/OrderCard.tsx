@@ -14,6 +14,7 @@ import { PhotoShooter } from "../components/PhotoShooter";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Photo } from "../components/OrderPhoto";
 import { DeviceHistory } from "../components/DeviceHistory";
+import { OrderLabels, canLabel } from "../components/OrderLabels";
 import { OrderChat } from "../components/OrderChat";
 import { OrderEditModal } from "../components/OrderEditModal";
 import { Modal } from "../components/Modal";
@@ -588,6 +589,15 @@ export default function OrderCard() {
             <StatusPill tone={statusPill(order).tone} className="text-[13px]">
               {statusPill(order).label}
             </StatusPill>
+            {/* Ярлыки — «Индивидуальные оповещения»: рядом со статусом, «+» — поставить. */}
+            <OrderLabels
+              order={order}
+              defs={ref?.labels}
+              size="md"
+              add="always"
+              canEdit={!order.issuedAt && canLabel(can, myId, order.assignedMaster?.id)}
+              onChanged={() => load()}
+            />
             {order.inDebt && <DebtBadge amount={order.debt} className="text-[13px]" />}
             {order.inDebt && can("finance.payment", "finance.manage") && (
               <PayDebtButton orderId={order.id} onPaid={() => void load()} className="min-h-[34px] px-3 text-[13px]" />
@@ -871,7 +881,7 @@ export default function OrderCard() {
             </div>
           </Card>
 
-          <OrderChat orderId={order.id} myId={myId} canModerate={can("orders.edit")} found={found} />
+          <OrderChat orderId={order.id} myId={myId} canModerate={can("orders.edit")} found={found} refreshKey={order} />
         </div>
 
         <div className="space-y-4">
@@ -964,11 +974,11 @@ export default function OrderCard() {
                     : []),
                   {
                     label: "Мастер",
-                    // Мастера меняет тот, кто вправе править заказ: «взялся
-                    // сам владелец» или «передали коллеге» — прямо здесь, без
-                    // пересоздания заказа.
+                    // Мастера меняет тот, у кого право «Назначает и меняет
+                    // мастера» (22.10.2026): приёмщик выбирает мастера при
+                    // приёме, а менять потом — только с этим правом.
                     value:
-                      can("orders.edit") && ref ? (
+                      can("orders.assign") && ref ? (
                         <Select
                           aria-label="Мастер"
                           value={order.assignedMaster?.id ?? ""}

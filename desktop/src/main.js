@@ -710,6 +710,14 @@ orderFolders.register({ ipcMain, dialog, shell, getWindow: () => win, userDataDi
 // Окно площадок (Ozon, Wildberries, Авито…) для поиска запчастей — см. markets.js.
 markets.register({ ipcMain, BrowserWindow, WebContentsView, session, shell, getWindow: () => win });
 
+// Обновление программы: значок у часов на главной (FineCRM, frontend
+// components/UpdateBadge.tsx). Состояние — у Updater, окно с «что нового»
+// рисует сама страница.
+ipcMain.handle("desktop:update-state", () =>
+  updater && updater.available ? { ...updater.available, current: app.getVersion() } : null
+);
+ipcMain.handle("desktop:update-install", async () => (updater ? updater.act() : { result: "nothing" }));
+
 ipcMain.handle("desktop:backups-status", (e) =>
   fromOwnWindow(e) ? { ok: true, here: true, ...backups.status() } : { ok: true, here: false }
 );
@@ -963,6 +971,14 @@ function startUpdater() {
       ask: box("question"),
       info: box("info"),
       error: box("warning"),
+      // Фоновое обновление загружено — значок у часов на главной (окно не
+      // всплывает: 22.10.2026, кто-то нажимал его по привычке посреди работы).
+      available: (a) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) w.webContents.send("desktop:update", { ...a, current: app.getVersion() });
+        }
+        if (tray) tray.setToolTip(`FineCRM — загружено обновление ${a.version}`);
+      },
       // Прогресс — на значке в панели задач: видно, даже когда окно свёрнуто.
       progress: (p) => {
         if (win && !win.isDestroyed()) win.setProgressBar(p);

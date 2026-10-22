@@ -1,3 +1,4 @@
+import { UpdateDot } from "./UpdateBadge";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -365,6 +366,8 @@ export default function Layout() {
                       <>
                         <span className="flex-1">{i.label}</span>
                         {!!i.badge && <Badge count={i.badge} />}
+                        {/* Обновление программы ждёт на главной, у часов. */}
+                        {i.to === "/" && inWorkshop && <UpdateDot />}
                       </>
                     )}
                   </>

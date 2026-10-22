@@ -36,6 +36,9 @@ import { Banner, Button, Checkbox, Spinner } from "./ui";
  */
 
 /** Пример на случай, когда на доске пусто: всё заполнено, чтобы было что настраивать. */
+/** Ярлык для образца — как «Требуется звонок клиенту» у мастерской. */
+const SAMPLE_LABELS = [{ id: "sample-call", name: "Требуется звонок клиенту", icon: "phone", color: "#2F8FE0", quickFilter: false, notify: false }];
+
 const SAMPLE: BoardCard = {
   id: "sample",
   number: "Р-2026-00123",
@@ -48,6 +51,7 @@ const SAMPLE: BoardCard = {
   customer: { id: "c", type: "INDIVIDUAL", name: "Мария Кузнецова", color: "green" },
   complaint: "Не включается после залития, клиент просит сохранить данные",
   note: "Царапина на крышке, без зарядки",
+  labels: [{ id: "sample-call", setAt: new Date().toISOString(), setBy: "Марина" }],
   total: 4500,
 };
 
@@ -323,7 +327,7 @@ export function TileEditor() {
                   <div className="space-y-2">
                     {cards.map((c) => (
                       <div key={c.id} className="rounded-card border border-line bg-surface-raised" style={{ padding: `${draft.pad}px` }}>
-                        <TileBody card={c} tile={draft} editing={{ selected, onPick: setSelected, onMove: move }} />
+                        <TileBody card={c} tile={draft} labelDefs={SAMPLE_LABELS} editing={{ selected, onPick: setSelected, onMove: move }} />
                       </div>
                     ))}
                   </div>

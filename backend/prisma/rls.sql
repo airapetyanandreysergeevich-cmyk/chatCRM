@@ -33,7 +33,8 @@ DECLARE
     'PrintStation','PrintJob',
     'Integration','SmsMessage','SmsPhone','SmsApproval',
     'StockCategory',
-    'Sale','SaleItem'
+    'Sale','SaleItem',
+    'OrderLabel','OrderLabelMark','OrderEvent'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

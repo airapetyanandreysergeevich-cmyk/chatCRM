@@ -114,6 +114,63 @@ messagesRouter.get(
   })
 );
 
+/** «Евгений, мастер»: имя и должность — как подпись в истории ремонта. */
+const whoSelect = { fullName: true, isOwner: true, isCoOwner: true, role: { select: { name: true } } } as const;
+function whoOf(u: { fullName: string; isOwner: boolean; isCoOwner: boolean; role: { name: string } | null } | null) {
+  if (!u) return null;
+  const position = u.isOwner ? "владелец" : u.isCoOwner ? "совладелец" : (u.role?.name ?? "").toLowerCase();
+  return { name: u.fullName, position: position || null };
+}
+
+/**
+ * Служебные строки истории ремонта (22.10.2026): приём, смены статуса,
+ * назначение мастера, ярлыки — кто (имя и должность) и когда. Смены статуса
+ * лежат в OrderStatusHistory с самого начала — поэтому видны и у старых
+ * заказов. Сообщения — отдельно (GET /), интерфейс сводит их по времени.
+ */
+messagesRouter.get(
+  "/events",
+  ah(async (req, res) => {
+    const out = await withTenant(tenantOf(req), async (tx) => {
+      const order = await loadOrder(req, tx);
+      const [statuses, events] = await Promise.all([
+        tx.orderStatusHistory.findMany({
+          where: { orderId: order.id },
+          orderBy: { createdAt: "asc" },
+          take: 500,
+          select: {
+            id: true,
+            createdAt: true,
+            comment: true,
+            fromStatus: { select: { name: true, group: true } },
+            toStatus: { select: { name: true, group: true } },
+            user: { select: whoSelect },
+          },
+        }),
+        tx.orderEvent.findMany({
+          where: { orderId: order.id },
+          orderBy: { createdAt: "asc" },
+          take: 500,
+          select: { id: true, createdAt: true, kind: true, data: true, user: { select: whoSelect } },
+        }),
+      ]);
+      return [
+        ...statuses.map((h) => ({
+          id: h.id,
+          at: h.createdAt,
+          kind: h.fromStatus ? ("STATUS" as const) : ("CREATED" as const),
+          from: h.fromStatus,
+          to: h.toStatus,
+          comment: h.comment,
+          who: whoOf(h.user),
+        })),
+        ...events.map((e) => ({ id: e.id, at: e.createdAt, kind: e.kind, data: e.data, who: whoOf(e.user) })),
+      ].sort((a, b) => a.at.getTime() - b.at.getTime());
+    });
+    res.json({ items: out });
+  })
+);
+
 messagesRouter.post(
   "/",
   upload.array("files", MAX_FILES),

@@ -13,6 +13,7 @@ import { STAGES, type Stage } from "../lib/stages";
 import { GearButton, PanelMenu } from "../components/PanelMenu";
 import { TileBody } from "../components/OrderTile";
 import { DashboardTable } from "../components/DashboardTable";
+import { UpdateBadge } from "../components/UpdateBadge";
 import { DEFAULT_TILE, type TileLayout } from "../lib/tile";
 import { columnsFor, isShown, panelLabel, withPanel } from "../lib/dashboard";
 import {
@@ -169,7 +170,7 @@ function OrderCardTile({
           панелей заказа» (components/OrderTile.tsx). По умолчанию — как было:
           номер и «срочный», техника, срок и мастер. Место под «⋯» в первой
           строке — только где она видна всегда (телефон). */}
-      <TileBody card={card} tile={tile} firstRowPad />
+      <TileBody card={card} tile={tile} firstRowPad labelDefs={om.reference?.labels} />
       {/* «⋯» — то же меню, что по правой кнопке: на телефоне правой кнопки нет,
           а долгое нажатие не всякий догадается сделать. */}
       <button
@@ -684,7 +685,11 @@ export default function Dashboard() {
           {workshop}
         </h1>
       </div>
-      <Clock />
+      {/* Обновление программы — значком слева от часов, а не окном посреди работы. */}
+      <div className="flex shrink-0 items-start gap-3 sm:gap-4">
+        <UpdateBadge />
+        <Clock />
+      </div>
     </div>
   );
 
@@ -758,7 +763,17 @@ export default function Dashboard() {
 
       {/* Вид «Таблица» (Настройки → Интерфейс → Главный экран). */}
       {data.view === "table" && data.table ? (
-        <DashboardTable rows={data.table} prefs={prefs} seesMoney={!!data.tableMoney} om={om} onPrefs={changePrefs} />
+        <DashboardTable
+          rows={data.table}
+          prefs={prefs}
+          views={data.tableViews ?? { views: [] }}
+          seesMoney={!!data.tableMoney}
+          contacts={data.money}
+          om={om}
+          onPrefs={changePrefs}
+          onShared={() => void load()}
+          onReload={load}
+        />
       ) : columns.length === 0 ? (
         <EmptyState icon={<IconOrders />} title="Все панели выключены">
           Включить их и расставить по порядку можно в{" "}

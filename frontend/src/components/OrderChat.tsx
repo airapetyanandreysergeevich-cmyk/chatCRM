@@ -2,7 +2,10 @@ import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent 
 import { ApiError } from "../lib/api";
 import { dayLabel, messagesApi, timeLabel, type OrderMessage } from "../lib/messages";
 import { compressPhoto } from "../lib/photos";
-import { IconAttach, IconClose, IconSend } from "./icons";
+import { IconAttach, IconClose, IconPerson, IconPlus, IconSend } from "./icons";
+import { ordersApi, type OrderEventRow } from "../lib/orders";
+import { LabelDot } from "../lib/labelIcons";
+import { STAGES } from "../lib/stages";
 import { PhotoViewer, type ViewerPhoto } from "./PhotoViewer";
 import { Banner, Card, SectionLabel } from "./ui";
 
@@ -32,10 +35,13 @@ export function OrderChat({
   myId,
   canModerate,
   found,
+  refreshKey,
 }: {
   orderId: string;
   myId: string | null;
   canModerate: boolean;
+  /** Сменился заказ (статус, мастер, ярлык) — перечитать служебные строки. */
+  refreshKey?: unknown;
   /** Сообщение, найденное поиском по заказам: его надо показать и подсветить. */
   found?: string | null;
 }) {
@@ -53,13 +59,38 @@ export function OrderChat({
   const counter = useRef(0);
   const stick = useRef(true);
 
+  const [events, setEvents] = useState<OrderEventRow[]>([]);
+  // «Всё» — и сообщения, и служебные строки; «только сообщения» — переписка.
+  // Выбор помнится на этом устройстве.
+  const [onlyMessages, setOnlyMessages] = useState(() => {
+    try {
+      return localStorage.getItem("finecrm.history.only-messages") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const switchMode = (v: boolean) => {
+    setOnlyMessages(v);
+    try {
+      localStorage.setItem("finecrm.history.only-messages", v ? "1" : "0");
+    } catch {
+      /* не запомнили — не беда */
+    }
+  };
+
   const load = useCallback(async () => {
     try {
-      setMessages(await messagesApi.list(orderId));
+      const [m, e] = await Promise.all([messagesApi.list(orderId), ordersApi.events(orderId).catch(() => ({ items: [] }))]);
+      setMessages(m);
+      setEvents(e.items);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить историю");
     }
   }, [orderId]);
+
+  useEffect(() => {
+    if (refreshKey !== undefined) void load();
+  }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void load();
@@ -176,11 +207,28 @@ export function OrderChat({
 
   const count = messages?.filter((m) => !m.deleted).length ?? 0;
 
+  type Item = { at: string; msg?: OrderMessage; ev?: OrderEventRow };
+  const timeline: Item[] = messages
+    ? [
+        ...messages.map((m) => ({ at: m.createdAt, msg: m })),
+        ...(onlyMessages ? [] : events.map((ev) => ({ at: ev.at, ev }))),
+      ].sort((a, b) => a.at.localeCompare(b.at))
+    : [];
+
   return (
     <Card>
-      <div id="history" className="flex items-center justify-between gap-3 scroll-mt-20">
+      <div id="history" className="flex flex-wrap items-center justify-between gap-3 scroll-mt-20">
         <SectionLabel>История ремонта</SectionLabel>
-        {count > 0 && <span className="text-[12.5px] text-ink-dim">{count}</span>}
+        <span className="flex items-center gap-1.5 text-[12.5px] text-ink-dim" data-history-mode>
+          Показывать:
+          <button type="button" onClick={() => switchMode(false)} className={onlyMessages ? "hover:text-ink" : "font-bold text-ink"} aria-pressed={!onlyMessages}>
+            всё
+          </button>
+          ·
+          <button type="button" onClick={() => switchMode(true)} className={onlyMessages ? "font-bold text-ink" : "hover:text-ink"} aria-pressed={onlyMessages}>
+            только сообщения{count > 0 ? ` (${count})` : ""}
+          </button>
+        </span>
       </div>
 
       <div
@@ -193,14 +241,23 @@ export function OrderChat({
       >
         {messages === null ? (
           <p className="py-6 text-center text-[13.5px] text-ink-dim">Загружаем…</p>
-        ) : messages.length === 0 ? (
+        ) : timeline.length === 0 ? (
           <p className="py-6 text-center text-[13.5px] text-ink-dim">
             Здесь мастера записывают ход ремонта: что нашли, что заказали, о чём договорились с клиентом.
           </p>
         ) : (
-          messages.map((m, i) => {
+          timeline.map((item, i) => {
+            const newDay = i === 0 || dayLabel(timeline[i - 1].at) !== dayLabel(item.at);
+            if (item.ev) {
+              return (
+                <Fragment key={"ev" + item.ev.id}>
+                  {newDay && <div className="py-1 text-center text-[12px] font-semibold text-ink-dim">{dayLabel(item.at)}</div>}
+                  <EventLine ev={item.ev} />
+                </Fragment>
+              );
+            }
+            const m = item.msg!;
             const mine = !!myId && m.author?.id === myId;
-            const newDay = i === 0 || dayLabel(messages[i - 1].createdAt) !== dayLabel(m.createdAt);
             return (
               <Fragment key={m.id}>
                 {newDay && (
@@ -366,5 +423,74 @@ export function OrderChat({
         />
       )}
     </Card>
+  );
+}
+
+/** Служебная строка истории: приём, статус, мастер, ярлык — кто и когда. */
+function EventLine({ ev }: { ev: OrderEventRow }) {
+  const who = ev.who ? `${ev.who.name}${ev.who.position ? `, ${ev.who.position}` : ""}` : "FineCRM";
+  const stage = (g?: string) => STAGES.find((s) => s.key === g);
+  let icon: React.ReactNode = null;
+  let text: React.ReactNode = null;
+  let dim = false;
+  if (ev.kind === "CREATED") {
+    icon = <IconPlus />;
+    text = (
+      <>
+        Заказ принят{ev.to ? <> · статус <b className="text-ink">{ev.to.name}</b></> : null}
+        {ev.comment && ev.comment !== "Принято в работу" ? <span className="text-ink-dim"> ({ev.comment})</span> : null}
+      </>
+    );
+  } else if (ev.kind === "STATUS") {
+    icon = <span className={"h-2 w-2 rounded-full " + (stage(ev.to?.group)?.dot ?? "bg-ink-dim")} />;
+    text = (
+      <>
+        Статус: {ev.from?.name ?? "—"} → <b className="text-ink">{ev.to?.name}</b>
+        {ev.comment ? <span className="text-ink-dim"> — {ev.comment}</span> : null}
+      </>
+    );
+  } else if (ev.kind === "MASTER") {
+    icon = <IconPerson />;
+    const d = ev.data ?? {};
+    text = d.to ? (
+      d.from ? (
+        <>
+          Мастер: {d.from} → <b className="text-ink">{d.to}</b>
+        </>
+      ) : (
+        <>
+          Назначен мастер <b className="text-ink">{d.to}</b>
+        </>
+      )
+    ) : (
+      <>Снят мастер {d.from ?? ""}</>
+    );
+  } else if (ev.kind === "LABEL_SET" || ev.kind === "LABEL_UNSET") {
+    const d = ev.data ?? {};
+    dim = ev.kind === "LABEL_UNSET";
+    icon = <LabelDot icon={d.icon ?? "flag"} color={d.color ?? "#6B7A99"} className="!h-[18px] !w-[18px] [&>svg]:!h-[10px] [&>svg]:!w-[10px]" />;
+    text = ev.kind === "LABEL_SET" ? (
+      <>
+        Поставлен ярлык <b className="text-ink">«{d.name}»</b>
+      </>
+    ) : (
+      <>Снят ярлык «{d.name}»</>
+    );
+  } else {
+    return null;
+  }
+  return (
+    <div className={"flex items-start gap-2 px-1 text-[13px] leading-snug " + (dim ? "opacity-70" : "")} data-history-event={ev.kind}>
+      <span className="mt-[1px] flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-surface-raised text-ink-muted [&>svg]:h-3 [&>svg]:w-3">
+        {icon}
+      </span>
+      <p className="min-w-0 text-ink-soft">
+        {text}
+        <span className="text-[12px] text-ink-dim">
+          {" "}
+          · {who} · {timeLabel(ev.at)}
+        </span>
+      </p>
+    </div>
   );
 }

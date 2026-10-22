@@ -209,8 +209,73 @@ interface Notice {
   title: string;
   body: string | null;
   url: string | null;
+  /** Почему пришло именно вам (с 22.10.2026). */
+  why?: string | null;
   readAt: string | null;
   createdAt: string;
+}
+
+/**
+ * «Только по моим заказам» — своя настройка сотрудника (22.10.2026): события
+ * про чужие заказы не приходят, даже если его роль отмечена в матрице.
+ * Владельцу или совладельцу, который сам чинит, — ровно то, что нужно.
+ */
+function OwnOnlyCard() {
+  const [state, setState] = useState<{ ownOnly: boolean; personal: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .get<{ ownOnly: boolean; personal: boolean }>("/notifications/prefs")
+      .then(setState)
+      .catch(() => setState(null));
+  }, []);
+  if (!state?.personal) return null;
+  const set = (ownOnly: boolean) => {
+    const before = state;
+    setState({ ...state, ownOnly });
+    setError(null);
+    api.put("/notifications/prefs", { ownOnly }).catch((e) => {
+      setState(before);
+      setError(e instanceof ApiError ? e.message : "Не удалось сохранить");
+    });
+  };
+  return (
+    <Panel id="notifications:Мои оповещения" title="Мои оповещения" summary={state.ownOnly ? "Только по моим заказам" : "Обо всех заказах, что положены роли"}>
+      <p className="mt-2 text-[13.5px] text-ink-muted">О каких заказах приходят оповещения лично вам.</p>
+      <div className="mt-3 inline-flex flex-wrap rounded-field border border-line bg-surface-input p-1" role="radiogroup" aria-label="О каких заказах">
+        {(
+          [
+            [false, "Обо всех, что положены моей роли"],
+            [true, "Только по моим заказам"],
+          ] as const
+        ).map(([v, label]) => (
+          <button
+            key={String(v)}
+            type="button"
+            role="radio"
+            aria-checked={state.ownOnly === v}
+            data-own-only={String(v)}
+            onClick={() => set(v)}
+            className={
+              "min-h-[40px] rounded-[9px] px-4 text-[14px] font-semibold transition-colors duration-150 " +
+              (state.ownOnly === v ? "bg-surface-raised text-ink shadow-sm" : "text-ink-muted hover:text-ink")
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-[12.5px] text-ink-dim">
+        «Только по моим» — оповещения о заказах, где вы мастер или участвуете в переписке. Остальное из «Кому какие события» вам
+        приходить не будет.
+      </p>
+      {error && (
+        <div className="mt-2">
+          <Banner tone="error">{error}</Banner>
+        </div>
+      )}
+    </Panel>
+  );
 }
 
 /**
@@ -267,6 +332,11 @@ function Feed() {
                 <span className="min-w-0 flex-1">
                   <span className="block text-[14.5px] font-semibold">{n.title}</span>
                   {n.body && <span className="mt-0.5 block text-[13.5px] text-ink-muted">{n.body}</span>}
+                  {n.why && (
+                    <span className="mt-0.5 block text-[12px] text-ink-dim" data-notice-why>
+                      Вам — потому что {n.why}
+                    </span>
+                  )}
                 </span>
                 <span className="shrink-0 text-[12px] text-ink-dim">{formatDateTime(n.createdAt)}</span>
               </button>
@@ -343,6 +413,7 @@ export default function Notifications() {
 
       <DeviceCard />
       <InstallAppCard />
+      {inWorkshop && <OwnOnlyCard />}
       {inWorkshop && <Feed />}
 
       {canManage && (

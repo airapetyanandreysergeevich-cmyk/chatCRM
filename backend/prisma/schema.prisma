@@ -130,6 +130,9 @@ model Tenant {
   transactions        Transaction[]
   sales               Sale[]
   saleItems           SaleItem[]
+  orderLabels         OrderLabel[]
+  orderLabelMarks     OrderLabelMark[]
+  orderEvents         OrderEvent[]
   auditLogs           AuditLog[]
   notifications       Notification[]
   pushSubscriptions   PushSubscription[]
@@ -483,6 +486,9 @@ model User {
   /// Совладелец: права как у владельца. Назначает и снимает только владелец.
   isCoOwner    Boolean @default(false)
   isActive     Boolean @default(true)
+  /// Оповещения о заказах — только по своим (где он мастер или участник
+  /// разговора), а не все, что положены его роли (22.10.2026).
+  notifyOwnOnly Boolean @default(false)
 
   // для мастеров — расчёт зарплаты
   workPercent Decimal? @db.Decimal(5, 2)
@@ -529,6 +535,8 @@ model User {
   transactions      Transaction[]
   salesMade         Sale[]            @relation("SaleSoldBy")
   salesReturned     Sale[]            @relation("SaleReturnedBy")
+  labelMarks        OrderLabelMark[]
+  orderEvents       OrderEvent[]
   auditLogs         AuditLog[]
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
@@ -804,6 +812,8 @@ model Order {
   messages         OrderMessage[]
   attachments      Attachment[]
   statusHistory    OrderStatusHistory[]
+  labelMarks       OrderLabelMark[]
+  events           OrderEvent[]
   purchaseRequests PurchaseRequest[]
   stockMovements   StockMovement[]
   transactions     Transaction[]
@@ -1619,4 +1629,67 @@ model SaleItem {
   stockItem StockItem? @relation(fields: [stockItemId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, saleId])
+}
+
+/**
+ * Индивидуальные оповещения — свои ярлыки заказов мастерской (22.10.2026):
+ * значок в цветном кружке рядом со статусом («Требуется звонок клиенту»).
+ */
+model OrderLabel {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  /// Ключ значка из коллекции интерфейса (frontend/src/lib/labelIcons.tsx).
+  icon        String
+  color       String
+  sortOrder   Int      @default(0)
+  /// Кнопкой в быстрых фильтрах главной.
+  quickFilter Boolean  @default(false)
+  /// Оповещать (колокольчик и телефон по матрице), когда ярлык ставят.
+  notify      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id])
+  marks  OrderLabelMark[]
+
+  @@index([tenantId])
+}
+
+/** Ярлык на заказе: кто и когда поставил. */
+model OrderLabelMark {
+  id       String   @id @default(uuid())
+  tenantId String
+  orderId  String
+  labelId  String
+  setById  String?
+  setAt    DateTime @default(now())
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id])
+  order  Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  label  OrderLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  setBy  User?      @relation(fields: [setById], references: [id], onDelete: SetNull)
+
+  @@unique([orderId, labelId])
+  @@index([tenantId, labelId])
+}
+
+/**
+ * Событие заказа для «Истории ремонта»: ярлык поставлен/снят, назначен
+ * мастер. Смены статуса — в OrderStatusHistory, сообщения — в OrderMessage.
+ */
+model OrderEvent {
+  id        String   @id @default(uuid())
+  tenantId  String
+  orderId   String
+  userId    String?
+  /// LABEL_SET, LABEL_UNSET, MASTER
+  kind      String
+  data      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, orderId])
 }

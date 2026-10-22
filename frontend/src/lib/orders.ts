@@ -72,9 +72,29 @@ export interface OrderExtra {
   amount?: number;
 }
 
+/** Ярлык мастерской: значок в цветном кружке (lib/labelIcons). */
+export interface LabelDef {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  quickFilter: boolean;
+  notify: boolean;
+  /** Сколько заказов в работе с ним — только в списке настроек. */
+  orders?: number;
+}
+
+/** Ярлык на заказе: какой, когда и кто поставил. */
+export interface LabelMark {
+  id: string;
+  setAt: string;
+  setBy: string | null;
+}
+
 export interface Order {
   id: string;
   number: string;
+  labels?: LabelMark[];
   kind: "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT";
   isUrgent: boolean;
   status: OrderStatus;
@@ -171,7 +191,9 @@ export interface Reference {
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
   statuses: OrderStatus[];
   /** Мастера и владелец мастерской — он тоже может взяться за ремонт. */
-  masters: Array<{ id: string; fullName: string; isOwner?: boolean }>;
+  masters: Array<{ id: string; fullName: string; isOwner?: boolean; isCoOwner?: boolean; active?: number }>;
+  /** Ярлыки мастерской — «Индивидуальные оповещения». */
+  labels?: LabelDef[];
   /** Прайс мастерской — для подсказок при наборе выполненных работ. */
   services: Service[];
 }
@@ -225,6 +247,26 @@ export const statusGlyphTone = (group: StatusGroup) =>
     CANCELLED: "cancelled",
   })[group] as "new" | "progress" | "waiting" | "done" | "closed" | "cancelled";
 
+
+/** Строка истории ремонта, кроме сообщений. */
+export interface OrderEventRow {
+  id: string;
+  at: string;
+  kind: "CREATED" | "STATUS" | "MASTER" | "LABEL_SET" | "LABEL_UNSET" | string;
+  from?: { name: string; group: StatusGroup } | null;
+  to?: { name: string; group: StatusGroup };
+  comment?: string | null;
+  data?: { name?: string; icon?: string; color?: string; from?: string | null; to?: string | null };
+  who: { name: string; position: string | null } | null;
+}
+
+export const labelsApi = {
+  list: () => api.get<{ items: LabelDef[]; canManage: boolean }>("/order-labels"),
+  create: (body: Omit<LabelDef, "id" | "orders">) => api.post<LabelDef>("/order-labels", body),
+  update: (id: string, body: Partial<Omit<LabelDef, "id" | "orders">>) => api.patch<LabelDef>(`/order-labels/${id}`, body),
+  remove: (id: string) => api.del<{ ok: true; marks: number }>(`/order-labels/${id}`),
+  reorder: (ids: string[]) => api.put("/order-labels/order", { ids }),
+};
 
 /** Найденный клиент в подсказках на приёме техники. */
 export interface CustomerHit {
@@ -293,6 +335,10 @@ export const ordersApi = {
   /** Правка карточки: шлём только изменённые поля. */
   update: (id: string, patch: Record<string, unknown>) => api.patch(`/orders/${id}`, patch),
   assignMaster: (id: string, masterId: string | null) => api.patch(`/orders/${id}`, { assignedMasterId: masterId }),
+  /** Поставить или снять ярлык. */
+  setLabel: (id: string, labelId: string, on: boolean) => api.post<{ ok: true; changed: boolean }>(`/orders/${id}/labels`, { labelId, on }),
+  /** Служебные строки истории ремонта: приём, статусы, мастер, ярлыки. */
+  events: (id: string) => api.get<{ items: OrderEventRow[] }>(`/orders/${id}/messages/events`),
   setStatus: (id: string, statusId: string, comment?: string) =>
     api.post(`/orders/${id}/status`, { statusId, comment }),
   saveWorks: (id: string, works: OrderWork[]) => api.put(`/orders/${id}/works`, { works }),

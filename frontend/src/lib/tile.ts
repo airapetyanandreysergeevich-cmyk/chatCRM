@@ -5,7 +5,7 @@ import { api } from "./api";
  * Те же правила, что на сервере: backend/src/modules/summary/tile.ts.
  */
 
-export const TILE_KEYS = ["number", "urgent", "color", "status", "device", "customer", "complaint", "note", "due", "master", "total"] as const;
+export const TILE_KEYS = ["number", "urgent", "labels", "color", "status", "device", "customer", "complaint", "note", "due", "master", "total"] as const;
 export type TileKey = (typeof TILE_KEYS)[number];
 export type TileAlign = "left" | "center" | "right";
 export type TileWidth = "full" | "half" | "auto";
@@ -30,6 +30,7 @@ export interface TileLayout {
 export const TILE_LABEL: Record<TileKey, string> = {
   number: "Номер заказа",
   urgent: "Срочный",
+  labels: "Ярлыки",
   color: "Метка клиента",
   status: "Статус",
   device: "Техника",
@@ -63,6 +64,7 @@ export const DEFAULT_TILE: TileLayout = {
   els: [
     el("number", true, 13, true, "left", 1, "auto"),
     el("urgent", true, 11, true, "left", 1, "auto"),
+    el("labels", true, 12, false, "left", 1, "auto"),
     el("color", false, 12, false, "left", 1, "auto"),
     el("status", false, 12, false, "left", 1, "auto"),
     el("device", true, 14, true, "left", 1, "full"),

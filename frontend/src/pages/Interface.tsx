@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { HomeScreenCard } from "../components/HomeScreenCard";
 import { TileEditor } from "../components/TileEditor";
+import { LabelsCard } from "../components/LabelsCard";
 import { Modal } from "../components/Modal";
 import { IconMoon, IconSun } from "../components/icons";
 import { Banner, Button, Checkbox, Field, Input, PageHeader } from "../components/ui";
@@ -434,6 +435,8 @@ export default function Interface() {
       <HomeScreenCard />
 
       <TileEditor />
+
+      <LabelsCard />
 
       <SearchLayoutCard />
 

@@ -35,9 +35,20 @@ export async function listMasters(tx: Prisma.TransactionClient) {
     // Владелец — последним: мастеров назначают чаще, и первым в списке
     // должен стоять тот, кого выбирают обычно.
     orderBy: [{ isOwner: "asc" }, { fullName: "asc" }],
-    select: { id: true, fullName: true, isOwner: true },
+    select: { id: true, fullName: true, isOwner: true, isCoOwner: true },
   });
-  return rows;
+  // Сколько заказов сейчас в работе у каждого — подсказка, кому дать новый.
+  const busy = await tx.order.groupBy({
+    by: ["assignedMasterId"],
+    where: {
+      deletedAt: null,
+      assignedMasterId: { in: rows.map((r) => r.id) },
+      status: { group: { in: ["NEW", "WAITING", "IN_PROGRESS"] } },
+    },
+    _count: { _all: true },
+  });
+  const count = new Map(busy.map((b) => [b.assignedMasterId, b._count._all]));
+  return rows.map((r) => ({ ...r, active: count.get(r.id) ?? 0 }));
 }
 
 /**

@@ -15,6 +15,8 @@ import { effectiveTile, normalizeTile } from "./tile";
 import { forbidden } from "../../lib/errors";
 import { clientIp, writeAudit } from "../../lib/audit";
 import { debtList, debts } from "../../lib/debt";
+import { toLabels } from "../../lib/dictionaries";
+import { contentDisposition, writeXlsx } from "../data/tableFile";
 import { badRequest } from "../../lib/errors";
 import { Prisma } from "@prisma/client";
 import {
@@ -27,6 +29,9 @@ import {
   stageSortOf,
   STAGE_KEYS,
   DASHBOARD_VIEWS,
+  defaultView,
+  normalizeTable,
+  type TablePrefs,
   type DashboardPrefs,
   type DashboardView,
   type DebtorSort,
@@ -80,6 +85,8 @@ const cardSelect = {
   // «Примечание приёмщика» — элемент карточки (Андрей, 21.10.2026).
   receptionNote: true,
   total: true,
+  // Ярлыки — «Индивидуальные оповещения» (22.10.2026).
+  labelMarks: { orderBy: { setAt: "asc" }, select: { labelId: true, setAt: true, setBy: { select: { fullName: true } } } },
 } as const;
 
 type CardRow = Prisma.OrderGetPayload<{ select: typeof cardSelect }>;
@@ -127,6 +134,14 @@ async function prefsOf(req: Request): Promise<DashboardPrefs> {
   return normalizePrefs(row?.dashboardPrefs ?? null);
 }
 
+/** Виды таблицы мастерской («Сделать так у всех»), tenant.settings.tableViews. */
+async function workshopTableOf(req: Request): Promise<TablePrefs | null> {
+  const t = await withTenant(tenantOf(req), (tx) =>
+    tx.tenant.findUnique({ where: { id: tenantOf(req) }, select: { settings: true } })
+  );
+  return normalizeTable((t?.settings as Record<string, unknown> | null)?.tableViews ?? null);
+}
+
 /** Вид главной у мастерской по умолчанию (tenant.settings.dashboardView). */
 async function workshopViewOf(req: Request): Promise<DashboardView> {
   const t = await withTenant(tenantOf(req), (tx) =>
@@ -139,11 +154,26 @@ async function workshopViewOf(req: Request): Promise<DashboardView> {
 /** Заказ строкой таблицы на главной: всё, что есть в столбцах. */
 const tableSelect = {
   ...cardSelect,
+  kind: true,
   completedAt: true,
   issuedAt: true,
   completeness: true,
+  appearance: true,
   receptionNote: true,
-  customer: { select: { id: true, name: true, type: true, color: true, phone: true } },
+  devicePasscode: true,
+  storageLocation: true,
+  outsourceNumber: true,
+  diagnosis: true,
+  masterComment: true,
+  estimatedCost: true,
+  prepayment: true,
+  totalWork: true,
+  totalParts: true,
+  discount: true,
+  acceptedBy: { select: { fullName: true } },
+  customer: {
+    select: { id: true, name: true, type: true, color: true, phone: true, phone2: true, email: true, address: true, source: true, _count: { select: { orders: true } } },
+  },
   device: { select: { kind: true, brand: true, model: true, serial: true } },
 } as const;
 
@@ -180,11 +210,45 @@ async function tableOf(req: Request, mineWhere: Prisma.OrderWhereInput, contacts
       const last = await tx.orderStatusHistory.groupBy({ by: ["orderId"], where: { orderId: { in: part } }, _max: { createdAt: true } });
       for (const l of last) if (l._max.createdAt) since.set(l.orderId, l._max.createdAt);
     }
+    // Оплачено по заказу и последнее сообщение истории ремонта — для столбцов
+    // конфигуратора. Одним запросом на всё, а не по запросу на строку.
+    const ids = rows.map((o) => o.id);
+    const paid = new Map<string, number>();
+    const lastMsg = new Map<string, string>();
+    for (let i = 0; i < ids.length; i += 1000) {
+      const part = ids.slice(i, i + 1000);
+      if (money) {
+        const sums = await tx.transaction.groupBy({ by: ["orderId", "direction"], where: { deletedAt: null, orderId: { in: part } }, _sum: { amount: true } });
+        for (const x of sums) {
+          if (!x.orderId) continue;
+          const v = Number(x._sum.amount ?? 0) * (x.direction === "IN" ? 1 : -1);
+          paid.set(x.orderId, Math.round(((paid.get(x.orderId) ?? 0) + v) * 100) / 100);
+        }
+      }
+      const msgs = await tx.$queryRaw<Array<{ orderId: string; text: string }>>`
+        SELECT DISTINCT ON ("orderId") "orderId", LEFT(text, 200) AS text
+          FROM "OrderMessage"
+         WHERE "orderId" IN (${Prisma.join(part)}) AND "deletedAt" IS NULL AND text <> ''
+         ORDER BY "orderId", "createdAt" DESC`;
+      for (const m of msgs) lastMsg.set(m.orderId, m.text);
+    }
+    const marks = await tx.orderLabelMark.findMany({
+      where: { orderId: { in: ids } },
+      orderBy: { setAt: "asc" },
+      select: { orderId: true, labelId: true, setAt: true, setBy: { select: { fullName: true } } },
+    });
+    const labelsBy = new Map<string, Array<{ id: string; setAt: Date; setBy: string | null }>>();
+    for (const m of marks) labelsBy.set(m.orderId, [...(labelsBy.get(m.orderId) ?? []), { id: m.labelId, setAt: m.setAt, setBy: m.setBy?.fullName ?? null }]);
+    const cut = (v: string | null | undefined, n = 300) => (v ? v.slice(0, n) : null);
+    const n = (v: Prisma.Decimal | null) => (v === null ? null : Number(v));
+
     return rows.map((o) => ({
       id: o.id,
       number: o.number,
+      kind: o.kind,
       isUrgent: o.isUrgent,
       acceptedAt: o.acceptedAt,
+      acceptedBy: o.acceptedBy?.fullName ?? null,
       dueAt: o.dueAt,
       completedAt: o.completedAt,
       issuedAt: o.issuedAt,
@@ -192,11 +256,43 @@ async function tableOf(req: Request, mineWhere: Prisma.OrderWhereInput, contacts
       status: o.status,
       device: o.device,
       master: o.assignedMaster,
-      customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type, color: o.customer.color },
+      labels: labelsBy.get(o.id) ?? [],
+      customer: contacts
+        ? {
+            id: o.customer.id,
+            type: o.customer.type,
+            color: o.customer.color,
+            name: o.customer.name,
+            phone: o.customer.phone,
+            phone2: o.customer.phone2,
+            email: o.customer.email,
+            address: o.customer.address,
+            source: o.customer.source,
+            orders: o.customer._count.orders,
+          }
+        : { id: o.customer.id, type: o.customer.type, color: o.customer.color },
       complaint: o.complaint.length > 300 ? o.complaint.slice(0, 300) : o.complaint,
-      completeness: o.completeness,
-      receptionNote: o.receptionNote ? o.receptionNote.slice(0, 300) : null,
-      ...(money ? { total: Number(o.total), ...(owed.has(o.id) ? { debt: owed.get(o.id)!.due } : {}) } : {}),
+      completeness: toLabels(o.completeness),
+      appearance: toLabels(o.appearance),
+      receptionNote: cut(o.receptionNote),
+      passcode: o.devicePasscode,
+      storage: o.storageLocation,
+      outsource: o.outsourceNumber,
+      diagnosis: cut(o.diagnosis),
+      masterComment: cut(o.masterComment),
+      lastMessage: lastMsg.get(o.id) ?? null,
+      ...(money
+        ? {
+            total: Number(o.total),
+            estimate: n(o.estimatedCost),
+            prepay: n(o.prepayment),
+            works: n(o.totalWork),
+            parts: n(o.totalParts),
+            discount: n(o.discount),
+            paid: paid.get(o.id) ?? 0,
+            ...(owed.has(o.id) ? { debt: owed.get(o.id)!.due } : {}),
+          }
+        : {}),
     }));
   });
 }
@@ -351,6 +447,7 @@ summaryRouter.get(
             customer: contacts ? o.customer : { id: o.customer.id, type: o.customer.type, color: o.customer.color },
             complaint: o.complaint.length > 300 ? o.complaint.slice(0, 300) : o.complaint,
             note: o.receptionNote ? o.receptionNote.slice(0, 300) : null,
+            labels: o.labelMarks.map((m) => ({ id: m.labelId, setAt: m.setAt, setBy: m.setBy?.fullName ?? null })),
             // Сумма — только тем, кто видит деньги заказа.
             ...(money ? { total: Number(o.total) } : {}),
           })),
@@ -384,6 +481,9 @@ summaryRouter.get(
       workshopView,
       // Сумма и «С долгом» в таблице — тому, кто видит деньги заказов.
       ...(table ? { table, tableMoney: money } : {}),
+      // Виды таблицы: свои → мастерской → стандартный.
+      tableViews: prefs.table ?? (await workshopTableOf(req)) ?? { views: [defaultView()] },
+      tableViewsOwn: Boolean(prefs.table),
       tile,
       // Может ли человек вообще видеть деньги клиентов: от этого зависит,
       // есть ли в его настройках «Должники» и полоса просрочки.
@@ -412,6 +512,62 @@ summaryRouter.get(
       workshopView: await workshopViewOf(req),
       canShare: has(req, PERMISSIONS.SETTINGS_MANAGE),
     });
+  })
+);
+
+/**
+ * «Сделать так у всех» в конфигураторе таблицы: виды мастерской, личные
+ * сбрасываются — как у редактора карточки заказа. null — у всех стандартный.
+ */
+summaryRouter.put(
+  "/table/workshop",
+  ah(async (req, res) => {
+    if (!has(req, PERMISSIONS.SETTINGS_MANAGE)) throw forbidden("Таблицу у всех меняет тот, кто правит настройки мастерской");
+    const body = z.object({ table: z.unknown() }).parse(req.body ?? {});
+    const table = body.table === null ? null : normalizeTable(body.table);
+    if (body.table !== null && !table) throw badRequest("Не похоже на настройки таблицы");
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const t = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const { tableViews: _old, ...rest } = (t?.settings as Record<string, unknown> | null) ?? {};
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { settings: (table ? { ...rest, tableViews: table } : rest) as unknown as Prisma.InputJsonObject },
+      });
+      const reset = await tx.$executeRaw`UPDATE "User" SET "dashboardPrefs" = "dashboardPrefs" - 'table' WHERE "dashboardPrefs" ? 'table'`;
+      await writeAudit(tx, {
+        tenantId,
+        userId: userOf(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        diff: { tableViews: table ? table.views.map((v) => v.name).join(", ") : "стандартная таблица", personalReset: reset },
+        ip: clientIp(req),
+      });
+    });
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * Выгрузка вида таблицы в Excel: то, что человек видит, — его же столбцы и
+ * строки (уже отфильтрованные и отформатированные интерфейсом).
+ */
+summaryRouter.post(
+  "/table/export",
+  ah(async (req, res) => {
+    const body = z
+      .object({
+        name: z.string().max(60).default("Заказы"),
+        columns: z.array(z.object({ title: z.string().max(60), width: z.number().min(4).max(80).optional() })).min(1).max(60),
+        rows: z.array(z.array(z.union([z.string().max(2000), z.number(), z.null()])).max(60)).max(5000),
+      })
+      .parse(req.body ?? {});
+    const buf = await writeXlsx([{ name: body.name || "Заказы", columns: body.columns, rows: body.rows }]);
+    const file = `${(body.name || "Заказы").replace(/[\\/:*?"<>|]+/g, " ").trim() || "Заказы"} ${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", contentDisposition(file, "orders.xlsx"));
+    res.send(buf);
   })
 );
 

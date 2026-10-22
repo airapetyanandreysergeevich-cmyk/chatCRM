@@ -17,6 +17,12 @@ import { sendPush, type PushTarget } from "./push";
 
 /** Псевдороль в матрице настроек: владелец мастерской строкой в Role может и не быть. */
 export const OWNER_ROLE = "owner";
+/**
+ * Совладельцы — своим столбцом (22.10.2026). Раньше они сидели в столбце
+ * «Владелец», и всё, что отмечено владельцу (просрочка, лимит, «ремонт
+ * готов»), уходило и совладельцу — в том числе по заказам владельца.
+ */
+export const COOWNER_ROLE = "coowner";
 
 interface TenantNotice {
   event: NotificationEventCode;
@@ -36,11 +42,13 @@ interface TenantNotice {
 export async function notifyTenant(tenantId: string, notice: TenantNotice): Promise<void> {
   try {
     const targets = await withTenant(tenantId, async (tx) => {
-      const recipients = await resolveRecipients(tx, tenantId, notice);
+      const why = await resolveRecipients(tx, tenantId, notice);
+      const recipients = [...why.keys()];
       if (recipients.length === 0) return [];
 
       // Колокольчик в интерфейсе. Он работает и без Web Push, и без телефона —
-      // это основной канал, push только доносит его быстрее.
+      // это основной канал, push только доносит его быстрее. «Почему вам» —
+      // в каждом оповещении: по нему видно, какая галочка его прислала.
       await tx.notification.createMany({
         data: recipients.map((userId) => ({
           tenantId,
@@ -48,7 +56,7 @@ export async function notifyTenant(tenantId: string, notice: TenantNotice): Prom
           type: notice.event,
           title: notice.title,
           body: notice.body ?? null,
-          payload: { ...(notice.payload ?? {}), url: notice.url ?? null },
+          payload: { ...(notice.payload ?? {}), url: notice.url ?? null, why: why.get(userId) ?? null },
         })),
       });
 
@@ -81,33 +89,46 @@ async function resolveRecipients(
   tx: Prisma.TransactionClient,
   tenantId: string,
   notice: TenantNotice
-): Promise<string[]> {
+): Promise<Map<string, string>> {
   const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
   const matrix = readMatrix(tenant?.settings);
   const definition = NOTIFICATION_EVENTS.find((e) => e.code === notice.event);
+  const eventTitle = definition?.title ?? notice.event;
 
   const configured = matrix[notice.event];
   const keys = configured ?? [...(definition?.defaultRoles ?? [])];
+  // «Владелец» в умолчаниях и псевдороль owner — только сам владелец.
   const wantsOwner = keys.includes(OWNER_ROLE) || (!configured && keys.includes("Владелец"));
-  const roleKeys = keys.filter((k) => k !== OWNER_ROLE && k !== "Владелец");
+  const wantsCoOwner = keys.includes(COOWNER_ROLE);
+  const roleKeys = keys.filter((k) => k !== OWNER_ROLE && k !== COOWNER_ROLE && k !== "Владелец");
 
   const or: Prisma.UserWhereInput[] = [];
+  let roleIds: string[] = [];
   if (roleKeys.length) {
     // В настройках роли записаны id, в умолчаниях — названиями. Сводим к id,
     // чтобы найти роль и основной, и дополнительной у сотрудника.
-    const ids = configured
+    roleIds = configured
       ? roleKeys
       : (await tx.role.findMany({ where: { name: { in: roleKeys } }, select: { id: true } })).map((r) => r.id);
-    if (ids.length) or.push({ roleId: { in: ids } }, { extraRoleIds: { hasSome: ids } });
+    if (roleIds.length) or.push({ roleId: { in: roleIds } }, { extraRoleIds: { hasSome: roleIds } });
   }
-  if (wantsOwner) or.push({ isOwner: true }, { isCoOwner: true });
+  if (wantsOwner) or.push({ isOwner: true });
+  if (wantsCoOwner) or.push({ isCoOwner: true });
 
   const byRole = or.length
     ? await tx.user.findMany({
         where: { deletedAt: null, isActive: true, OR: or },
-        select: { id: true, isOwner: true, isCoOwner: true, roleId: true, extraRoleIds: true },
+        select: { id: true, isOwner: true, isCoOwner: true, roleId: true, extraRoleIds: true, notifyOwnOnly: true },
       })
     : [];
+
+  const roleRows = await tx.role.findMany({
+    where: { id: { in: [...new Set(byRole.flatMap((u) => [u.roleId, ...(u.extraRoleIds ?? [])]).filter((x): x is string => !!x))] } },
+    select: { id: true, name: true, permissions: true },
+  });
+  const roleById = new Map(roleRows.map((r) => [r.id, r]));
+  const rolesOf = (u: (typeof byRole)[number]) =>
+    [u.roleId, ...(u.extraRoleIds ?? [])].filter((id): id is string => !!id).map((id) => roleById.get(id)).filter((r) => !!r);
 
   // Личные события (назначен заказ, сообщение, ответ на согласование) — про
   // конкретный заказ. Отмеченная роль получает их, только если её люди видят
@@ -115,21 +136,40 @@ async function resolveRecipients(
   // мастеру чужие назначения, а открыть такой заказ он всё равно не мог.
   let allowed = byRole;
   if (definition?.hasDirectTarget && byRole.length) {
-    const roleIds = [...new Set(byRole.flatMap((u) => [u.roleId, ...(u.extraRoleIds ?? [])]).filter((x): x is string => !!x))];
-    const roles = roleIds.length
-      ? await tx.role.findMany({ where: { id: { in: roleIds } }, select: { id: true, permissions: true } })
-      : [];
-    const seesAll = new Set(roles.filter((r) => r.permissions.includes("orders.view.all")).map((r) => r.id));
     allowed = byRole.filter(
-      (u) => u.isOwner || u.isCoOwner || [u.roleId, ...(u.extraRoleIds ?? [])].some((id) => !!id && seesAll.has(id))
+      (u) => u.isOwner || u.isCoOwner || rolesOf(u).some((r) => r!.permissions.includes("orders.view.all"))
     );
   }
 
-  const recipients = new Set(allowed.map((u) => u.id));
-  if (definition?.hasDirectTarget && notice.targetUserId) recipients.add(notice.targetUserId);
-  if (definition?.hasDirectTarget) for (const id of notice.targetUserIds ?? []) recipients.add(id);
-  if (notice.exceptUserId) recipients.delete(notice.exceptUserId);
-  return [...recipients];
+  // «Только по моим заказам» (настройка самого сотрудника): событие про
+  // чужой заказ ему не уходит, даже если галочка роли стоит.
+  const orderId = typeof notice.payload?.orderId === "string" ? notice.payload.orderId : null;
+  if (orderId && allowed.some((u) => u.notifyOwnOnly)) {
+    const order = await tx.order.findFirst({ where: { id: orderId }, select: { assignedMasterId: true } });
+    allowed = allowed.filter((u) => !u.notifyOwnOnly || order?.assignedMasterId === u.id);
+  }
+
+  const out = new Map<string, string>();
+  for (const u of allowed) {
+    const matched = rolesOf(u).filter((r) => roleIds.includes(r!.id)).map((r) => r!.name);
+    const why =
+      wantsOwner && u.isOwner
+        ? `в «Оповещениях» для «${eventTitle}» отмечен «Владелец»`
+        : wantsCoOwner && u.isCoOwner
+          ? `в «Оповещениях» для «${eventTitle}» отмечены «Совладельцы»`
+          : matched.length
+            ? `в «Оповещениях» для «${eventTitle}» отмечена ваша роль «${matched[0]}»`
+            : `по настройке «Оповещений» для «${eventTitle}»`;
+    out.set(u.id, why);
+  }
+  if (definition?.hasDirectTarget && notice.targetUserId) {
+    out.set(notice.targetUserId, notice.event === "order.assigned" ? "вы назначены мастером этого заказа" : "вы мастер этого заказа");
+  }
+  if (definition?.hasDirectTarget) {
+    for (const id of notice.targetUserIds ?? []) if (!out.has(id)) out.set(id, "вы мастер этого заказа или уже писали в его историю");
+  }
+  if (notice.exceptUserId) out.delete(notice.exceptUserId);
+  return out;
 }
 
 // ------------------------------------------------------------------ платформа

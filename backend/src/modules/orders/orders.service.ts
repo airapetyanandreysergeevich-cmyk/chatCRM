@@ -38,7 +38,13 @@ export const orderInclude = {
   parts: { orderBy: { createdAt: "asc" } },
   // Фото из истории ремонта живут в своих сообщениях, среди снимков приёмки их нет.
   attachments: { where: { kind: { not: "MESSAGE" } }, orderBy: { createdAt: "asc" } },
+  // Ярлыки — «Индивидуальные оповещения» (modules/labels): кто и когда поставил.
+  labelMarks: { orderBy: { setAt: "asc" }, select: { labelId: true, setAt: true, setBy: { select: { fullName: true } } } },
 } satisfies Prisma.OrderInclude;
+
+/** Ярлыки заказа для интерфейса: id ярлыка, когда и кто поставил. */
+export const labelsOf = (marks: Array<{ labelId: string; setAt: Date; setBy: { fullName: string } | null }>) =>
+  marks.map((m) => ({ id: m.labelId, setAt: m.setAt, setBy: m.setBy?.fullName ?? null }));
 
 export type OrderWithRelations = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 
@@ -110,6 +116,7 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
     isUrgent: order.isUrgent,
     status: order.status,
     branch: order.branch,
+    labels: labelsOf(order.labelMarks),
 
     acceptedAt: order.acceptedAt,
     dueAt: order.dueAt,

@@ -21,7 +21,7 @@ const tenantOf = (req: Request) => currentTenantId(req)!;
 referenceRouter.get(
   "/",
   ah(async (req, res) => {
-    const [statuses, masters, services, completeness, appearance, complaint] = await withTenant(tenantOf(req), async (tx) => [
+    const [statuses, masters, services, completeness, appearance, complaint, labels] = await withTenant(tenantOf(req), async (tx) => [
       await tx.orderStatus.findMany({ orderBy: { sortOrder: "asc" } }),
       await listMasters(tx),
       // Прайс едет вместе со справочниками, чтобы подсказки в карточке
@@ -33,6 +33,8 @@ referenceRouter.get(
       await listQuickPicks(tx, "completeness"),
       await listQuickPicks(tx, "appearance"),
       await listQuickPicks(tx, "complaint"),
+      // Ярлыки заказов мастерской — «Индивидуальные оповещения».
+      await tx.orderLabel.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
     ] as const);
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true } });
 
@@ -61,6 +63,7 @@ referenceRouter.get(
         isInitial: s.isInitial,
       })),
       masters,
+      labels: labels.map((l) => ({ id: l.id, name: l.name, icon: l.icon, color: l.color, quickFilter: l.quickFilter, notify: l.notify })),
       services: services.map((s) => ({
         id: s.id,
         name: s.name,

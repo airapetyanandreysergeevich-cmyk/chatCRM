@@ -9,6 +9,11 @@ export const PERMISSIONS = {
   ORDERS_VIEW_DELIVERY: "orders.view.delivery",
   ORDERS_CREATE: "orders.create",
   ORDERS_EDIT: "orders.edit",
+  /**
+   * Назначает и меняет мастера у принятого заказа (22.10.2026). При приёме
+   * мастера выбирает тот, кто принимает, — это право для смены потом.
+   */
+  ORDERS_ASSIGN: "orders.assign",
   ORDERS_STATUS: "orders.status",
   ORDERS_STATUS_OWN: "orders.status.own",
   ORDERS_ISSUE: "orders.issue",
@@ -56,7 +61,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
     code: "MANAGER",
     name: "Управляющий",
     permissions: [
-      P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_STATUS, P.ORDERS_ISSUE,
+      P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_ASSIGN, P.ORDERS_STATUS, P.ORDERS_ISSUE,
       P.ORDERS_DELETE, P.ORDERS_CUSTOMER_CONTACTS, P.ORDERS_COST,
       P.CUSTOMERS_VIEW, P.CUSTOMERS_EDIT,
       P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_INVENTORY, P.STOCK_SELL,
@@ -133,6 +138,7 @@ export const PERMISSION_GROUPS: Array<{ group: string; items: Array<{ code: Perm
       { code: P.ORDERS_VIEW_DELIVERY, label: "Видит заказы на доставку" },
       { code: P.ORDERS_CREATE, label: "Принимает технику, создаёт заказы" },
       { code: P.ORDERS_EDIT, label: "Редактирует заказы" },
+      { code: P.ORDERS_ASSIGN, label: "Назначает и меняет мастера", hint: "При приёме мастера выбирает и приёмщик; менять потом — только с этим правом" },
       { code: P.ORDERS_STATUS, label: "Меняет статус любого заказа" },
       { code: P.ORDERS_STATUS_OWN, label: "Меняет статус своих заказов" },
       { code: P.ORDERS_ISSUE, label: "Выдаёт технику клиенту" },

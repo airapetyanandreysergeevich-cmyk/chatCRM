@@ -67,6 +67,8 @@ declare global {
       orderFolder?: OrderFolderBridge;
       /** Окно площадок для поиска запчастей — с версии 0.1.46. */
       markets?: MarketsBridge;
+      /** Обновление программы значком у часов — с версии 0.1.55 (lib/desktopUpdate). */
+      updates?: import("./desktopUpdate").UpdatesBridge;
     };
   }
 }

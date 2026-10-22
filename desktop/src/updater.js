@@ -114,7 +114,18 @@ class Updater {
     // Установщик у нас полный, «веб-установщиков» не выпускаем.
     this.au.disableWebInstaller = true;
 
-    this.au.on("download-progress", (p) => this.ui.progress(Math.max(0, Math.min(1, (p.percent || 0) / 100))));
+    this.au.on("download-progress", (p) => {
+      // Тихая загрузка в фоне — без полоски на значке: человек ничего не просил.
+      if (this.quietDownload) return;
+      this.ui.progress(Math.max(0, Math.min(1, (p.percent || 0) / 100)));
+    });
+    /**
+     * Обновление, о котором сказано значком у часов (ui.available):
+     * { version, notes, ready, download } — ready: загружено, можно ставить;
+     * download: Mac, «Скачать». null — новостей нет.
+     */
+    this.available = null;
+    this.quietDownload = false;
   }
 
   /** Фоновые проверки: через 15 секунд после запуска и раз в шесть часов. */
@@ -168,6 +179,12 @@ class Updater {
       return { result: "declined-before" };
     }
 
+    // Фоновая проверка без окна (22.10.2026): окно посреди работы кто-то
+    // нажимал по привычке и ждал с клиентом установки. Теперь обновление
+    // тихо загружается, а программа показывает значок у часов — ставят,
+    // когда удобно (act()).
+    if (!manual && this.ui.available) return this.quiet(info);
+
     const notes = notesText(info);
     const yes = await this.ui.ask(
       `Доступна новая версия ${info.version}`,
@@ -215,6 +232,53 @@ class Updater {
     this.state = "ready";
     this.readyInfo = info;
     return this.offerInstall(info);
+  }
+
+  /** Тихий путь: загрузить в фоне и сказать значком. Ошибки — только в журнал. */
+  async quiet(info) {
+    const notes = notesText(info);
+    if (this.openDownload) {
+      this.state = "idle";
+      this.readyInfo = info;
+      this.available = { version: info.version, notes, ready: false, download: true };
+      this.ui.available(this.available);
+      return { result: "available" };
+    }
+    this.state = "downloading";
+    this.quietDownload = true;
+    try {
+      await this.au.downloadUpdate();
+    } catch (err) {
+      this.state = "idle";
+      this.log(`фоновая загрузка обновления: ${err && err.message}`);
+      return { result: "download-failed" };
+    } finally {
+      this.quietDownload = false;
+    }
+    this.state = "ready";
+    this.readyInfo = info;
+    this.available = { version: info.version, notes, ready: true, download: false };
+    this.ui.available(this.available);
+    return { result: "ready" };
+  }
+
+  /**
+   * «Установить сейчас» со значка у часов. Спрашивать второй раз не надо —
+   * окно с «что нового» и предупреждением уже показала программа.
+   */
+  async act() {
+    if (this.state === "ready") return this.install();
+    if (this.available && this.available.download && this.openDownload && this.readyInfo) {
+      try {
+        await this.openDownload(this.readyInfo);
+        return { result: "opened" };
+      } catch (err) {
+        this.log(`открыть загрузку: ${err && err.message}`);
+        await this.ui.error("Не удалось открыть загрузку", "Скачайте новую версию на сайте finecrm.ru." + reason(err));
+        return { result: "error" };
+      }
+    }
+    return { result: "nothing" };
   }
 
   /** Обновление скачано: поставить сейчас или при выходе из программы. */

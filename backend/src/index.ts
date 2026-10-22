@@ -18,6 +18,7 @@ import { migrateRouter } from "./modules/migrate/migrate.routes";
 import { salaryRouter } from "./modules/salary/salary.routes";
 import { financeRouter } from "./modules/finance/finance.routes";
 import { ordersRouter } from "./modules/orders/orders.routes";
+import { labelsRouter, orderLabelsRouter } from "./modules/labels/labels.routes";
 import { messagesRouter } from "./modules/orders/messages.routes";
 import { purchasesRouter } from "./modules/purchases/purchases.routes";
 import { stockRouter } from "./modules/stock/stock.routes";
@@ -123,6 +124,8 @@ if (env.relayEnabled) app.use("/api/box", boxApiRouter);
 app.use("/api/platform", platformRouter);
 // История ремонта — раньше заказов: иначе /:id заказа перехватил бы адрес.
 app.use("/api/orders/:id/messages", messagesRouter);
+app.use("/api/orders/:id/labels", orderLabelsRouter);
+app.use("/api/order-labels", labelsRouter);
 app.use("/api/orders", ordersRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/summary", summaryRouter);

@@ -6,6 +6,9 @@ import { money } from "../lib/orders";
 import { STAGES } from "../lib/stages";
 import { DEFAULT_TILE, TILE_LABEL, tileRows, type TileElement, type TileKey, type TileLayout } from "../lib/tile";
 import type { BoardCard } from "../lib/workshop";
+import { LabelDot } from "../lib/labelIcons";
+import type { LabelDef } from "../lib/orders";
+import { formatDateTime } from "../lib/format";
 
 /**
  * Содержимое карточки заказа на главном экране — по раскладке из
@@ -33,10 +36,24 @@ function clampStyle(lines: number): CSSProperties {
 }
 
 /** Значение элемента или null, если у заказа его нет. tone — класс цвета. */
-function valueOf(k: TileKey, card: BoardCard): { node: ReactNode; tone?: string; style?: CSSProperties; copy?: object } | null {
+function valueOf(k: TileKey, card: BoardCard, defs?: LabelDef[]): { node: ReactNode; tone?: string; style?: CSSProperties; copy?: object } | null {
   switch (k) {
     case "number":
       return { node: card.number, tone: "font-mono text-ink-soft", copy: copyable("order", card.number) };
+    case "labels": {
+      const shown = (defs ?? []).filter((d) => card.labels?.some((m) => m.id === d.id));
+      if (!shown.length) return null;
+      return {
+        node: (
+          <span className="inline-flex items-center gap-1 align-middle" data-tile-labels>
+            {shown.map((d) => {
+              const m = card.labels!.find((x) => x.id === d.id)!;
+              return <LabelDot key={d.id} icon={d.icon} color={d.color} title={`${d.name} · ${m.setBy ? `${m.setBy}, ` : ""}${formatDateTime(m.setAt)}`} />;
+            })}
+          </span>
+        ),
+      };
+    }
     case "urgent":
       return card.isUrgent ? { node: <span className="tag tag-urgent px-2 py-[1px]">срочный</span> } : null;
     case "color": {
@@ -83,6 +100,7 @@ function valueOf(k: TileKey, card: BoardCard): { node: ReactNode; tone?: string;
 const GHOST: Record<TileKey, string> = {
   number: "Р-0000",
   urgent: "срочный",
+  labels: "ярлыки",
   color: "●",
   status: "статус",
   device: "техника",
@@ -99,9 +117,12 @@ export function TileBody({
   tile = DEFAULT_TILE,
   editing,
   firstRowPad = false,
+  labelDefs,
 }: {
   card: BoardCard;
   tile?: TileLayout;
+  /** Ярлыки мастерской — чтобы нарисовать кружки (Reference.labels). */
+  labelDefs?: LabelDef[];
   editing?: TileEditing;
   /** Место справа в первой строке под «⋯» (телефон: кнопка видна всегда). */
   firstRowPad?: boolean;
@@ -109,7 +130,7 @@ export function TileBody({
   const [over, setOver] = useState<{ k: TileKey; before: boolean } | null>(null);
   const items = tile.els
     .filter((e) => e.on)
-    .map((e) => ({ ...e, value: valueOf(e.k, card) }))
+    .map((e) => ({ ...e, value: valueOf(e.k, card, labelDefs) }))
     .filter((e) => editing || e.value);
   const rows = tileRows(items);
 

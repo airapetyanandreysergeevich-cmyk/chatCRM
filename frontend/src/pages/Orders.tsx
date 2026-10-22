@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { copyable, copyRow, deviceText } from "../components/CopyMenu";
 import { StatusPicker } from "../components/StatusPicker";
+import { MasterPicker } from "../components/MasterPicker";
+import { OrderLabels, canLabel } from "../components/OrderLabels";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { backState, useScrollMemory, useUrlSearch } from "../lib/listState";
 import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
@@ -83,6 +85,7 @@ const deviceTitle = (o: Order) =>
 
 export default function Orders() {
   const { can, me } = useAuth();
+  const myId = me?.kind === "tenant" ? me.user.id : null;
   const navigate = useNavigate();
   const [rows, setRows] = useState<Order[] | null>(null);
   // Вернулись из заказа — список на той же строке.
@@ -323,7 +326,7 @@ export default function Orders() {
                 // запросом: карточка подсветит ту самую запись.
                 to={o.foundMessage ? `/orders/${o.id}?found=${o.foundMessage.id}#history` : `/orders/${o.id}`}
                 state={backState(location.pathname, location.search)}
-                className="block"
+                className="group block"
                 data-order-row={o.id}
                 {...om.bind(menuFromOrder(o))}
                 {...copyRow(menuFromOrder(o).copy ?? [])}
@@ -379,6 +382,15 @@ export default function Orders() {
                       {/* Пустые ячейки на широком экране остаются на месте:
                           без этого колонки съезжают у заказов без мастера
                           или без суммы, и список перестаёт читаться сверху вниз. */}
+                      {/* Ярлыки — слева от статуса («Индивидуальные оповещения»). */}
+                      <span className="empty:hidden lg:empty:block lg:flex lg:w-[86px] lg:justify-end">
+                        <OrderLabels
+                          order={o}
+                          defs={om.reference?.labels}
+                          canEdit={!o.issuedAt && canLabel(can, myId, o.assignedMaster?.id)}
+                          onChanged={() => load(true)}
+                        />
+                      </span>
                       <span className="whitespace-nowrap lg:flex lg:w-[156px] lg:justify-end">
                         <StatusPicker
                           order={o}
@@ -388,11 +400,23 @@ export default function Orders() {
                         />
                       </span>
                       <span
-                        className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[104px] lg:text-right"
+                        className="empty:hidden lg:empty:block whitespace-nowrap lg:w-[120px] lg:text-right"
                         title={o.assignedMaster?.fullName}
                         {...copyable("text", o.assignedMaster?.fullName, "мастера")}
                       >
-                        {o.assignedMaster ? shortName(o.assignedMaster.fullName) : ""}
+                        {om.canAssign && !o.issuedAt ? (
+                          <MasterPicker
+                            number={o.number}
+                            master={o.assignedMaster}
+                            masters={om.reference?.masters}
+                            canChange
+                            onPick={(m) => void om.changeMaster(menuFromOrder(o), m, o.assignedMaster)}
+                          />
+                        ) : o.assignedMaster ? (
+                          shortName(o.assignedMaster.fullName)
+                        ) : (
+                          ""
+                        )}
                       </span>
                       <span
                         className={

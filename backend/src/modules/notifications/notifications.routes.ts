@@ -4,7 +4,7 @@ import { withPlatform, withTenant } from "../../lib/db";
 import { env, pushConfigured } from "../../lib/env";
 import { ah, badRequest, notFound } from "../../lib/errors";
 import { NOTIFICATION_EVENTS, isEventCode } from "../../lib/notificationEvents";
-import { OWNER_ROLE } from "../../lib/notify";
+import { COOWNER_ROLE, OWNER_ROLE } from "../../lib/notify";
 import { PERMISSIONS } from "../../lib/permissions";
 import { sendPush } from "../../lib/push";
 import {
@@ -229,6 +229,8 @@ notificationsRouter.get(
         title: n.title,
         body: n.body,
         url: (n.payload as { url?: string } | null)?.url ?? null,
+        // Почему пришло именно вам — какая галочка или что вы мастер заказа.
+        why: (n.payload as { why?: string } | null)?.why ?? null,
         readAt: n.readAt,
         createdAt: n.createdAt,
       })),
@@ -274,10 +276,10 @@ notificationsRouter.get(
       ?.notifications;
 
     res.json({
-      // Владелец — псевдороль: строкой в справочнике ролей он может и не быть,
-      // а оповещения получать должен.
-      // Совладельцы — в том же столбце: у них те же права, что у владельца.
-      roles: [{ id: OWNER_ROLE, name: "Владелец и совладельцы" }, ...data.roles],
+      // Владелец и совладельцы — псевдороли: строкой в справочнике ролей их
+      // может и не быть, а оповещения получать они должны. Своими столбцами
+      // (22.10.2026): отмеченное владельцу совладельцам больше не уходит.
+      roles: [{ id: OWNER_ROLE, name: "Владелец" }, { id: COOWNER_ROLE, name: "Совладельцы" }, ...data.roles],
       events: NOTIFICATION_EVENTS.map((e) => ({
         code: e.code,
         title: e.title,
@@ -298,6 +300,31 @@ notificationsRouter.get(
   })
 );
 
+/**
+ * Свои настройки оповещений сотрудника: «только по моим заказам» — событие
+ * про чужой заказ не приходит, даже если галочка роли стоит.
+ */
+notificationsRouter.get(
+  "/prefs",
+  ah(async (req, res) => {
+    const userId = userOf(req);
+    if (!userId) return res.json({ ownOnly: false, personal: false });
+    const u = await withTenant(tenantOf(req), (tx) => tx.user.findFirst({ where: { id: userId }, select: { notifyOwnOnly: true } }));
+    res.json({ ownOnly: !!u?.notifyOwnOnly, personal: true });
+  })
+);
+
+notificationsRouter.put(
+  "/prefs",
+  ah(async (req, res) => {
+    const userId = userOf(req);
+    if (!userId) throw notFound("Настройки оповещений есть только у сотрудников мастерской");
+    const { ownOnly } = z.object({ ownOnly: z.boolean() }).parse(req.body ?? {});
+    await withTenant(tenantOf(req), (tx) => tx.user.updateMany({ where: { id: userId }, data: { notifyOwnOnly: ownOnly } }));
+    res.json({ ownOnly });
+  })
+);
+
 notificationsRouter.put(
   "/settings",
   requirePermission(PERMISSIONS.SETTINGS_MANAGE),
@@ -310,7 +337,7 @@ notificationsRouter.put(
 
     await withTenant(tenantId, async (tx) => {
       const roles = await tx.role.findMany({ select: { id: true } });
-      const known = new Set([OWNER_ROLE, ...roles.map((r) => r.id)]);
+      const known = new Set([OWNER_ROLE, COOWNER_ROLE, ...roles.map((r) => r.id)]);
 
       // В настройки попадают только существующие роли этой мастерской:
       // иначе чужой id остался бы лежать в Json и однажды кого-то оповестил.

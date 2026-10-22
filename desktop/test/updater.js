@@ -185,6 +185,35 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
     check(none === null, "Mac: нет mac.json — обновлений нет, без ошибки");
   }
 
+  // Тихий путь (22.10.2026): фоновая проверка не спрашивает, а загружает и
+  // говорит значком у часов; ставят по «Установить сейчас» (act()).
+  {
+    const { up, log } = setup();
+    const said = [];
+    up.ui.available = (a) => said.push(a);
+    const r = await up.check({ manual: false });
+    check(r.result === "ready" && !log.some((l) => l.startsWith("ask")), "фоном: без окна — сразу загрузка");
+    check(log.includes("download") && !log.some((l) => l.startsWith("progress")), "загрузка тихая, без полоски на значке");
+    check(said.length === 1 && said[0].version === "0.2.0" && said[0].ready === true && said[0].notes.includes("Новое окно"), "значку сказано: версия, что нового, готово");
+    check(!log.includes("prepare") && !log.some((l) => l.startsWith("install:")), "сама ничего не ставит");
+    const again = await up.check({ manual: false });
+    check(again.result === "busy" && log.filter((l) => l === "download").length === 1, "следующая проверка не качает второй раз");
+    const go = await up.act();
+    check(go.result === "installing" && log.indexOf("prepare") < log.findIndex((l) => l.startsWith("install:")), "«Установить сейчас»: копия, остановка, установщик");
+  }
+  {
+    const { up, log } = setup({ downloadError: Object.assign(new Error("ECONNRESET"), { code: "ECONNRESET" }) });
+    const said = [];
+    up.ui.available = (a) => said.push(a);
+    const r = await up.check({ manual: false });
+    check(r.result === "download-failed" && !log.some((l) => l.startsWith("error")) && !said.length && up.state === "idle", "фоном оборвалась загрузка — без окна, значка нет, следующая попытка пройдёт");
+  }
+  {
+    const { up } = setup({ version: "0.1.0" });
+    up.ui.available = () => {};
+    check((await up.act()).result === "nothing", "нет обновления — «установить» ничего не делает");
+  }
+
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;
 })();

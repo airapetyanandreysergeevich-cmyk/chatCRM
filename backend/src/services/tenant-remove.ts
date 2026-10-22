@@ -63,12 +63,15 @@ const ORDER: readonly string[] = [
   // вложения ссылаются и на заказ, и на заявку — значит, после обеих
   "attachment",
   // заказы и всё, что к ним пришито (фото сообщений ушли вместе с вложениями)
+  "orderEvent",
+  "orderLabelMark",
   "orderMessage",
   "orderPart",
   "orderWork",
   "orderStatusHistory",
   "order",
   // справочники мастерской
+  "orderLabel",
   "deviceHint",
   "quickPick",
   "service",

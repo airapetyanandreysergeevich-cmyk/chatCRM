@@ -610,6 +610,7 @@ ordersRouter.post(
       await tx.orderStatusHistory.create({
         data: { tenantId, orderId: order.id, toStatusId: status.id, userId, comment: "Принято в работу" },
       });
+      if (order.assignedMasterId) await masterEvent(tx, tenantId, order.id, userId, null, order.assignedMasterId);
       await writeAudit(tx, {
         tenantId,
         userId,
@@ -842,9 +843,37 @@ function changesOf(before: Record<string, unknown>, after: Record<string, unknow
   return out;
 }
 
+/** «Назначен мастер» в истории ремонта: кто, кого и вместо кого. */
+async function masterEvent(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  orderId: string,
+  userId: string | null,
+  from: string | null,
+  to: string | null
+) {
+  const names = new Map(
+    (await tx.user.findMany({ where: { id: { in: [from, to].filter((x): x is string => !!x) } }, select: { id: true, fullName: true } })).map(
+      (u) => [u.id, u.fullName]
+    )
+  );
+  await tx.orderEvent.create({
+    data: {
+      tenantId,
+      orderId,
+      userId,
+      kind: "MASTER",
+      data: { from: from ? (names.get(from) ?? null) : null, to: to ? (names.get(to) ?? null) : null },
+    },
+  });
+}
+
 ordersRouter.patch(
   "/:id",
-  requirePermission(PERMISSIONS.ORDERS_EDIT),
+  // Править заказ — «Редактирует заказы»; сменить мастера — «Назначает и
+  // меняет мастера» (22.10.2026: приёмщик выбирает мастера при приёме, а
+  // менять потом — только с этим правом). Что именно меняют, видно ниже.
+  requirePermission(PERMISSIONS.ORDERS_EDIT, PERMISSIONS.ORDERS_ASSIGN),
   ah(async (req, res) => {
     const body = patchSchema.parse(req.body);
     const tenantId = tenantOf(req);
@@ -852,7 +881,14 @@ ordersRouter.patch(
     const assigned = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
-      if (body.assignedMasterId) await assertAssignable(tx, body.assignedMasterId);
+      const masterChanges = body.assignedMasterId !== undefined && body.assignedMasterId !== order.assignedMasterId;
+      if (masterChanges && !has(req, PERMISSIONS.ORDERS_ASSIGN)) {
+        throw forbidden("Менять мастера может тот, у кого есть право «Назначает и меняет мастера»");
+      }
+      const otherFields = Object.entries(body).some(([k, v]) => k !== "assignedMasterId" && v !== undefined);
+      if (otherFields && !has(req, PERMISSIONS.ORDERS_EDIT)) throw forbidden("Недостаточно прав");
+      if (body.assignedMasterId && masterChanges) await assertAssignable(tx, body.assignedMasterId);
+      if (masterChanges) await masterEvent(tx, tenantId, order.id, actorUserId(req), order.assignedMasterId, body.assignedMasterId ?? null);
 
       const { device: deviceIn, ...fields } = body;
       // Пустая строка из бланка — «стёрли»: храним null, как при приёме.

@@ -53,27 +53,110 @@ export interface DashboardPrefs {
 }
 
 /**
- * Главная таблицей (Андрей, 21.10.2026: «как в HelloClient»): строка на
- * заказ, столбцы на выбор. Храним, как и всё здесь, выключенное — новый
- * столбец сам встанет на место. Кроме тех, что по умолчанию выключены:
- * они перечислены в TABLE_OFF и включаются явно, списком shown.
+ * Главная таблицей (Андрей, 21.10.2026: «как в HelloClient»), с 22.10.2026 —
+ * с конфигуратором: несколько своих «видов» вкладками, в каждом — свой набор
+ * столбцов по порядку, ширина и перенос у каждого, сортировка, плотность,
+ * строка «Итого». Столбцы — ключи каталога (TABLE_COLS); что в них рисовать —
+ * знает интерфейс (frontend/src/lib/tableCols.ts).
  */
 export const DASHBOARD_VIEWS = ["board", "table"] as const;
 export type DashboardView = (typeof DASHBOARD_VIEWS)[number];
 
-export const TABLE_COLS = ["number", "created", "device", "status", "customer", "complaint", "master", "due", "total", "serial", "note", "since"] as const;
+export const TABLE_COLS = [
+  // заказ
+  "number", "created", "kind", "urgent", "status", "since", "due", "ready", "acceptedBy", "master", "outsource", "labels", "age", "storage",
+  // техника
+  "device", "dkind", "brand", "model", "serial", "completeness", "appearance", "passcode",
+  // клиент
+  "customer", "cname", "phone", "phone2", "email", "address", "source", "corders",
+  // работа
+  "complaint", "note", "diagnosis", "mcomment", "lastmsg",
+  // деньги
+  "estimate", "prepay", "works", "parts", "discount", "total", "paid", "debt",
+] as const;
 export type TableCol = (typeof TABLE_COLS)[number];
-/** Выключены, пока их не включат: серийник, примечание приёмщика, «в статусе». */
-export const TABLE_OFF: readonly TableCol[] = ["serial", "note", "since"];
-export const TABLE_SORTS = ["created", "-created", "number", "-number", "due", "-due", "total", "-total", "since", "-since"] as const;
 
-export interface TablePrefs {
-  /** Выключенные столбцы из обычных. */
-  hidden?: TableCol[];
-  /** Включённые из тех, что по умолчанию выключены. */
-  shown?: TableCol[];
+/** Столбцы вида по умолчанию — те, что были до конфигуратора. */
+export const DEFAULT_COLS: readonly TableCol[] = ["number", "created", "device", "status", "customer", "complaint", "master", "due", "total"];
+/** Выключенные по умолчанию столбцы первой таблицы (batch48) — для перевода старых настроек. */
+const LEGACY_OFF: readonly TableCol[] = ["serial", "note", "since"];
+
+export type ColWidth = "s" | "m" | "l";
+export interface TableColPrefs {
+  k: TableCol;
+  w?: ColWidth;
+  /** Переносить текст на вторую строку. */
+  wrap?: boolean;
+}
+export interface TableViewPrefs {
+  id: string;
+  name: string;
+  cols: TableColPrefs[];
+  /** «created» — по возрастанию, «-created» — по убыванию. */
+  sort?: string;
   dense?: boolean;
-  sort?: (typeof TABLE_SORTS)[number];
+  /** Строка «Итого» внизу. */
+  totals?: boolean;
+}
+export interface TablePrefs {
+  views: TableViewPrefs[];
+  active?: string;
+}
+
+export const MAX_VIEWS = 8;
+const MAX_COLS = TABLE_COLS.length;
+
+export const defaultView = (): TableViewPrefs => ({ id: "main", name: "Все в работе", cols: DEFAULT_COLS.map((k) => ({ k })) });
+
+const isCol = (k: unknown): k is TableCol => typeof k === "string" && (TABLE_COLS as readonly string[]).includes(k);
+
+/** Привести виды таблицы к правильному виду. Старые настройки (hidden/shown) — в один вид. */
+export function normalizeTable(raw: unknown): TablePrefs | null {
+  const obj = (v: unknown): Record<string, unknown> =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const t = obj(raw);
+  const views: TableViewPrefs[] = [];
+  if (Array.isArray(t.views)) {
+    const ids = new Set<string>();
+    for (const rv of t.views.slice(0, MAX_VIEWS)) {
+      const v = obj(rv);
+      const id = typeof v.id === "string" && /^[a-z0-9-]{1,24}$/i.test(v.id) && !ids.has(v.id) ? v.id : `v${views.length + 1}`;
+      ids.add(id);
+      const name = (typeof v.name === "string" ? v.name.trim() : "").slice(0, 40) || `Вид ${views.length + 1}`;
+      const seen = new Set<TableCol>();
+      const cols: TableColPrefs[] = [];
+      for (const rc of Array.isArray(v.cols) ? v.cols.slice(0, MAX_COLS) : []) {
+        const c = obj(rc);
+        if (!isCol(c.k) || seen.has(c.k)) continue;
+        seen.add(c.k);
+        const col: TableColPrefs = { k: c.k };
+        if (c.w === "s" || c.w === "m" || c.w === "l") col.w = c.w;
+        if (c.wrap === true) col.wrap = true;
+        cols.push(col);
+      }
+      // Номер и статус — всегда: без них строка не заказ.
+      if (!seen.has("number")) cols.unshift({ k: "number" });
+      if (!seen.has("status")) cols.splice(Math.min(cols.length, 3), 0, { k: "status" });
+      const view: TableViewPrefs = { id, name, cols };
+      if (typeof v.sort === "string" && isCol(v.sort.replace(/^-/, ""))) view.sort = v.sort;
+      if (v.dense === true) view.dense = true;
+      if (v.totals === true) view.totals = true;
+      views.push(view);
+    }
+  } else if (Array.isArray(t.hidden) || Array.isArray(t.shown) || t.dense !== undefined || t.sort !== undefined) {
+    // batch48: hidden — выключенные из обычных, shown — включённые из выключенных.
+    const hidden = new Set(Array.isArray(t.hidden) ? t.hidden : []);
+    const shown = new Set(Array.isArray(t.shown) ? t.shown : []);
+    const legacy: TableCol[] = ["number", "created", "device", "serial", "status", "since", "customer", "complaint", "note", "master", "due", "total"];
+    const view = defaultView();
+    view.cols = legacy.filter((k) => (LEGACY_OFF.includes(k) ? shown.has(k) : !hidden.has(k) || k === "number" || k === "status")).map((k) => ({ k }));
+    if (t.dense === true) view.dense = true;
+    if (typeof t.sort === "string" && isCol(t.sort.replace(/^-/, ""))) view.sort = t.sort;
+    views.push(view);
+  }
+  if (!views.length) return null;
+  const active = typeof t.active === "string" && views.some((v) => v.id === t.active) ? t.active : undefined;
+  return { views, ...(active ? { active } : {}) };
 }
 
 /**
@@ -98,15 +181,8 @@ export const prefsSchema = z
     hidden: z.array(z.string()).max(20).optional(),
     panels: z.record(z.string(), panelSchema).optional(),
     view: z.string().max(10).nullable().optional(),
-    table: z
-      .object({
-        hidden: z.array(z.string().max(20)).max(30).optional(),
-        shown: z.array(z.string().max(20)).max(30).optional(),
-        dense: z.boolean().optional(),
-        sort: z.string().max(12).optional(),
-      })
-      .strip()
-      .optional(),
+    // Виды таблицы разбирает normalizeTable — здесь только предел размера.
+    table: z.unknown().optional(),
   })
   .strip();
 
@@ -151,20 +227,8 @@ export function normalizePrefs(raw: unknown): DashboardPrefs {
 
   const out: DashboardPrefs = { order, hidden, panels };
   if (typeof p.view === "string" && (DASHBOARD_VIEWS as readonly string[]).includes(p.view)) out.view = p.view as DashboardView;
-  const t = obj(p.table);
-  const cols = (v: unknown, keep: (c: TableCol) => boolean) =>
-    [...new Set(strings(v))].filter((c): c is TableCol => (TABLE_COLS as readonly string[]).includes(c) && keep(c as TableCol));
-  const table: TablePrefs = {};
-  // Номер и статус не выключаются: без них строка — не заказ.
-  const tHidden = cols(t.hidden, (c) => !TABLE_OFF.includes(c) && c !== "number" && c !== "status");
-  const tShown = cols(t.shown, (c) => TABLE_OFF.includes(c));
-  if (tHidden.length) table.hidden = tHidden;
-  if (tShown.length) table.shown = tShown;
-  if (t.dense === true) table.dense = true;
-  if (typeof t.sort === "string" && (TABLE_SORTS as readonly string[]).includes(t.sort) && t.sort !== "-created") {
-    table.sort = t.sort as TablePrefs["sort"];
-  }
-  if (Object.keys(table).length) out.table = table;
+  const table = normalizeTable(p.table);
+  if (table) out.table = table;
   return out;
 }
 

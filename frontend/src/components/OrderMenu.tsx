@@ -6,6 +6,7 @@ import { masterLabel, ordersApi, type Order, type OrderStatus, type Reference, t
 import { smsApi, type ApprovalHint, type ReadyHint, type SmsKind } from "../lib/sms";
 import type { BoardCard } from "../lib/workshop";
 import { copyText, ORDER_MENU_EVENT } from "./CopyMenu";
+import { LabelDot } from "../lib/labelIcons";
 import {
   IconCamera,
   IconFolder,
@@ -20,6 +21,7 @@ import {
   IconSearch,
   IconSms,
   IconStatusProgress,
+  IconTag,
   IconUrgent,
   IconWarranty,
 } from "./icons";
@@ -62,6 +64,8 @@ export interface MenuOrder {
   phone?: string | null;
   /** Что предложить скопировать: «номер заказа» — «Р-…», «клиента» — имя… */
   copy?: Array<[string, string]>;
+  /** id ярлыков на заказе — для «Ярлыки ›» в меню. */
+  labels?: string[];
 }
 
 /** Что копировать из заказа — пункты «Копировать» в меню и строка целиком. */
@@ -91,6 +95,7 @@ export const menuFromBoard = (c: BoardCard): MenuOrder => ({
   completed: c.status.group === "DONE",
   issued: false,
   copy: orderCopyItems({ number: c.number, customer: c.customer, device: c.device }),
+  labels: c.labels?.map((l) => l.id) ?? [],
 });
 
 export const menuFromOrder = (o: Order): MenuOrder => ({
@@ -103,6 +108,7 @@ export const menuFromOrder = (o: Order): MenuOrder => ({
   issued: !!o.issuedAt,
   phone: o.customer.phone ?? null,
   copy: orderCopyItems({ number: o.number, customer: o.customer, device: o.device, serial: o.device?.serial }),
+  labels: o.labels?.map((l) => l.id) ?? [],
 });
 
 type Dialog =
@@ -203,6 +209,34 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
       } catch (err) {
         await changed.current();
         fail(err, "Не удалось сменить статус");
+      }
+    },
+    [say, fail]
+  );
+
+  /**
+   * Сменить мастера — из списка заказов и таблицы (MasterPicker), с
+   * «Отменить» внизу, как у статуса. Назначенному уходит оповещение.
+   */
+  const changeMaster = useCallback(
+    async (o: MenuOrder, to: { id: string; fullName: string } | null, from: { id: string; fullName: string } | null) => {
+      if ((to?.id ?? null) === (from?.id ?? null)) return;
+      try {
+        await ordersApi.assignMaster(o.id, to?.id ?? null);
+        await changed.current();
+        say({
+          text: `${o.number} — ${to ? `мастер: ${to.fullName}` : "мастер снят"}`,
+          undo: () => {
+            setToast(null);
+            ordersApi
+              .assignMaster(o.id, from?.id ?? null)
+              .then(() => changed.current())
+              .then(() => say({ text: `${o.number} — ${from ? `снова ${from.fullName}` : "снова без мастера"}` }))
+              .catch((err) => fail(err, "Не удалось вернуть мастера"));
+          },
+        });
+      } catch (err) {
+        fail(err, "Не удалось назначить мастера");
       }
     },
     [say, fail]
@@ -449,6 +483,12 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
                   .catch((err) => fail(err, "Не получилось"));
               case "copy":
                 return void copyText(o.number).then((ok) => say({ text: ok ? `Скопировано: ${o.number}` : "Не удалось скопировать", tone: ok ? undefined : "error" }));
+              case "label":
+                return void ordersApi
+                  .setLabel(o.id, a.labelId, a.on)
+                  .then(() => changed.current())
+                  .then(() => say({ text: `${o.number} — ${a.on ? "поставлен" : "снят"} ярлык «${a.name}»` }))
+                  .catch((err) => fail(err, "Не удалось"));
               case "copyText":
                 return void copyText(a.text).then((ok) => say({ text: ok ? `Скопировано: ${a.text}` : "Не удалось скопировать", tone: ok ? undefined : "error" }));
               case "repeat":
@@ -459,6 +499,9 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
           }}
           perms={{
             edit: can("orders.edit"),
+            // Мастер — право «Назначает и меняет мастера» (22.10.2026).
+            assign: can("orders.assign"),
+            labels: !open.o.issued && (can("orders.edit", "orders.status", "orders.assign") || (can("orders.status.own") && !!myId && open.o.masterId === myId)),
             work: can("orders.edit") || (!!myId && open.o.masterId === myId),
             del: can("orders.delete"),
             issue: can("orders.issue") && open.o.completed && !open.o.issued,
@@ -491,7 +534,7 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
     </>
   );
 
-  return { bind, openFrom, element, changeStatus, canStatus, reference: ref, say };
+  return { bind, openFrom, element, changeStatus, canStatus, changeMaster, canAssign: can("orders.assign"), reference: ref, reloadReference: () => ordersApi.reference().then(setRef).catch(() => undefined), say };
 }
 
 // ---------------------------------------------------------------- само меню
@@ -501,6 +544,7 @@ type Action =
   | { kind: "print"; doc: "intake" | "act" }
   | { kind: "status"; status: OrderStatus }
   | { kind: "copyText"; text: string }
+  | { kind: "label"; labelId: string; name: string; on: boolean }
   | { kind: "master"; masterId: string | null; name: string };
 
 const GROUP_LABEL: Partial<Record<StatusGroup, string>> = {
@@ -521,12 +565,12 @@ function OrderMenu({
   at: Open;
   reference: Reference | null;
   canStatus: boolean;
-  perms: { edit: boolean; work: boolean; del: boolean; issue: boolean; reopen: boolean; repeat: boolean; folder: boolean };
+  perms: { edit: boolean; assign: boolean; labels: boolean; work: boolean; del: boolean; issue: boolean; reopen: boolean; repeat: boolean; folder: boolean };
   act: (a: Action) => void;
   onClose: () => void;
 }) {
   const o = at.o;
-  const [view, setView] = useState<"main" | "status" | "master" | "copy">("main");
+  const [view, setView] = useState<"main" | "status" | "master" | "copy" | "labels">("main");
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: at.x, top: at.y, ready: at.sheet });
   const [sms, setSms] = useState<{ send: boolean; ask: boolean } | null>(null);
@@ -647,6 +691,23 @@ function OrderMenu({
         </p>
       </>
     );
+  } else if (view === "labels") {
+    body = (
+      <>
+        <MenuItem big={big} icon={<IconChevronLeft className={ico} />} onClick={() => setView("main")}>
+          Ярлыки
+        </MenuItem>
+        <Sep />
+        {(reference?.labels ?? []).map((l) => {
+          const on = (o.labels ?? []).includes(l.id);
+          return (
+            <MenuItem big={big} key={l.id} checked={on} icon={<LabelDot icon={l.icon} color={l.color} size="sm" />} onClick={() => act({ kind: "label", labelId: l.id, name: l.name, on: !on })}>
+              {l.name}
+            </MenuItem>
+          );
+        })}
+      </>
+    );
   } else if (view === "copy") {
     const items = o.copy ?? [];
     body = (
@@ -697,7 +758,12 @@ function OrderMenu({
             Статус
           </MenuItem>
         )}
-        {perms.edit && (
+        {perms.labels && (reference?.labels?.length ?? 0) > 0 && (
+          <MenuItem big={big} icon={<IconTag className={ico} />} sub onClick={() => setView("labels")} hint={(o.labels?.length ?? 0) ? String(o.labels!.length) : undefined}>
+            Ярлыки
+          </MenuItem>
+        )}
+        {perms.assign && (
           <MenuItem big={big} icon={<IconPerson className={ico} />} sub disabled={!reference} onClick={() => setView("master")}>
             Мастер
           </MenuItem>
@@ -717,7 +783,7 @@ function OrderMenu({
             Добавить фото…
           </MenuItem>
         )}
-        {(canStatus || perms.edit || perms.work) && <Sep />}
+        {(canStatus || perms.edit || perms.assign || perms.work) && <Sep />}
         <MenuItem big={big} icon={<IconPrint className={ico} />} onClick={() => act({ kind: "print", doc: "intake" })}>
           Квитанция…
         </MenuItem>

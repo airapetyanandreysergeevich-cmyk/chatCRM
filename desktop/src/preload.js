@@ -31,6 +31,16 @@ contextBridge.exposeInMainWorld("setup", {
  * На компьютере сотрудника и в облаке ответ — «не здесь».
  */
 contextBridge.exposeInMainWorld("finecrmDesktop", {
+  // Обновление программы: значок у часов вместо всплывающего окна (updater.js).
+  updates: {
+    state: () => ipcRenderer.invoke("desktop:update-state"),
+    install: () => ipcRenderer.invoke("desktop:update-install"),
+    onChange: (fn) => {
+      const h = (_e, data) => fn(data);
+      ipcRenderer.on("desktop:update", h);
+      return () => ipcRenderer.removeListener("desktop:update", h);
+    },
+  },
   backups: {
     status: () => ipcRenderer.invoke("desktop:backups-status"),
     addPlace: () => ipcRenderer.invoke("desktop:backups-add"),

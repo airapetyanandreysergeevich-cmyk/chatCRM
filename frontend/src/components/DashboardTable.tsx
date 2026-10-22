@@ -1,30 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { copyable, copyRow, deviceText } from "./CopyMenu";
 import { orderCopyItems, type MenuOrder, type useOrderMenu } from "./OrderMenu";
 import { StatusPicker } from "./StatusPicker";
-import { IconOrders, IconPlus, IconUrgent } from "./icons";
+import { MasterPicker } from "./MasterPicker";
+import { OrderLabels, canLabel } from "./OrderLabels";
+import { TableConfigurator } from "./TableConfigurator";
+import { IconDownload, IconOrders, IconPlus, IconUrgent } from "./icons";
 import { Button, EmptyState, SearchInput } from "./ui";
 import { useAuth } from "../lib/auth";
 import { nameStyle } from "../lib/customerColor";
 import { dueLabel, formatDate, plural, shortName } from "../lib/format";
+import { LabelDot } from "../lib/labelIcons";
 import { money, type OrderStatus } from "../lib/orders";
 import { STAGES } from "../lib/stages";
-import { TABLE_OFF, type DashboardPrefs, type TableCol, type TableRow, type TablePrefs, type TableSort } from "../lib/workshop";
+import { COL, DEFAULT_VIEW, colFlex, colPx, deviceLine, moneyText, type ColSpec } from "../lib/tableCols";
+import { summaryApi, type DashboardPrefs, type TablePrefs, type TableRow, type TableViewPrefs } from "../lib/workshop";
 
 /**
- * Главная таблицей — вариант «А» (Андрей, 21.10.2026, по образцу HelloClient).
+ * Главная таблицей — вариант «А» (Андрей, 21.10.2026, по образцу HelloClient),
+ * с 22.10.2026 — с конфигуратором.
  *
- * Строка на заказ, сверху — быстрые фильтры по тому, что требует внимания
- * («Статус дольше нормы», «Просрочены по сроку», «Без мастера»…), под ними —
- * статусы с числами. Статус меняется щелчком по таблетке, любое поле —
- * копируется правой кнопкой (там же «всё строкой» и «Меню заказа…»), по
- * свободному месту строки — обычное меню заказа.
+ * Строка на заказ, сверху — вкладки видов (у каждого свои столбцы), быстрые
+ * фильтры по тому, что требует внимания, и статусы с числами. Статус и мастер
+ * меняются щелчком, ярлыки — щелчком по кружкам, любое поле копируется правой
+ * кнопкой (там же «всё строкой» и «Меню заказа…»), по свободному месту строки —
+ * обычное меню заказа.
  *
  * Сервер присылает все заказы в работе разом (и выданные с долгом — тому, кто
  * видит деньги), а фильтрует, ищет и сортирует уже браузер: щелчок по фильтру
- * не должен ждать ответа. Фильтр и поиск — в адресе страницы: вернулись из
- * заказа — таблица та же.
+ * не должен ждать ответа. Фильтр, поиск и вид — в адресе страницы: вернулись
+ * из заказа — таблица та же.
  *
  * На телефоне строки становятся карточками: таблица в девять столбцов на
  * узком экране не читается, а прокручивать её вбок неудобно.
@@ -49,9 +55,16 @@ const isOverdue = (r: TableRow) => isActive(r) && r.status.group !== "DONE" && !
 const waitsParts = (r: TableRow) => isActive(r) && /запчаст|детал/i.test(r.status.name);
 const readyIdle = (r: TableRow) => isActive(r) && r.status.group === "DONE" && days(r.completedAt ?? r.statusSince) >= READY_DAYS;
 
-type QuickKey = "all" | "stale" | "overdue" | "nomaster" | "debt" | "parts" | "ready";
+interface Quick {
+  key: string;
+  label: string;
+  hint: string;
+  test: (r: TableRow) => boolean;
+  money?: boolean;
+  dot?: { icon: string; color: string };
+}
 
-const QUICK: Array<{ key: QuickKey; label: string; hint: string; test: (r: TableRow) => boolean; money?: boolean }> = [
+const QUICK: Quick[] = [
   { key: "all", label: "Все в работе", hint: "Все заказы, которые ещё не выданы", test: isActive },
   {
     key: "stale",
@@ -66,49 +79,6 @@ const QUICK: Array<{ key: QuickKey; label: string; hint: string; test: (r: Table
   { key: "ready", label: "Готовы, не забрали", hint: `Готовы больше ${READY_DAYS} дн. назад, а клиент не пришёл`, test: readyIdle },
 ];
 
-interface ColDef {
-  key: TableCol;
-  label: string;
-  /** Чем сортировать по щелчку на заголовке. */
-  sort?: "created" | "number" | "due" | "total" | "since";
-  /** Классы ячейки: ширина, выравнивание. */
-  cls: string;
-  /**
-   * Ширина: постоянная в пикселях или доля оставшегося места. Таблица с
-   * постоянной раскладкой (table-fixed): иначе длинная жалоба или имя
-   * растягивали свой столбец, и «Срок» с «Суммой» уезжали за край.
-   */
-  w?: number;
-  money?: boolean;
-}
-
-const COLS: ColDef[] = [
-  { key: "number", label: "Номер", sort: "number", cls: "whitespace-nowrap", w: 118 },
-  { key: "created", label: "Создан", sort: "created", cls: "whitespace-nowrap", w: 84 },
-  { key: "device", label: "Устройство", cls: "" },
-  { key: "serial", label: "Серийный №", cls: "", w: 130 },
-  { key: "status", label: "Статус", cls: "", w: 152 },
-  { key: "since", label: "В статусе", sort: "since", cls: "whitespace-nowrap", w: 92 },
-  { key: "customer", label: "Клиент", cls: "" },
-  { key: "complaint", label: "Неисправность", cls: "" },
-  { key: "note", label: "Примечание", cls: "" },
-  { key: "master", label: "Мастер", cls: "truncate whitespace-nowrap", w: 100 },
-  { key: "due", label: "Срок", sort: "due", cls: "truncate whitespace-nowrap", w: 128 },
-  { key: "total", label: "Сумма", sort: "total", cls: "whitespace-nowrap text-right", w: 98, money: true },
-];
-
-/** Меньше этого таблица не сжимается — дальше прокрутка внутри неё, а не каша. */
-const minTable = (cols: TableCol[]) =>
-  cols.reduce((n, c) => n + (COLS.find((x) => x.key === c)?.w ?? 110), 16);
-
-export function visibleCols(t: TablePrefs | undefined, seesMoney: boolean): TableCol[] {
-  return COLS.filter((c) => {
-    if (c.money && !seesMoney) return false;
-    if (TABLE_OFF.includes(c.key)) return !!t?.shown?.includes(c.key);
-    return !t?.hidden?.includes(c.key);
-  }).map((c) => c.key);
-}
-
 const menuOf = (r: TableRow): MenuOrder => ({
   id: r.id,
   number: r.number,
@@ -119,18 +89,31 @@ const menuOf = (r: TableRow): MenuOrder => ({
   issued: !!r.issuedAt,
   phone: r.customer.phone ?? null,
   copy: orderCopyItems({ number: r.number, customer: r.customer, device: r.device, serial: r.device?.serial }),
+  labels: r.labels?.map((l) => l.id) ?? [],
 });
 
-const deviceLine = (r: TableRow) => [r.device?.kind, r.device?.brand, r.device?.model].filter(Boolean).join(" ") || "Техника не указана";
 const digits = (s: string) => s.replace(/\D+/g, "");
 
 /** Подходит ли заказ под слова поиска: номер, клиент, телефон, техника, серийник, жалоба, мастер. */
 function matches(r: TableRow, words: string[]) {
-  const hay = [r.number, r.customer.name, r.customer.phone, deviceLine(r), r.device?.serial, r.complaint, r.master?.fullName, r.receptionNote, ...r.completeness]
+  const hay = [
+    r.number,
+    r.customer.name,
+    r.customer.phone,
+    r.customer.phone2,
+    deviceLine(r),
+    r.device?.serial,
+    r.complaint,
+    r.master?.fullName,
+    r.receptionNote,
+    r.outsource,
+    r.storage,
+    ...r.completeness,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLocaleLowerCase("ru-RU");
-  const phone = digits(r.customer.phone ?? "");
+  const phone = digits(`${r.customer.phone ?? ""} ${r.customer.phone2 ?? ""}`);
   // Телефон — по цифрам: «9021739851» находит «+7 902 173-98-51».
   return words.every((w) => {
     const dw = digits(w);
@@ -138,69 +121,87 @@ function matches(r: TableRow, words: string[]) {
   });
 }
 
-function sorter(sort: TableSort): (a: TableRow, b: TableRow) => number {
+function sorter(sort: string): (a: TableRow, b: TableRow) => number {
   const dir = sort.startsWith("-") ? -1 : 1;
-  const key = sort.replace(/^-/, "");
-  const t = (v: string | null | undefined) => (v ? new Date(v).getTime() : Number.POSITIVE_INFINITY);
-  const val = (r: TableRow): number => {
-    switch (key) {
-      case "number":
-        return Number(r.number.replace(/\D+/g, "")) || 0;
-      case "due":
-        return t(r.dueAt);
-      case "total":
-        return r.total ?? 0;
-      case "since":
-        return new Date(r.statusSince).getTime();
-      default:
-        return new Date(r.acceptedAt).getTime();
-    }
-  };
+  const spec = COL.get(sort.replace(/^-/, "")) ?? COL.get("created")!;
+  const val = spec.sort ?? (() => 0);
+  const cmp = (x: number | string, y: number | string) =>
+    typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ru");
   // Срочные — всегда сверху: так же, как на доске.
-  return (a, b) => Number(b.isUrgent) - Number(a.isUrgent) || dir * (val(a) - val(b)) || b.acceptedAt.localeCompare(a.acceptedAt);
+  return (a, b) => Number(b.isUrgent) - Number(a.isUrgent) || dir * cmp(val(a), val(b)) || b.acceptedAt.localeCompare(a.acceptedAt);
 }
 
-const withTable = (prefs: DashboardPrefs, patch: Partial<TablePrefs>): DashboardPrefs => {
-  const t: TablePrefs = { ...(prefs.table ?? {}), ...patch };
-  const clean: TablePrefs = {};
-  if (t.hidden?.length) clean.hidden = t.hidden;
-  if (t.shown?.length) clean.shown = t.shown;
-  if (t.dense) clean.dense = true;
-  if (t.sort && t.sort !== "-created") clean.sort = t.sort;
-  const next = { ...prefs };
-  if (Object.keys(clean).length) next.table = clean;
-  else delete next.table;
-  return next;
-};
+/** Виды таблицы, где изменён один: остальные — как были. */
+const replaceView = (table: TablePrefs, view: TableViewPrefs): TablePrefs => ({
+  ...table,
+  views: table.views.map((v) => (v.id === view.id ? view : v)),
+});
+
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
 
 export function DashboardTable({
   rows,
   prefs,
+  views,
   seesMoney,
+  contacts,
   om,
   onPrefs,
+  onShared,
+  onReload,
 }: {
   rows: TableRow[];
   prefs: DashboardPrefs;
-  /** Видит ли человек деньги клиентов: столбец «Сумма» и фильтр «С долгом». */
+  /** Действующие виды: свои → мастерской → стандартный (сервер, tableViews). */
+  views: TablePrefs;
+  /** Видит ли человек деньги заказов: суммы и фильтр «С долгом». */
   seesMoney: boolean;
+  /** Видит ли контакты клиентов. */
+  contacts: boolean;
   om: Om;
   onPrefs: (next: DashboardPrefs) => void;
+  /** «Сделать так у всех» прошло — перечитать. */
+  onShared: () => void;
+  /** Перечитать строки (после ярлыка). */
+  onReload: () => unknown;
 }) {
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, me } = useAuth();
+  const myId = me?.kind === "tenant" ? me.user.id : null;
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(params.get("q") ?? "");
   const [shown, setShown] = useState(PAGE);
-  const [colsOpen, setColsOpen] = useState(false);
+  const [config, setConfig] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const quick = (QUICK.find((x) => x.key === params.get("f"))?.key ?? "all") as QuickKey;
+  // Свои виды — из настроек, что уже на экране (правка видна сразу, до
+  // ответа сервера); нет своих — мастерской или стандартный.
+  const eff = prefs.table ?? views;
+  const list = eff.views.length ? eff.views : [DEFAULT_VIEW];
+  const activeId = params.get("v") ?? eff.active ?? list[0].id;
+  const view = list.find((v) => v.id === activeId) ?? list[0];
+  const dense = !!view.dense;
+  const sort = view.sort ?? "-created";
+  const labelDefs = om.reference?.labels ?? [];
+
+  const allowed = (c: ColSpec | undefined) => !!c && (!c.money || seesMoney) && (!c.contacts || contacts);
+  const cols = view.cols.filter((c) => allowed(COL.get(c.k)));
+
+  const quickList: Quick[] = [
+    ...QUICK.filter((x) => !x.money || seesMoney),
+    // Ярлыки с галочкой «кнопкой в быстрых фильтрах» — рядом с остальными.
+    ...labelDefs
+      .filter((l) => l.quickFilter)
+      .map((l) => ({
+        key: `label:${l.id}`,
+        label: l.name,
+        hint: `С ярлыком «${l.name}»`,
+        test: (r: TableRow) => isActive(r) && !!r.labels?.some((m) => m.id === l.id),
+        dot: { icon: l.icon, color: l.color },
+      })),
+  ];
+  const quick = quickList.find((x) => x.key === params.get("f"))?.key ?? "all";
   const statusId = params.get("st");
-  const table = prefs.table;
-  const dense = !!table?.dense;
-  const sort: TableSort = table?.sort ?? "-created";
-  const cols = visibleCols(table, seesMoney);
-  const quickList = QUICK.filter((x) => !x.money || seesMoney);
 
   // Несколько ключей — одним переходом: два setParams подряд читают один и
   // тот же старый адрес, и второй затирал первый.
@@ -226,7 +227,7 @@ export function DashboardTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  useEffect(() => setShown(PAGE), [quick, statusId, q]);
+  useEffect(() => setShown(PAGE), [quick, statusId, q, view.id]);
 
   const words = useMemo(
     () =>
@@ -237,8 +238,9 @@ export function DashboardTable({
     [q]
   );
   const searched = useMemo(() => (words.length ? rows.filter((r) => matches(r, words)) : rows), [rows, words]);
-  const counts = useMemo(() => new Map(quickList.map((x) => [x.key, searched.filter(x.test).length])), [searched, quickList]);
-  const byQuick = useMemo(() => searched.filter(QUICK.find((x) => x.key === quick)!.test), [searched, quick]);
+  const counts = new Map(quickList.map((x) => [x.key, searched.filter(x.test).length]));
+  const quickTest = quickList.find((x) => x.key === quick)!.test;
+  const byQuick = useMemo(() => searched.filter(quickTest), [searched, quickTest]);
 
   // Статусы с числами — в порядке статусов мастерской, только непустые.
   const statusChips = useMemo(() => {
@@ -251,15 +253,31 @@ export function DashboardTable({
   }, [byQuick, om.reference]);
 
   const filtered = useMemo(() => {
-    const list = statusId ? byQuick.filter((r) => r.status.id === statusId) : byQuick;
-    return [...list].sort(sorter(sort));
+    const l = statusId ? byQuick.filter((r) => r.status.id === statusId) : byQuick;
+    return [...l].sort(sorter(sort));
   }, [byQuick, statusId, sort]);
   const page = filtered.slice(0, shown);
 
-  const sortBy = (key: NonNullable<ColDef["sort"]>) => {
-    // Первый щелчок: даты и суммы — сначала большие, номер — сначала новые.
-    const next: TableSort = sort === `-${key}` ? (key as TableSort) : (`-${key}` as TableSort);
-    onPrefs(withTable(prefs, { sort: next }));
+  /** Изменить вид и сохранить. Свои виды заводятся с первой правки. */
+  const saveView = (next: TableViewPrefs, extra: Partial<TablePrefs> = {}) =>
+    onPrefs({ ...prefs, table: { ...replaceView({ views: list, active: eff.active }, next), ...extra } });
+
+  const sortBy = (key: string) => {
+    // Первый щелчок — по убыванию (новые, большие сверху), второй — наоборот.
+    saveView({ ...view, sort: sort === `-${key}` ? key : `-${key}` });
+  };
+
+  const switchView = (id: string) => {
+    setParam("v", id === list[0].id ? null : id);
+    onPrefs({ ...prefs, table: { views: list, active: id } });
+  };
+
+  const addView = () => {
+    const id = `v${Date.now().toString(36).slice(-6)}`;
+    const copy: TableViewPrefs = { ...view, id, name: `Вид ${list.length + 1}`, cols: view.cols.map((c) => ({ ...c })) };
+    onPrefs({ ...prefs, table: { views: [...list, copy], active: id } });
+    setParam("v", id);
+    setConfig(true);
   };
 
   const pick = (r: TableRow, s: OrderStatus) => void om.changeStatus(menuOf(r), s);
@@ -274,11 +292,13 @@ export function DashboardTable({
 
   const pad = dense ? "py-1.5" : "py-2.5";
 
-  const cell = (c: TableCol, r: TableRow) => {
-    switch (c) {
+  /** Ячейка. Особый вид — у части столбцов; остальное — текстом с «Копировать». */
+  const cell = (k: string, r: TableRow, wrap: boolean) => {
+    const clamp = wrap ? "line-clamp-2 [overflow-wrap:anywhere]" : "block truncate";
+    switch (k) {
       case "number":
         return (
-          <Link to={`/orders/${r.id}`} className="font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
+          <Link to={`/orders/${r.id}`} className="whitespace-nowrap font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
             {r.number}
             {r.isUrgent && (
               <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">
@@ -289,10 +309,12 @@ export function DashboardTable({
         );
       case "created":
         return (
-          <span className="text-ink-muted" {...copyable("text", formatDate(r.acceptedAt), "дату приёма")}>
+          <span className="whitespace-nowrap text-ink-muted" {...copyable("text", formatDate(r.acceptedAt), "дату приёма")}>
             {shortDate(r.acceptedAt)}
           </span>
         );
+      case "urgent":
+        return r.isUrgent ? <span className="tag tag-urgent px-2 py-[1px] text-[11px]">срочный</span> : null;
       case "device":
         return (
           <span className="line-clamp-2 font-semibold [overflow-wrap:anywhere]" title={deviceLine(r)} {...copyable("device", deviceText(r.device) || deviceLine(r))}>
@@ -300,18 +322,22 @@ export function DashboardTable({
           </span>
         );
       case "serial":
-        return r.device?.serial ? (
-          <span className="block truncate font-mono text-[12.5px] text-ink-soft" {...copyable("serial", r.device.serial)}>
-            {r.device.serial}
+      case "passcode": {
+        const v = k === "serial" ? r.device?.serial : r.passcode;
+        return v ? (
+          <span className="block truncate font-mono text-[12.5px] text-ink-soft" {...copyable(k === "serial" ? "serial" : "text", v, k === "serial" ? undefined : "пароль")}>
+            {v}
           </span>
         ) : (
-          <span className="text-ink-dim">—</span>
+          <Dash />
         );
+      }
       case "status":
         return (
           <StatusPicker order={r} statuses={om.reference?.statuses} canChange={om.canStatus(menuOf(r))} onPick={(s) => pick(r, s)} className="max-w-full" />
         );
       case "since": {
+        if (!isActive(r)) return <Dash />;
         const d = days(r.statusSince);
         return (
           <span className={isStale(r) ? "font-semibold text-state-off" : "text-ink-muted"} title={`В статусе с ${formatDate(r.statusSince)}`}>
@@ -319,55 +345,81 @@ export function DashboardTable({
           </span>
         );
       }
+      case "age":
+        return <span className="text-ink-muted">{plural(days(r.acceptedAt), "день", "дня", "дней")}</span>;
+      case "labels":
+        return (
+          <OrderLabels
+            order={r}
+            defs={labelDefs}
+            canEdit={isActive(r) && canLabel(can, myId, r.master?.id)}
+            onChanged={onReload}
+          />
+        );
       case "customer":
         return (
           <span className="block min-w-0">
             {r.customer.name ? (
-              <span className="block truncate" style={nameStyle(r.customer.color)} title={r.customer.name} {...copyable("name", r.customer.name)}>
+              <span className={clamp} style={nameStyle(r.customer.color)} title={r.customer.name} {...copyable("name", r.customer.name)}>
                 {r.customer.name}
               </span>
             ) : (
-              <span className="text-ink-dim">—</span>
+              <Dash />
             )}
             {r.customer.phone && (
-              <a
-                href={`tel:${r.customer.phone}`}
-                className="block truncate text-[12.5px] text-brand-ink hover:underline"
-                {...copyable("phone", r.customer.phone)}
-              >
+              <a href={`tel:${r.customer.phone}`} className="block truncate text-[12.5px] text-brand-ink hover:underline" {...copyable("phone", r.customer.phone)}>
                 {r.customer.phone}
               </a>
             )}
           </span>
         );
+      case "cname":
+        return r.customer.name ? (
+          <span className={clamp} style={nameStyle(r.customer.color)} title={r.customer.name} {...copyable("name", r.customer.name)}>
+            {r.customer.name}
+          </span>
+        ) : (
+          <Dash />
+        );
+      case "phone":
+      case "phone2": {
+        const v = k === "phone" ? r.customer.phone : r.customer.phone2;
+        return v ? (
+          <a href={`tel:${v}`} className="block truncate text-brand-ink hover:underline" {...copyable("phone", v)}>
+            {v}
+          </a>
+        ) : (
+          <Dash />
+        );
+      }
       case "complaint":
         return (
           <span className="block min-w-0">
-            <span className="line-clamp-2 [overflow-wrap:anywhere]" title={r.complaint} {...copyable("text", r.complaint, "неисправность")}>
-              {r.complaint || <span className="text-ink-dim">—</span>}
+            <span className={wrap ? clamp : "line-clamp-2 [overflow-wrap:anywhere]"} title={r.complaint} {...copyable("text", r.complaint, "неисправность")}>
+              {r.complaint || <Dash />}
             </span>
-            {r.completeness.length > 0 && (
+            {r.completeness.length > 0 && !view.cols.some((c) => c.k === "completeness") && (
               <span className="block truncate text-[12px] text-ink-dim" {...copyable("text", r.completeness.join(", "), "комплектность")}>
                 {r.completeness.join(", ")}
               </span>
             )}
           </span>
         );
-      case "note":
-        return r.receptionNote ? (
-          <span className="block truncate text-ink-soft" title={r.receptionNote} {...copyable("text", r.receptionNote, "примечание")}>
-            {r.receptionNote}
-          </span>
-        ) : (
-          <span className="text-ink-dim">—</span>
-        );
       case "master":
-        return r.master ? (
-          <span title={r.master.fullName} {...copyable("text", r.master.fullName, "мастера")}>
+        return om.canAssign && isActive(r) ? (
+          <MasterPicker
+            number={r.number}
+            master={r.master}
+            masters={om.reference?.masters}
+            canChange
+            onPick={(m) => void om.changeMaster(menuOf(r), m, r.master)}
+          />
+        ) : r.master ? (
+          <span className="block truncate" title={r.master.fullName} {...copyable("text", r.master.fullName, "мастера")}>
             {shortName(r.master.fullName)}
           </span>
         ) : (
-          <span className="text-ink-dim">—</span>
+          <Dash />
         );
       case "due":
         return <DueCell r={r} />;
@@ -379,19 +431,61 @@ export function DashboardTable({
                 {money(r.total)}
               </span>
             ) : (
-              <span className="text-ink-dim">—</span>
+              <Dash />
             )}
             {(r.debt ?? 0) > 0 && (
-              <span className="tag tag-debt mt-0.5 block w-fit px-2 py-[1px] text-[11px] sm:ml-auto" {...copyable("text", money(r.debt), "долг")}>
+              <span className="tag tag-debt ml-auto mt-0.5 block w-fit px-2 py-[1px] text-[11px]" {...copyable("text", money(r.debt), "долг")}>
                 долг {money(r.debt)}
               </span>
             )}
           </span>
         );
     }
+    const spec = COL.get(k);
+    if (!spec) return null;
+    const v = spec.text(r);
+    if (v === null || v === "") return <Dash />;
+    const shownText = spec.group === "Деньги" && typeof v === "number" ? money(v) : String(v);
+    return (
+      <span className={clamp + (spec.group === "Деньги" ? " tabular-nums" : "")} title={shownText} {...copyable("text", shownText, spec.what ?? spec.label.toLowerCase())}>
+        {shownText}
+      </span>
+    );
   };
 
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      await summaryApi.exportTable({
+        name: view.name,
+        columns: cols.filter((c) => c.k !== "labels").map((c) => ({ title: COL.get(c.k)!.label, width: Math.round((colFlex(c.k, c.w) ? 240 : colPx(c.k, c.w)) / 7) })),
+        rows: filtered.slice(0, 5000).map((r) =>
+          cols
+            .filter((c) => c.k !== "labels")
+            .map((c) => {
+              const v = COL.get(c.k)!.text(r);
+              return v === null || v === undefined ? null : v;
+            })
+        ),
+      });
+    } catch {
+      /* подсказка о сбое — внизу */
+      om.say({ text: "Не удалось выгрузить таблицу", tone: "error" });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const totals = view.totals
+    ? new Map(
+        cols
+          .filter((c) => COL.get(c.k)?.sum)
+          .map((c) => [c.k, filtered.reduce((n, r) => n + (Number(COL.get(c.k)!.text(r)) || 0), 0)])
+      )
+    : null;
+
   const nothing = rows.length === 0;
+  const minWidth = cols.reduce((n, c) => n + colPx(c.k, c.w), 24);
 
   return (
     <div className="space-y-3" data-dashboard-table>
@@ -404,19 +498,47 @@ export function DashboardTable({
           className="min-w-0 flex-1 basis-full sm:basis-auto"
           data-table-search
         />
-        <div className="relative hidden md:block">
-          <Button variant="secondary" onClick={() => setColsOpen((v) => !v)} aria-expanded={colsOpen} data-table-columns className="whitespace-nowrap">
-            <ColumnsIcon />
-            Столбцы
-          </Button>
-          {colsOpen && <ColumnsMenu prefs={prefs} seesMoney={seesMoney} onPrefs={onPrefs} onClose={() => setColsOpen(false)} />}
-        </div>
+        <Button variant="secondary" onClick={() => setConfig(true)} data-table-columns className="hidden whitespace-nowrap md:inline-flex">
+          <ColumnsIcon />
+          Настроить
+        </Button>
         {can("orders.create") && (
           <Button icon={<IconPlus />} onClick={() => navigate("/orders/new")} className="hidden whitespace-nowrap sm:inline-flex">
             Принять технику
           </Button>
         )}
       </div>
+
+      {/* Виды — вкладками: у каждого свои столбцы, порядок и «Итого». */}
+      {(
+        <div className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-table-views>
+          {list.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => switchView(v.id)}
+              onDoubleClick={() => setConfig(true)}
+              aria-pressed={v.id === view.id}
+              data-table-view={v.name}
+              className={
+                "inline-flex min-h-[34px] shrink-0 items-center whitespace-nowrap rounded-field border px-3.5 text-[13.5px] font-semibold transition-colors duration-150 " +
+                (v.id === view.id ? "border-line bg-surface text-ink" : "border-transparent text-ink-muted hover:text-ink")
+              }
+            >
+              {v.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={addView}
+            data-table-view-add
+            className="hidden min-h-[34px] shrink-0 items-center whitespace-nowrap rounded-field px-3 text-[13px] font-semibold text-brand-ink hover:underline md:inline-flex"
+            disabled={list.length >= 8}
+          >
+            + Новый вид
+          </button>
+        </div>
+      )}
 
       {/* Быстрые фильтры: на телефоне — лентой вбок, на компьютере — переносом. */}
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-quick-filters>
@@ -433,9 +555,11 @@ export function DashboardTable({
               onClick={() => setParam("f", x.key === "all" ? null : x.key, { st: null })}
               className={
                 "inline-flex min-h-[36px] shrink-0 items-center gap-2 whitespace-nowrap rounded-pill border px-3.5 text-[13px] font-semibold transition-colors duration-150 " +
+                (x.dot ? "pl-1.5 " : "") +
                 (on ? "border-brand bg-brand-tint text-brand-ink" : "border-line bg-surface hover:border-line-strong")
               }
             >
+              {x.dot && <LabelDot icon={x.dot.icon} color={x.dot.color} />}
               {x.label}
               <span
                 className={
@@ -479,36 +603,31 @@ export function DashboardTable({
           {/* Компьютер: таблица. */}
           <div className="hidden overflow-hidden rounded-panel border border-line bg-surface md:block">
             <div className="overflow-x-auto">
-              <table
-                className={"w-full table-fixed border-collapse " + (dense ? "text-[13px]" : "text-[13.5px]")}
-                style={{ minWidth: minTable(cols) }}
-                data-table
-              >
+              <table className={"w-full table-fixed border-collapse " + (dense ? "text-[13px]" : "text-[13.5px]")} style={{ minWidth }} data-table>
                 <colgroup>
-                  {cols.map((c) => {
-                    const def = COLS.find((x) => x.key === c)!;
-                    return <col key={c} style={def.w ? { width: def.w + (c === cols[0] || c === cols[cols.length - 1] ? 8 : 0) } : undefined} />;
-                  })}
+                  {cols.map((c, i) => (
+                    <col key={c.k} style={colFlex(c.k, c.w) ? undefined : { width: colPx(c.k, c.w) + (i === 0 || i === cols.length - 1 ? 8 : 0) }} />
+                  ))}
                 </colgroup>
                 <thead>
                   <tr className="border-b border-line text-left text-[11px] font-bold uppercase tracking-[0.07em] text-ink-dim">
                     {cols.map((c) => {
-                      const def = COLS.find((x) => x.key === c)!;
-                      const active = def.sort && sort.replace(/^-/, "") === def.sort;
+                      const spec = COL.get(c.k)!;
+                      const active = sort.replace(/^-/, "") === c.k;
                       return (
-                        <th key={c} className={"truncate px-2 py-2.5 font-bold first:pl-4 last:pr-4 " + def.cls}>
-                          {def.sort ? (
+                        <th key={c.k} className={"truncate px-2 py-2.5 font-bold first:pl-4 last:pr-4 " + (spec.right ? "text-right" : "")} title={spec.label}>
+                          {spec.sort ? (
                             <button
                               type="button"
-                              onClick={() => sortBy(def.sort!)}
-                              className={"inline-flex items-center gap-1 uppercase tracking-[0.07em] hover:text-ink " + (active ? "text-ink" : "")}
-                              data-sort={def.sort}
+                              onClick={() => sortBy(c.k)}
+                              className={"inline-flex max-w-full items-center gap-1 uppercase tracking-[0.07em] hover:text-ink " + (active ? "text-ink" : "")}
+                              data-sort={c.k}
                             >
-                              {def.label}
+                              <span className="truncate">{spec.head ?? spec.label}</span>
                               {active && <span aria-hidden>{sort.startsWith("-") ? "↓" : "↑"}</span>}
                             </button>
                           ) : (
-                            def.label
+                            spec.head ?? spec.label
                           )}
                         </th>
                       );
@@ -526,22 +645,34 @@ export function DashboardTable({
                         {...copyRow(m.copy ?? [])}
                         onClick={(e) => open(e, r)}
                         className={
-                          "cursor-pointer border-b border-line align-middle transition-colors duration-100 last:border-b-0 hover:bg-surface-raised/60 " +
+                          "group cursor-pointer border-b border-line align-middle transition-colors duration-100 last:border-b-0 hover:bg-surface-raised/60 " +
                           (r.isUrgent ? "shadow-[inset_3px_0_0_0_rgb(var(--state-off))]" : "")
                         }
                       >
-                        {cols.map((c) => {
-                          const def = COLS.find((x) => x.key === c)!;
-                          return (
-                            <td key={c} className={`overflow-hidden px-2 ${pad} first:pl-4 last:pr-4 ` + def.cls} data-col={c}>
-                              {cell(c, r)}
-                            </td>
-                          );
-                        })}
+                        {cols.map((c) => (
+                          <td
+                            key={c.k}
+                            className={`overflow-hidden px-2 ${pad} first:pl-4 last:pr-4 ` + (COL.get(c.k)!.right ? "text-right" : "")}
+                            data-col={c.k}
+                          >
+                            {cell(c.k, r, !!c.wrap)}
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
                 </tbody>
+                {totals && (
+                  <tfoot>
+                    <tr className="border-t-2 border-line bg-surface-raised/40 font-semibold" data-table-totals>
+                      {cols.map((c, i) => (
+                        <td key={c.k} className={"px-2 py-2.5 first:pl-4 last:pr-4 " + (COL.get(c.k)!.right ? "text-right tabular-nums" : "")}>
+                          {i === 0 ? `Итого: ${filtered.length}` : totals.has(c.k) ? moneyText(totals.get(c.k)) : ""}
+                        </td>
+                      ))}
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-[12.5px] text-ink-muted">
@@ -556,25 +687,27 @@ export function DashboardTable({
                   </>
                 )}
               </span>
-              <span className="flex items-center gap-1.5">
-                Строки:
+              <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <button
                   type="button"
-                  onClick={() => dense && onPrefs(withTable(prefs, { dense: false }))}
-                  className={dense ? "hover:text-ink" : "font-bold text-ink"}
-                  data-density="normal"
+                  onClick={() => void exportExcel()}
+                  disabled={exporting}
+                  className="inline-flex items-center gap-1.5 font-semibold text-brand-ink hover:underline disabled:opacity-50 [&>svg]:h-4 [&>svg]:w-4"
+                  data-table-export
                 >
-                  обычные
+                  <IconDownload />
+                  {exporting ? "Выгружаем…" : "В Excel"}
                 </button>
-                ·
-                <button
-                  type="button"
-                  onClick={() => !dense && onPrefs(withTable(prefs, { dense: true }))}
-                  className={dense ? "font-bold text-ink" : "hover:text-ink"}
-                  data-density="dense"
-                >
-                  плотные
-                </button>
+                <span className="flex items-center gap-1.5">
+                  Строки:
+                  <button type="button" onClick={() => dense && saveView({ ...view, dense: false })} className={dense ? "hover:text-ink" : "font-bold text-ink"} data-density="normal">
+                    обычные
+                  </button>
+                  ·
+                  <button type="button" onClick={() => !dense && saveView({ ...view, dense: true })} className={dense ? "font-bold text-ink" : "hover:text-ink"} data-density="dense">
+                    плотные
+                  </button>
+                </span>
               </span>
             </div>
           </div>
@@ -589,20 +722,20 @@ export function DashboardTable({
                   data-table-card={r.number}
                   {...om.bind(m)}
                   onClick={(e) => open(e, r)}
-                  className={
-                    "cursor-pointer rounded-card border border-line bg-surface p-3.5 " +
-                    (r.isUrgent ? "shadow-[inset_3px_0_0_0_rgb(var(--state-off))]" : "")
-                  }
+                  className={"cursor-pointer rounded-card border border-line bg-surface p-3.5 " + (r.isUrgent ? "shadow-[inset_3px_0_0_0_rgb(var(--state-off))]" : "")}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <Link to={`/orders/${r.id}`} className="font-mono text-[14px] font-bold">
-                      {r.number}
-                      {r.isUrgent && (
-              <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">
-                <IconUrgent className="h-3.5 w-3.5" />
-              </span>
-            )}
-                    </Link>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Link to={`/orders/${r.id}`} className="font-mono text-[14px] font-bold">
+                        {r.number}
+                        {r.isUrgent && (
+                          <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">
+                            <IconUrgent className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                      </Link>
+                      <OrderLabels order={r} defs={labelDefs} canEdit={false} />
+                    </span>
                     <StatusPicker order={r} statuses={om.reference?.statuses} canChange={om.canStatus(m)} onPick={(s) => pick(r, s)} />
                   </div>
                   <p className="mt-1.5 text-[15px] font-bold leading-snug [overflow-wrap:anywhere]">{deviceLine(r)}</p>
@@ -643,16 +776,40 @@ export function DashboardTable({
           </div>
         </>
       )}
+
+      {config && (
+        <TableConfigurator
+          view={view}
+          views={list}
+          seesMoney={seesMoney}
+          contacts={contacts}
+          canShare={can("settings.manage")}
+          onChange={(v) => saveView(v)}
+          onDelete={() => {
+            const rest = list.filter((v) => v.id !== view.id);
+            onPrefs({ ...prefs, table: { views: rest, active: rest[0].id } });
+            setParam("v", null);
+            setConfig(false);
+          }}
+          onShare={async () => {
+            await summaryApi.shareTable({ views: list, active: view.id });
+            onShared();
+          }}
+          onClose={() => setConfig(false)}
+        />
+      )}
     </div>
   );
 }
 
-const shortDate = (iso: string) => new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
+function Dash() {
+  return <span className="text-ink-dim">—</span>;
+}
 
 function DueCell({ r }: { r: TableRow }) {
   if (r.issuedAt) {
     return (
-      <span className="text-ink-muted" {...copyable("text", formatDate(r.issuedAt), "дату выдачи")}>
+      <span className="whitespace-nowrap text-ink-muted" {...copyable("text", formatDate(r.issuedAt), "дату выдачи")}>
         выдан {shortDate(r.issuedAt)}
       </span>
     );
@@ -660,16 +817,19 @@ function DueCell({ r }: { r: TableRow }) {
   if (r.status.group === "DONE") {
     const idle = readyIdle(r);
     return (
-      <span className={idle ? "font-semibold text-state-waiting" : "text-ink-muted"} {...copyable("text", formatDate(r.completedAt ?? r.statusSince), "дату готовности")}>
+      <span
+        className={"whitespace-nowrap " + (idle ? "font-semibold text-state-waiting" : "text-ink-muted")}
+        {...copyable("text", formatDate(r.completedAt ?? r.statusSince), "дату готовности")}
+      >
         готов {shortDate(r.completedAt ?? r.statusSince)}
       </span>
     );
   }
   const due = dueLabel(r.dueAt);
-  if (!due) return <span className="text-ink-dim">—</span>;
+  if (!due) return <Dash />;
   return (
     <span
-      className={due.overdue ? "font-semibold text-state-off" : due.soon ? "font-semibold text-state-waiting" : "text-ink-muted"}
+      className={"whitespace-nowrap " + (due.overdue ? "font-semibold text-state-off" : due.soon ? "font-semibold text-state-waiting" : "text-ink-muted")}
       {...copyable("text", formatDate(r.dueAt), "срок")}
     >
       {due.text}
@@ -696,86 +856,11 @@ function StageChip({ on, onClick, label, count, dot }: { on: boolean; onClick: (
   );
 }
 
-function ColumnsIcon() {
+export function ColumnsIcon() {
   return (
     <svg aria-hidden viewBox="0 0 20 20" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
       <rect x="3" y="4" width="14" height="12" rx="2" />
       <path d="M8 4v12M12.5 4v12" />
     </svg>
-  );
-}
-
-/** «Столбцы»: что показывать в таблице. Номер и статус — всегда. */
-function ColumnsMenu({
-  prefs,
-  seesMoney,
-  onPrefs,
-  onClose,
-}: {
-  prefs: DashboardPrefs;
-  seesMoney: boolean;
-  onPrefs: (p: DashboardPrefs) => void;
-  onClose: () => void;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const down = (e: MouseEvent) => {
-      if (box.current?.contains(e.target as Node)) return;
-      if ((e.target as Element).closest?.("[data-table-columns]")) return;
-      onClose();
-    };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("mousedown", down);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", down);
-      document.removeEventListener("keydown", key);
-    };
-  }, [onClose]);
-
-  const t = prefs.table ?? {};
-  const visible = visibleCols(t, seesMoney);
-  const toggle = (c: TableCol) => {
-    const on = visible.includes(c);
-    if (TABLE_OFF.includes(c)) {
-      const shown = on ? (t.shown ?? []).filter((x) => x !== c) : [...(t.shown ?? []), c];
-      onPrefs(withTable(prefs, { shown }));
-    } else {
-      const hidden = on ? [...(t.hidden ?? []), c] : (t.hidden ?? []).filter((x) => x !== c);
-      onPrefs(withTable(prefs, { hidden }));
-    }
-  };
-
-  return (
-    <div
-      ref={box}
-      className="absolute right-0 top-[calc(100%+6px)] z-40 w-[250px] rounded-field border border-line bg-surface-raised p-2 shadow-raised"
-      data-columns-menu
-    >
-      <p className="px-2 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-dim">Столбцы</p>
-      {COLS.filter((c) => !c.money || seesMoney).map((c) => {
-        const fixed = c.key === "number" || c.key === "status";
-        const on = visible.includes(c.key);
-        return (
-          <label
-            key={c.key}
-            className={"flex min-h-[34px] items-center gap-2.5 rounded-[8px] px-2 text-[13.5px] " + (fixed ? "opacity-55" : "cursor-pointer hover:bg-surface-input")}
-          >
-            <input type="checkbox" checked={on} disabled={fixed} onChange={() => toggle(c.key)} className="h-4 w-4 accent-[rgb(var(--brand))]" data-col-toggle={c.key} />
-            {c.label}
-          </label>
-        );
-      })}
-      <div className="mt-1 border-t border-line px-2 pt-2 text-[12.5px] text-ink-dim">
-        Строки:{" "}
-        <button type="button" className={prefs.table?.dense ? "hover:text-ink" : "font-bold text-ink"} onClick={() => onPrefs(withTable(prefs, { dense: false }))}>
-          обычные
-        </button>
-        {" · "}
-        <button type="button" className={prefs.table?.dense ? "font-bold text-ink" : "hover:text-ink"} onClick={() => onPrefs(withTable(prefs, { dense: true }))}>
-          плотные
-        </button>
-      </div>
-    </div>
   );
 }
