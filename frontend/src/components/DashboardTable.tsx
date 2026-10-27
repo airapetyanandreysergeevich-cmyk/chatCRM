@@ -6,13 +6,15 @@ import { StatusPicker } from "./StatusPicker";
 import { MasterPicker } from "./MasterPicker";
 import { OrderLabels, canLabel } from "./OrderLabels";
 import { TableConfigurator } from "./TableConfigurator";
+import { OutsourceFilter, type OutsourceOption } from "./OutsourceFilter";
+import { KindBadge } from "./KindBadge";
 import { IconDownload, IconOrders, IconPlus, IconUrgent } from "./icons";
 import { Button, EmptyState, SearchInput } from "./ui";
 import { useAuth } from "../lib/auth";
 import { nameStyle } from "../lib/customerColor";
 import { dueLabel, formatDate, plural, shortName } from "../lib/format";
 import { LabelDot } from "../lib/labelIcons";
-import { money, type OrderStatus } from "../lib/orders";
+import { isWarrantyKind, kindBadge, money, type OrderStatus } from "../lib/orders";
 import { STAGES } from "../lib/stages";
 import { COL, DEFAULT_VIEW, MAX_PX, MIN_PX, colFlex, colPx, deviceLine, layoutCols, moneyText, type ColSpec } from "../lib/tableCols";
 import { summaryApi, type DashboardPrefs, type TablePrefs, type TableRow, type TableViewPrefs } from "../lib/workshop";
@@ -125,10 +127,22 @@ function sorter(sort: string): (a: TableRow, b: TableRow) => number {
   const dir = sort.startsWith("-") ? -1 : 1;
   const spec = COL.get(sort.replace(/^-/, "")) ?? COL.get("created")!;
   const val = spec.sort ?? (() => 0);
+  // Строки сравниваем «как люди»: ПР121847 раньше ПР121902, 1192-9 раньше 1192-10.
   const cmp = (x: number | string, y: number | string) =>
-    typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ru");
+    typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ru", { numeric: true, sensitivity: "base" });
+  // Пустое (нет номера аутсорса) — внизу при любом направлении.
+  const empty = (v: number | string | null) => v === null || v === "";
   // Срочные — всегда сверху: так же, как на доске.
-  return (a, b) => Number(b.isUrgent) - Number(a.isUrgent) || dir * cmp(val(a), val(b)) || b.acceptedAt.localeCompare(a.acceptedAt);
+  return (a, b) => {
+    const x = val(a);
+    const y = val(b);
+    return (
+      Number(b.isUrgent) - Number(a.isUrgent) ||
+      Number(empty(x)) - Number(empty(y)) ||
+      (empty(x) || empty(y) ? 0 : dir * cmp(x!, y!)) ||
+      b.acceptedAt.localeCompare(a.acceptedAt)
+    );
+  };
 }
 
 /** Виды таблицы, где изменён один: остальные — как были. */
@@ -252,7 +266,54 @@ export function DashboardTable({
         .filter(Boolean),
     [q]
   );
-  const searched = useMemo(() => (words.length ? rows.filter((r) => matches(r, words)) : rows), [rows, words]);
+  const found = useMemo(() => (words.length ? rows.filter((r) => matches(r, words)) : rows), [rows, words]);
+
+  // «Аутсорс ▾»: компании — из заказов в работе; числа — с учётом поиска.
+  const outOptions = useMemo<OutsourceOption[]>(() => {
+    const live = found.filter(isActive);
+    const by = new Map<string, OutsourceOption>();
+    let named = 0;
+    for (const r of live) {
+      if (!r.outsourcer) continue;
+      const o = by.get(r.outsourcer.id) ?? { key: r.outsourcer.id, label: r.outsourcer.name ?? "", count: 0 };
+      o.count += 1;
+      if (r.outsourcer.name) named += 1;
+      by.set(r.outsourcer.id, o);
+    }
+    const any = [...by.values()].reduce((n, o) => n + o.count, 0);
+    // Без права видеть клиентов имён нет — тогда только «аутсорс / без».
+    const companies = named ? [...by.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru")) : [];
+    return [
+      { key: "", label: "Все заказы", count: live.length },
+      { key: "any", label: "Только аутсорс", count: any },
+      ...companies,
+      { key: "none", label: "Без аутсорса", count: live.length - any },
+    ];
+  }, [found]);
+  const out = view.out && outOptions.some((o) => o.key === view.out) ? view.out : "";
+  const hasOutsource = (outOptions[1]?.count ?? 0) > 0 || !!out;
+  // «Тип заказа ▾»: платные / гарантийные (27.10.2026) — показываем, когда
+  // гарантийные вообще бывают или фильтр уже выбран.
+  const okind = view.okind === "paid" || view.okind === "warranty" ? view.okind : "";
+  const kindOptions = useMemo<OutsourceOption[]>(() => {
+    const live = found.filter(isActive);
+    const warranty = live.filter((r) => isWarrantyKind(r.kind)).length;
+    return [
+      { key: "", label: "Все заказы", count: live.length },
+      { key: "paid", label: "Платные", count: live.length - warranty },
+      { key: "warranty", label: "Гарантийные", count: warranty },
+    ];
+  }, [found]);
+  const hasKinds = kindOptions[2].count > 0 || !!okind;
+  const searched = useMemo(
+    () =>
+      found.filter(
+        (r) =>
+          (!out || (out === "any" ? !!r.outsourcer : out === "none" ? !r.outsourcer : r.outsourcer?.id === out)) &&
+          (!okind || (okind === "warranty") === isWarrantyKind(r.kind))
+      ),
+    [found, out, okind]
+  );
   const counts = new Map(quickList.map((x) => [x.key, searched.filter(x.test).length]));
   const quickTest = quickList.find((x) => x.key === quick)!.test;
   const byQuick = useMemo(() => searched.filter(quickTest), [searched, quickTest]);
@@ -311,17 +372,32 @@ export function DashboardTable({
   const cell = (k: string, r: TableRow, wrap: boolean) => {
     const clamp = wrap ? "line-clamp-2 [overflow-wrap:anywhere]" : "block truncate";
     switch (k) {
-      case "number":
+      case "number": {
+        // Гарантийный заказ — подписью под номером (27.10.2026): видно сразу,
+        // даже если столбца «Тип обращения» в виде нет.
+        const kb = isWarrantyKind(r.kind) ? kindBadge(r.kind, r.device?.brand) : null;
         return (
-          <Link to={`/orders/${r.id}`} className="whitespace-nowrap font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
-            {r.number}
-            {r.isUrgent && (
-              <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">
-                <IconUrgent className="h-3.5 w-3.5" />
+          <>
+            <Link to={`/orders/${r.id}`} className="whitespace-nowrap font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
+              {r.number}
+              {r.isUrgent && (
+                <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">
+                  <IconUrgent className="h-3.5 w-3.5" />
+                </span>
+              )}
+            </Link>
+            {kb && (
+              <span
+                title={kb.title}
+                data-row-kind={r.kind}
+                className={"block truncate text-[11.5px] font-semibold " + (kb.tone === "factory" ? "text-[rgb(var(--tag-factory))]" : "text-[rgb(var(--tag-warranty))]")}
+              >
+                {kb.label}
               </span>
             )}
-          </Link>
+          </>
         );
+      }
       case "created":
         return (
           <span className="whitespace-nowrap text-ink-muted" {...copyable("text", formatDate(r.acceptedAt), "дату приёма")}>
@@ -630,8 +706,8 @@ export function DashboardTable({
         })}
       </div>
 
-      {statusChips.length > 0 && (
-        <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-status-chips>
+      {(statusChips.length > 0 || hasOutsource || hasKinds) && (
+        <div className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0" data-status-chips>
           <StageChip on={!statusId} onClick={() => setParam("st", null)} label="Все статусы" count={byQuick.length} />
           {statusChips.map(({ status, count }) => (
             <StageChip
@@ -643,6 +719,16 @@ export function DashboardTable({
               dot={STAGES.find((s) => s.key === status.group)?.dot ?? "bg-ink-dim"}
             />
           ))}
+          {(hasOutsource || hasKinds) && (
+            <span className="ml-auto flex gap-1.5 pl-2">
+              {hasKinds && (
+                <OutsourceFilter id="okind" title="Тип" value={okind} options={kindOptions} onChange={(key) => saveView({ ...view, okind: key === "paid" || key === "warranty" ? key : undefined })} />
+              )}
+              {hasOutsource && (
+                <OutsourceFilter value={out} options={outOptions} onChange={(key) => saveView({ ...view, out: key || undefined })} />
+              )}
+            </span>
+          )}
         </div>
       )}
 
@@ -810,6 +896,7 @@ export function DashboardTable({
                         )}
                       </Link>
                       <OrderLabels order={r} defs={labelDefs} canEdit={false} />
+                      <KindBadge kind={r.kind} brand={r.device?.brand} />
                     </span>
                     <StatusPicker order={r} statuses={om.reference?.statuses} canChange={om.canStatus(m)} onPick={(s) => pick(r, s)} />
                   </div>

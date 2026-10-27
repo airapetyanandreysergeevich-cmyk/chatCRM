@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconAgent, IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms } from "../components/icons";
+import { IconAgent, IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms, IconWarranty } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ordersApi } from "../lib/orders";
@@ -57,6 +57,13 @@ const SECTIONS: Section[] = [
     title: "Интеграции",
     text: "SMS клиентам с телефона мастерской: «ваш заказ готов» и согласование ремонта — клиент отвечает «да» или «нет».",
     icon: <IconSms />,
+    need: "settings.manage",
+  },
+  {
+    to: "/settings/intake",
+    title: "Приём техники",
+    text: "Авторизованные бренды: для их техники при приёме выбирают — платный ремонт или гарантия производителя.",
+    icon: <IconWarranty />,
     need: "settings.manage",
   },
   {

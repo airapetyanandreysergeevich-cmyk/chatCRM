@@ -12,6 +12,7 @@ import {
   type OrderNumberFormat,
 } from "../../lib/orderNumber";
 import { PERMISSIONS } from "../../lib/permissions";
+import { readAuthorizedBrands } from "../../lib/brands";
 import { storageInfo } from "../../lib/usage";
 import {
   actorUserId,
@@ -651,6 +652,62 @@ settingsRouter.put(
       });
     });
     res.json(next);
+  })
+);
+
+// ---------------------------------------------------------------- авторизованные бренды
+
+/**
+ * Бренды, у которых мастерская — авторизованный сервис (27.10.2026). Для их
+ * техники при приёме тип заказа надо выбрать явно: платный ремонт или
+ * гарантия производителя. Иначе заказ остаётся «Ремонтом» по умолчанию, и
+ * гарантийный путается с платным (так было у мастерской-клиента).
+ */
+const brandsSchema = z.object({
+  brands: z.array(z.string().trim().min(1).max(40, "Название бренда — до 40 знаков")).max(60, "Не больше 60 брендов"),
+});
+
+settingsRouter.get(
+  "/authorized-brands",
+  ah(async (req, res) => {
+    const tenantId = tenantOf(req);
+    const t = await withTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } }));
+    res.json({ brands: readAuthorizedBrands(t?.settings) });
+  })
+);
+
+settingsRouter.put(
+  "/authorized-brands",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const body = brandsSchema.parse(req.body);
+    // Без повторов и без регистра: «ASUS» и «asus» — один бренд.
+    const seen = new Set<string>();
+    const brands = body.brands.map((b) => b.replace(/\s+/g, " ")).filter((b) => {
+      const k = b.toLocaleLowerCase("ru-RU");
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const t = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+      const settings = (t?.settings && typeof t.settings === "object" ? t.settings : {}) as Record<string, unknown>;
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { settings: { ...settings, authorizedBrands: brands } as Prisma.InputJsonObject },
+      });
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        diff: { authorizedBrands: brands.join(", ") || "нет" },
+        ip: clientIp(req),
+      });
+    });
+    res.json({ brands });
   })
 );
 

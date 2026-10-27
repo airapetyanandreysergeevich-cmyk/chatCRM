@@ -95,7 +95,7 @@ export interface Order {
   id: string;
   number: string;
   labels?: LabelMark[];
-  kind: "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT";
+  kind: OrderKind;
   isUrgent: boolean;
   status: OrderStatus;
   branch: { id: string; name: string } | null;
@@ -189,6 +189,8 @@ export interface Reference {
   /** Что включено у мастерской. */
   features: { plateOcr: boolean; plateOcrMode?: "server" | "browser"; remoteAccess?: boolean };
   orderKinds: Array<{ value: Order["kind"]; label: string }>;
+  /** Бренды, у которых мастерская — авторизованный сервис: тип заказа выбирают явно. */
+  authorizedBrands?: string[];
   statuses: OrderStatus[];
   /** Мастера и владелец мастерской — он тоже может взяться за ремонт. */
   masters: Array<{ id: string; fullName: string; isOwner?: boolean; isCoOwner?: boolean; active?: number }>;
@@ -198,12 +200,39 @@ export interface Reference {
   services: Service[];
 }
 
-export const ORDER_KIND_LABEL: Record<Order["kind"], string> = {
+export type OrderKind = "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT" | "BRAND_WARRANTY";
+
+export const ORDER_KIND_LABEL: Record<OrderKind, string> = {
   REPAIR: "Ремонт",
   DIAGNOSTICS: "Диагностика",
   WARRANTY: "Гарантийный возврат",
   REPEAT: "Повторное обращение",
+  BRAND_WARRANTY: "Гарантия производителя",
 };
+
+/** Гарантийные: по гарантии производителя и наш гарантийный возврат. Остальные — платные. */
+export const isWarrantyKind = (k: OrderKind | undefined | null) => k === "BRAND_WARRANTY" || k === "WARRANTY";
+
+/** Бренд в списке авторизаций мастерской — без регистра и лишних пробелов. */
+export const isAuthorizedBrand = (brand: string | null | undefined, list: string[] | undefined) => {
+  const b = (brand ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
+  return !!b && !!list?.some((x) => x.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU") === b);
+};
+
+/**
+ * Плашка типа заказа в списках, таблице, на плитке и в карточке (27.10.2026).
+ * Обычный ремонт — без плашки: его большинство, плашка была бы шумом.
+ * Гарантия производителя — фиолетовая, с брендом: «гарантия ASUS».
+ */
+export function kindBadge(kind: OrderKind | undefined | null, brand?: string | null): { label: string; tone: "factory" | "warning" | "neutral"; title: string } | null {
+  if (!kind || kind === "REPAIR") return null;
+  if (kind === "BRAND_WARRANTY") {
+    const b = (brand ?? "").trim();
+    return { label: b ? `гарантия ${b}` : "гарантия производителя", tone: "factory", title: "Гарантия производителя: ремонт оплачивает бренд" };
+  }
+  if (kind === "WARRANTY") return { label: "гарантия", tone: "warning", title: "Гарантийный возврат: повторный ремонт по нашей гарантии" };
+  return { label: ORDER_KIND_LABEL[kind].toLowerCase(), tone: "neutral", title: ORDER_KIND_LABEL[kind] };
+}
 
 export const PART_SOURCE_LABEL: Record<OrderPart["source"], string> = {
   STOCK: "Со склада",

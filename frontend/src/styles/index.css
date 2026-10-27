@@ -57,6 +57,8 @@
   --tag-urgent: 242 84 91;
   --tag-warranty: 255 176 32;
   --tag-brand: 47 143 224;
+  /* Гарантия производителя — фиолетовый: не путается с «гарантийным возвратом» (оранжевый). */
+  --tag-factory: 139 108 255;
   --tag-neutral: 146 151 163;
 }
 
@@ -103,6 +105,7 @@
   .tag-urgent { --t: var(--tag-urgent); }
   .tag-warranty { --t: var(--tag-warranty); }
   .tag-brand { --t: var(--tag-brand); }
+  .tag-factory { --t: var(--tag-factory); }
   .tag-neutral { --t: var(--tag-neutral); }
 }
 

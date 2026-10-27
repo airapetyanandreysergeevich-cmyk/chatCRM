@@ -723,6 +723,7 @@ enum OrderKind {
   DIAGNOSTICS
   WARRANTY // возврат по гарантии
   REPEAT // повторное обращение
+  BRAND_WARRANTY // гарантия производителя: мастерская — авторизованный сервис бренда (27.10.2026)
 }
 
 model Order {

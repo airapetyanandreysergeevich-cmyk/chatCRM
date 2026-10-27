@@ -1,3 +1,4 @@
+import { kindBadge } from "../lib/orders";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { copyable, deviceText } from "./CopyMenu";
 import { customerColor, nameStyle } from "../lib/customerColor";
@@ -56,6 +57,18 @@ function valueOf(k: TileKey, card: BoardCard, defs?: LabelDef[]): { node: ReactN
     }
     case "urgent":
       return card.isUrgent ? { node: <span className="tag tag-urgent px-2 py-[1px]">срочный</span> } : null;
+    case "kind": {
+      const b = kindBadge(card.kind, card.device?.brand);
+      return b
+        ? {
+            node: (
+              <span title={b.title} className={"tag px-2 py-[1px] " + (b.tone === "factory" ? "tag-factory" : b.tone === "warning" ? "tag-warranty" : "tag-neutral")}>
+                {b.label}
+              </span>
+            ),
+          }
+        : null;
+    }
     case "color": {
       const c = customerColor(card.customer.color);
       return c
@@ -100,6 +113,7 @@ function valueOf(k: TileKey, card: BoardCard, defs?: LabelDef[]): { node: ReactN
 const GHOST: Record<TileKey, string> = {
   number: "Р-0000",
   urgent: "срочный",
+  kind: "гарантия",
   labels: "ярлыки",
   color: "●",
   status: "статус",

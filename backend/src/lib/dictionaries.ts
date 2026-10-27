@@ -52,6 +52,7 @@ export const WATER_DAMAGE = "Следы влаги";
 
 export const ORDER_KINDS = [
   { value: "REPAIR", label: "Ремонт" },
+  { value: "BRAND_WARRANTY", label: "Гарантия производителя" },
   { value: "DIAGNOSTICS", label: "Диагностика" },
   { value: "WARRANTY", label: "Гарантийный возврат" },
   { value: "REPEAT", label: "Повторное обращение" },

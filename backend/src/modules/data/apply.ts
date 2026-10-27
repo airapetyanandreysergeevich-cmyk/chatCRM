@@ -379,6 +379,7 @@ const ORDER_KIND_BY_LABEL: Record<string, string> = {
   "гарантийный возврат": "WARRANTY",
   гарантия: "WARRANTY",
   "повторное обращение": "REPEAT",
+  "гарантия производителя": "BRAND_WARRANTY",
 };
 
 export function parseDate(raw: string | undefined): Date | undefined {

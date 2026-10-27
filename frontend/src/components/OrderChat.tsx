@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent 
 import { ApiError } from "../lib/api";
 import { dayLabel, messagesApi, timeLabel, type OrderMessage } from "../lib/messages";
 import { compressPhoto } from "../lib/photos";
-import { IconAttach, IconClose, IconPerson, IconPlus, IconSend } from "./icons";
+import { IconAttach, IconClose, IconPerson, IconPlus, IconSend, IconSettings } from "./icons";
+import type { HistoryDock } from "../lib/historyDock";
 import { ordersApi, type OrderEventRow } from "../lib/orders";
 import { LabelDot } from "../lib/labelIcons";
 import { STAGES } from "../lib/stages";
@@ -36,10 +37,16 @@ export function OrderChat({
   canModerate,
   found,
   refreshKey,
+  dock,
 }: {
   orderId: string;
   myId: string | null;
   canModerate: boolean;
+  /**
+   * Прикрепление панели (шестерёнка в шапке): где она сейчас (value), где
+   * стоит на самом деле (docked: окно узкое — на своём месте) и смена места.
+   */
+  dock?: { value: HistoryDock; docked: HistoryDock; fits: boolean; set: (d: HistoryDock) => void };
   /** Сменился заказ (статус, мастер, ярлык) — перечитать служебные строки. */
   refreshKey?: unknown;
   /** Сообщение, найденное поиском по заказам: его надо показать и подсветить. */
@@ -215,11 +222,14 @@ export function OrderChat({
       ].sort((a, b) => a.at.localeCompare(b.at))
     : [];
 
+  const docked = dock?.docked ?? null;
+
   return (
-    <Card>
-      <div id="history" className="flex flex-wrap items-center justify-between gap-3 scroll-mt-20">
+    <Card className={docked ? "flex h-full flex-col" : undefined}>
+      <div id="history" className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 scroll-mt-20">
         <SectionLabel>История ремонта</SectionLabel>
-        <span className="flex items-center gap-1.5 text-[12.5px] text-ink-dim" data-history-mode>
+        <span className="flex items-center gap-1.5 text-[12.5px] text-ink-dim">
+        <span className="flex items-center gap-1.5" data-history-mode>
           Показывать:
           <button type="button" onClick={() => switchMode(false)} className={onlyMessages ? "hover:text-ink" : "font-bold text-ink"} aria-pressed={!onlyMessages}>
             всё
@@ -229,6 +239,8 @@ export function OrderChat({
             только сообщения{count > 0 ? ` (${count})` : ""}
           </button>
         </span>
+        {dock && <DockMenu dock={dock} />}
+        </span>
       </div>
 
       <div
@@ -237,7 +249,8 @@ export function OrderChat({
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
         }}
-        className="mt-3 max-h-[520px] space-y-2 overflow-y-auto pr-1"
+        className={"mt-3 space-y-2 overflow-y-auto pr-1 " + (docked ? "min-h-0 flex-1" : "max-h-[520px]")}
+        data-history-list
       >
         {messages === null ? (
           <p className="py-6 text-center text-[13.5px] text-ink-dim">Загружаем…</p>
@@ -492,5 +505,98 @@ function EventLine({ ev }: { ev: OrderEventRow }) {
         </span>
       </p>
     </div>
+  );
+}
+
+/** Значок места панели: рамка заказа и закрашенная полоса там, где история. */
+function DockGlyph({ side }: { side: HistoryDock }) {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" strokeWidth={1.7} aria-hidden>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      {side === "left" && <rect x="4.6" y="5.6" width="5" height="12.8" rx="1.3" fill="currentColor" stroke="none" opacity={0.45} />}
+      {side === "right" && <rect x="14.4" y="5.6" width="5" height="12.8" rx="1.3" fill="currentColor" stroke="none" opacity={0.45} />}
+      {side === null && <rect x="6" y="12.4" width="12" height="5" rx="1.3" fill="currentColor" stroke="none" opacity={0.45} />}
+    </svg>
+  );
+}
+
+/**
+ * Шестерёнка в шапке истории (Андрей, 27.10.2026): «Прикрепить слева»,
+ * «Прикрепить справа», «Открепить» — вернуть панель на прежнее место.
+ */
+function DockMenu({ dock }: { dock: NonNullable<Parameters<typeof OrderChat>[0]["dock"]> }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: PointerEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  const items: Array<[HistoryDock, string]> = [
+    ["left", "Прикрепить слева"],
+    ["right", "Прикрепить справа"],
+    [null, "Открепить — вернуть на место"],
+  ];
+  return (
+    <span ref={box} className="relative hidden md:inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Где показывать историю ремонта"
+        title="Где показывать историю ремонта"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-history-dock-menu
+        className={
+          "ml-1 flex h-8 w-8 items-center justify-center rounded-field text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-[17px] [&>svg]:w-[17px] " +
+          (open ? "bg-surface-raised text-ink" : "")
+        }
+      >
+        <IconSettings />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-[calc(100%+6px)] z-40 w-[290px] rounded-field border border-line-strong bg-surface-raised p-1.5 text-[13.5px] shadow-raised">
+          {items.map(([side, label], i) => {
+            const on = dock.value === side;
+            return (
+              <Fragment key={label}>
+                {i === 2 && <div className="mx-1 my-1 h-px bg-line" />}
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={on}
+                  onClick={() => {
+                    dock.set(side);
+                    setOpen(false);
+                  }}
+                  data-history-dock-option={side ?? "none"}
+                  className={
+                    "flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left transition-colors duration-100 " +
+                    (on ? "bg-brand-tint font-semibold text-ink" : "text-ink-soft hover:bg-surface-input hover:text-ink")
+                  }
+                >
+                  <DockGlyph side={side} />
+                  <span className="flex-1">{label}</span>
+                  {on && <span className="text-brand-ink">✓</span>}
+                </button>
+              </Fragment>
+            );
+          })}
+          {dock.value && !dock.fits && (
+            <p className="px-2.5 pb-1 pt-2 text-[12px] leading-snug text-ink-dim" data-history-dock-narrow>
+              Окно узкое для трёх колонок — пока панель на своём месте. Станет шире — прикрепится сама.
+            </p>
+          )}
+        </div>
+      )}
+    </span>
   );
 }

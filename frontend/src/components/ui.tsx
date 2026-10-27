@@ -431,7 +431,7 @@ export function Badge({
   icon,
   children,
 }: {
-  tone?: "neutral" | "danger" | "warning" | "brand" | "done";
+  tone?: "neutral" | "danger" | "warning" | "brand" | "done" | "factory";
   icon?: ReactNode;
   children: ReactNode;
 }) {
@@ -441,6 +441,7 @@ export function Badge({
     warning: "tag-warranty",
     brand: "tag-brand",
     done: "tag-issued",
+    factory: "tag-factory",
   } as const;
   return (
     <span className={cx("tag gap-1 px-2.5 py-0.5 text-[11.5px] [&>svg]:h-3 [&>svg]:w-3", map[tone])}>

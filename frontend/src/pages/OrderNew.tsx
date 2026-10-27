@@ -1,3 +1,4 @@
+import { OrderKindPicker } from "../components/OrderKindPicker";
 import { copyable } from "../components/CopyMenu";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -34,7 +35,7 @@ import type { QuickPick, QuickPickField } from "../lib/quickPicks";
 import { formatDate, plural } from "../lib/format";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
-import { masterLabel, ordersApi, type CustomerHit, type Reference } from "../lib/orders";
+import { isAuthorizedBrand, masterLabel, ordersApi, type CustomerHit, type OrderKind, type Reference } from "../lib/orders";
 
 const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(",", ".")));
 
@@ -129,8 +130,11 @@ export default function OrderNew() {
   const [sameDevice, setSameDevice] = useState<{ id: string; number: string; orderId: string } | null>(null);
   const [peek, setPeek] = useState<string | null>(null);
   const deviceCard = useRef<HTMLDivElement>(null);
+  /** Тип заказа выбран кнопкой (для брендов из авторизаций — обязательно). */
+  const [kindChosen, setKindChosen] = useState(false);
+  const [kindTried, setKindTried] = useState(false);
   const [form, setForm] = useState({
-    kind: "REPAIR",
+    kind: "REPAIR" as OrderKind,
     isUrgent: false,
     complaint: "",
     receptionNote: "",
@@ -258,6 +262,7 @@ export default function OrderNew() {
         if (warrantyFrom === o.id) {
           setWarranty({ id: o.id, number: o.number, issuedAt: o.issuedAt, warrantyUntil: o.warrantyUntil });
           setForm((f) => ({ ...f, kind: "WARRANTY" }));
+          setKindChosen(true);
         }
         const c = o.customer;
         if (c.name) {
@@ -342,11 +347,21 @@ export default function OrderNew() {
     }
   }
 
+  // Техника бренда, у которого мастерская — авторизованный сервис.
+  const kindNeedBrand = ref && isAuthorizedBrand(device.brand, ref.authorizedBrands) ? device.brand.trim() : null;
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (stuck) {
       // Заказ уже принят — второй раз его не создаём, только догружаем снимки.
       void retryPhotos();
+      return;
+    }
+    // Бренд из списка авторизаций: платный или гарантия производителя — решает
+    // приёмщик, не умолчание (27.10.2026: «каждый раз забывали это менять»).
+    if (kindNeedBrand && !kindChosen) {
+      setKindTried(true);
+      document.getElementById("order-kind")?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
     setBusy(true);
@@ -397,6 +412,11 @@ export default function OrderNew() {
 
   if (!ref) return <Spinner label="Готовим бланк" />;
 
+  const pickKind = (k: OrderKind) => {
+    setForm((f) => ({ ...f, kind: k }));
+    setKindChosen(true);
+  };
+
   const fieldError = (path: string) => error?.field(path);
 
   return (
@@ -436,7 +456,7 @@ export default function OrderNew() {
             ) : null}
             . Новый заказ получит свой номер, квитанция — «Акт приема оборудования в ремонт по гарантии».
           </span>
-          <button type="button" onClick={() => setForm((f) => ({ ...f, kind: "REPAIR" }))} className="text-[12.5px] font-semibold text-brand-ink hover:underline">
+          <button type="button" onClick={() => pickKind("REPAIR")} className="text-[12.5px] font-semibold text-brand-ink hover:underline">
             принять как обычный ремонт
           </button>
         </div>
@@ -460,6 +480,15 @@ export default function OrderNew() {
           </div>
         </Banner>
       )}
+
+      <OrderKindPicker
+        kinds={ref.orderKinds}
+        value={kindNeedBrand && !kindChosen ? null : form.kind}
+        onPick={pickKind}
+        needBrand={kindNeedBrand}
+        tried={kindTried}
+        showFactory={(ref.authorizedBrands?.length ?? 0) > 0}
+      />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
@@ -880,7 +909,6 @@ export default function OrderNew() {
         <More
           filled={countFilled(
             form.receptionNote,
-            form.kind !== "REPAIR",
             form.assignedMasterId,
             form.dueAt,
             form.isUrgent,
@@ -902,16 +930,7 @@ export default function OrderNew() {
           />
         </Field>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Field label="Тип обращения">
-            <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
-              {ref.orderKinds.map((k) => (
-                <option key={k.value} value={k.value}>
-                  {k.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <Field label="Мастер" hint="Можно назначить позже">
             <Select
               value={form.assignedMasterId}

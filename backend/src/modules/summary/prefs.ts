@@ -50,6 +50,8 @@ export interface DashboardPrefs {
   view?: DashboardView;
   /** Настройки таблицы — только если что-то поменяли. */
   table?: TablePrefs;
+  /** История ремонта в карточке заказа прикреплена: слева или справа. Нет — на своём месте. */
+  historyDock?: "left" | "right";
 }
 
 /**
@@ -99,6 +101,10 @@ export interface TableViewPrefs {
   dense?: boolean;
   /** Строка «Итого» внизу. */
   totals?: boolean;
+  /** Фильтр «Аутсорс ▾»: any — только аутсорс, none — без аутсорса, иначе id компании-аутсорса. */
+  out?: string;
+  /** Фильтр «Тип ▾»: платные или гарантийные заказы. */
+  okind?: "paid" | "warranty";
 }
 export interface TablePrefs {
   views: TableViewPrefs[];
@@ -148,6 +154,8 @@ export function normalizeTable(raw: unknown): TablePrefs | null {
       if (typeof v.sort === "string" && isCol(v.sort.replace(/^-/, ""))) view.sort = v.sort;
       if (v.dense === true) view.dense = true;
       if (v.totals === true) view.totals = true;
+      if (typeof v.out === "string" && /^(any|none|[0-9a-f-]{36})$/i.test(v.out)) view.out = v.out;
+      if (v.okind === "paid" || v.okind === "warranty") view.okind = v.okind;
       views.push(view);
     }
   } else if (Array.isArray(t.hidden) || Array.isArray(t.shown) || t.dense !== undefined || t.sort !== undefined) {
@@ -190,6 +198,7 @@ export const prefsSchema = z
     view: z.string().max(10).nullable().optional(),
     // Виды таблицы разбирает normalizeTable — здесь только предел размера.
     table: z.unknown().optional(),
+    historyDock: z.string().max(10).nullable().optional(),
   })
   .strip();
 
@@ -236,6 +245,8 @@ export function normalizePrefs(raw: unknown): DashboardPrefs {
   if (typeof p.view === "string" && (DASHBOARD_VIEWS as readonly string[]).includes(p.view)) out.view = p.view as DashboardView;
   const table = normalizeTable(p.table);
   if (table) out.table = table;
+  // История ремонта в карточке заказа — прикреплена слева или справа (27.10.2026).
+  if (p.historyDock === "left" || p.historyDock === "right") out.historyDock = p.historyDock;
   return out;
 }
 

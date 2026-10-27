@@ -74,6 +74,7 @@ const cardSelect = {
   id: true,
   number: true,
   isUrgent: true,
+  kind: true,
   acceptedAt: true,
   dueAt: true,
   status: { select: { id: true, name: true, group: true, color: true } },
@@ -172,7 +173,7 @@ const tableSelect = {
   discount: true,
   acceptedBy: { select: { fullName: true } },
   customer: {
-    select: { id: true, name: true, type: true, color: true, phone: true, phone2: true, email: true, address: true, source: true, _count: { select: { orders: true } } },
+    select: { id: true, name: true, type: true, color: true, phone: true, phone2: true, email: true, address: true, source: true, isOutsource: true, _count: { select: { orders: true } } },
   },
   device: { select: { kind: true, brand: true, model: true, serial: true } },
 } as const;
@@ -278,6 +279,9 @@ async function tableOf(req: Request, mineWhere: Prisma.OrderWhereInput, contacts
       passcode: o.devicePasscode,
       storage: o.storageLocation,
       outsource: o.outsourceNumber,
+      // Заказ от аутсорса — для фильтра «Аутсорс ▾» (27.10.2026). Название
+      // компании — тем, кто видит клиентов; остальным — только «аутсорс».
+      outsourcer: o.customer.isOutsource ? { id: o.customer.id, name: contacts ? o.customer.name : null } : null,
       diagnosis: cut(o.diagnosis),
       masterComment: cut(o.masterComment),
       lastMessage: lastMsg.get(o.id) ?? null,
@@ -436,6 +440,7 @@ summaryRouter.get(
             id: o.id,
             number: o.number,
             isUrgent: o.isUrgent,
+            kind: o.kind,
             acceptedAt: o.acceptedAt,
             dueAt: o.dueAt,
             status: o.status,

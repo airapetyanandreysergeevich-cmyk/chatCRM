@@ -12,6 +12,8 @@ export interface BoardCard {
   id: string;
   number: string;
   isUrgent: boolean;
+  /** Тип заказа: плашка «гарантия ASUS» на карточке доски. */
+  kind?: "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT" | "BRAND_WARRANTY";
   acceptedAt: string;
   dueAt: string | null;
   status: OrderStatus;
@@ -73,6 +75,8 @@ export interface DashboardPrefs {
   /** Свой вид главной. Нет — как у мастерской (workshopView). */
   view?: DashboardView | null;
   table?: TablePrefs;
+  /** История ремонта в карточке заказа прикреплена: слева или справа. */
+  historyDock?: "left" | "right";
 }
 
 export type DashboardView = "board" | "table";
@@ -95,6 +99,10 @@ export interface TableViewPrefs {
   sort?: string;
   dense?: boolean;
   totals?: boolean;
+  /** Фильтр «Аутсорс ▾»: any — только аутсорс, none — без, иначе id компании. */
+  out?: string;
+  /** Фильтр «Тип ▾»: платные или гарантийные. */
+  okind?: "paid" | "warranty";
 }
 export interface TablePrefs {
   views: TableViewPrefs[];
@@ -128,7 +136,7 @@ export interface TableRow {
     /** Сколько всего заказов у клиента. */
     orders?: number;
   };
-  kind?: "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT";
+  kind?: "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT" | "BRAND_WARRANTY";
   acceptedBy?: string | null;
   labels?: Array<{ id: string; setAt: string; setBy: string | null }>;
   complaint: string;
@@ -138,6 +146,8 @@ export interface TableRow {
   passcode?: string | null;
   storage?: string | null;
   outsource?: string | null;
+  /** Заказ от аутсорса: компания (имя — тем, кто видит клиентов). */
+  outsourcer?: { id: string; name: string | null } | null;
   diagnosis?: string | null;
   masterComment?: string | null;
   lastMessage?: string | null;

@@ -27,8 +27,8 @@ export interface ColSpec {
   money?: boolean;
   /** Только тем, кто видит контакты клиентов. */
   contacts?: boolean;
-  /** Значение для сортировки по щелчку на заголовке. Нет — не сортируется. */
-  sort?: (r: TableRow) => number | string;
+  /** Значение для сортировки по щелчку на заголовке. Нет — не сортируется. null — пусто: такие строки всегда внизу. */
+  sort?: (r: TableRow) => number | string | null;
   /** Складывать в строке «Итого». */
   sum?: boolean;
   text: (r: TableRow) => string | number | null;
@@ -55,7 +55,7 @@ export const COLS: ColSpec[] = [
   { key: "ready", label: "Готов с", group: "Заказ", w: "s", sort: (r) => t(r.completedAt), text: (r) => (r.completedAt ? formatDate(r.completedAt) : null), what: "дату готовности" },
   { key: "acceptedBy", label: "Принял", group: "Заказ", w: "m", sort: (r) => r.acceptedBy ?? "", text: (r) => r.acceptedBy ?? null, what: "кто принял" },
   { key: "master", label: "Мастер", group: "Заказ", w: "m", sort: (r) => r.master?.fullName ?? "я", text: (r) => (r.master ? shortName(r.master.fullName) : null), what: "мастера" },
-  { key: "outsource", label: "Номер аутсорса", group: "Заказ", w: "m", text: (r) => r.outsource ?? null, what: "номер аутсорса" },
+  { key: "outsource", label: "Номер аутсорса", head: "№ аутсорса", group: "Заказ", w: "m", sort: (r) => r.outsource || null, text: (r) => r.outsource ?? null, what: "номер аутсорса" },
   { key: "labels", label: "Ярлыки", group: "Заказ", w: "s", sort: (r) => r.labels?.length ?? 0, text: () => null },
   { key: "age", label: "Дней в работе", group: "Заказ", w: "s", sort: (r) => new Date(r.acceptedAt).getTime(), text: (r) => days(r.acceptedAt) },
   { key: "storage", label: "Место хранения", group: "Заказ", w: "m", sort: (r) => r.storage ?? "", text: (r) => r.storage ?? null, what: "место хранения" },

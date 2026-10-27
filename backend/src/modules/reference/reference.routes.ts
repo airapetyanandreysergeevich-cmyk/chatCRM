@@ -1,3 +1,4 @@
+import { readAuthorizedBrands } from "../../lib/brands";
 import { Router, type Request } from "express";
 import { prisma, withTenant } from "../../lib/db";
 import { env } from "../../lib/env";
@@ -36,7 +37,7 @@ referenceRouter.get(
       // Ярлыки заказов мастерской — «Индивидуальные оповещения».
       await tx.orderLabel.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
     ] as const);
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true } });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true, settings: true } });
 
     res.json({
       deviceKinds: DEVICE_KINDS,
@@ -44,6 +45,8 @@ referenceRouter.get(
       appearance: appearance.map((q) => ({ key: q.id, label: q.label, locked: q.locked })),
       complaint: complaint.map((q) => ({ key: q.id, label: q.label, locked: q.locked })),
       orderKinds: ORDER_KINDS,
+      // Авторизованные бренды: для их техники тип заказа при приёме выбирают явно.
+      authorizedBrands: readAuthorizedBrands(tenant?.settings),
       // Что включено у этой мастерской. Кнопка с камерой видна, только когда
       // распознаватель есть на сервере и собственник платформы его не выключил.
       features: {

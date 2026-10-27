@@ -1,3 +1,4 @@
+import { KindBadge } from "../components/KindBadge";
 import { useCallback, useEffect, useState } from "react";
 import { copyable, copyRow, deviceText } from "../components/CopyMenu";
 import { StatusPicker } from "../components/StatusPicker";
@@ -5,7 +6,7 @@ import { MasterPicker } from "../components/MasterPicker";
 import { OrderLabels, canLabel } from "../components/OrderLabels";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { backState, useScrollMemory, useUrlSearch } from "../lib/listState";
-import { IconOrders, IconPlus, IconUrgent, IconWarranty } from "../components/icons";
+import { IconOrders, IconPlus, IconUrgent } from "../components/icons";
 import {
   Badge,
   Banner,
@@ -27,7 +28,6 @@ import { customerColor, nameStyle } from "../lib/customerColor";
 import { dueLabel, formatDate, formatDateShort, plural, shortName } from "../lib/format";
 import {
   money,
-  ORDER_KIND_LABEL,
   ordersApi,
   statusGlyphTone,
   type Order,
@@ -134,8 +134,10 @@ export default function Orders() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   // Аутсорс: «1» — все такие клиенты, иначе id одного (в адресе, как остальные фильтры).
   const outsource = params.get("outsource") ?? "";
+  const okindParam = params.get("okind");
+  const okind = okindParam === "paid" || okindParam === "warranty" ? okindParam : "";
   const outsourceClients = useOutsourceClients();
-  const filters: OrderFilterState = { stages, kinds, kindsNot, color, sort, outsource };
+  const filters: OrderFilterState = { stages, kinds, kindsNot, color, sort, outsource, okind };
   const memoryKey = `finecrm.orders.filters.${me?.kind === "tenant" ? me.user.id : "platform"}`;
 
   /**
@@ -148,7 +150,7 @@ export default function Orders() {
   useEffect(() => {
     if (restored) return;
     setRestored(true);
-    const own = ["group", "stages", "kind", "kindNot", "color", "sort", "outsource", "search", "page"].some((k) => params.has(k));
+    const own = ["group", "stages", "kind", "kindNot", "color", "sort", "outsource", "okind", "search", "page"].some((k) => params.has(k));
     if (own) return;
     const saved = recallFilters(memoryKey);
     if (saved) applyFilters(saved, { save: false });
@@ -165,6 +167,7 @@ export default function Orders() {
     put("kindNot", next.kindsNot.join(","));
     put("color", next.color);
     put("outsource", next.outsource);
+    put("okind", next.okind ?? "");
     put("sort", next.sort === "default" ? "" : next.sort);
     p.delete("page");
     setParams(p, { replace: true });
@@ -201,6 +204,7 @@ export default function Orders() {
       if (kindsParam) query.kind = kindsParam;
       if (kindsNotParam) query.kindNot = kindsNotParam;
       if (outsource) query.outsource = outsource;
+      if (okind) query.okind = okind;
       const data = await ordersApi.list(query);
       setRows(data.rows);
       setDebtTotal(data.debtTotal ?? null);
@@ -209,7 +213,7 @@ export default function Orders() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить заказы");
     }
-  }, [stagesParam, search, page, sort, color, exact, kindsParam, kindsNotParam, outsource]);
+  }, [stagesParam, search, page, sort, color, exact, kindsParam, kindsNotParam, outsource, okind]);
 
   useEffect(() => {
     // Сначала — вспомнить фильтры, потом грузить: иначе список мигнул бы без них.
@@ -336,20 +340,24 @@ export default function Orders() {
                   title={
                     <>
                       <span className="font-mono text-[14px] text-ink-soft" {...copyable("order", o.number)}>{o.number}</span>
+                      {/* Номер у заказчика-аутсорса — сразу за нашим (27.10.2026). */}
+                      {o.outsourceNumber && (
+                        <span
+                          className="shrink-0 whitespace-nowrap rounded-[6px] border border-line bg-surface-raised px-1.5 py-[1px] font-mono text-[11.5px] font-semibold text-ink-muted"
+                          title="Номер этого заказа у заказчика-аутсорса"
+                          data-order-outsource={o.outsourceNumber}
+                          {...copyable("outsource", o.outsourceNumber)}
+                        >
+                          аутс. {o.outsourceNumber}
+                        </span>
+                      )}
                       <span className="truncate" {...copyable("device", deviceText(o.device))}>{deviceTitle(o)}</span>
                       {o.isUrgent && (
                         <Badge tone="danger" icon={<IconUrgent />}>
                           срочный
                         </Badge>
                       )}
-                      {o.kind === "WARRANTY" && (
-                        <Badge tone="warning" icon={<IconWarranty />}>
-                          гарантия
-                        </Badge>
-                      )}
-                      {o.kind !== "REPAIR" && o.kind !== "WARRANTY" && (
-                        <Badge>{ORDER_KIND_LABEL[o.kind]}</Badge>
-                      )}
+                      <KindBadge kind={o.kind} brand={o.device?.brand} />
                       {o.inDebt && <DebtBadge amount={o.debt} />}
                     </>
                   }

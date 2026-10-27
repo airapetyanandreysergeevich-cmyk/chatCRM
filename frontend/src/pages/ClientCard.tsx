@@ -1,8 +1,9 @@
+import { KindBadge } from "../components/KindBadge";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { PAYMENT_LABEL, salesApi, type SalesPage } from "../lib/salesApi";
-import { IconChevronLeft, IconCompany, IconEdit, IconOrders, IconPerson, IconUrgent, IconWarranty } from "../components/icons";
+import { IconChevronLeft, IconCompany, IconEdit, IconOrders, IconPerson, IconUrgent } from "../components/icons";
 import {
   Badge,
   Banner,
@@ -23,7 +24,7 @@ import { useAuth } from "../lib/auth";
 import type { CustomerDebt } from "../lib/debt";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { formatDateShort, plural } from "../lib/format";
-import { money, ORDER_KIND_LABEL, statusGlyphTone, statusPill, type Order } from "../lib/orders";
+import { money, statusGlyphTone, statusPill, type Order } from "../lib/orders";
 import { ClientModal, type Client } from "./Clients";
 
 /**
@@ -225,12 +226,7 @@ export default function ClientCard() {
                           срочный
                         </Badge>
                       )}
-                      {o.kind === "WARRANTY" && (
-                        <Badge tone="warning" icon={<IconWarranty />}>
-                          гарантия
-                        </Badge>
-                      )}
-                      {o.kind !== "REPAIR" && o.kind !== "WARRANTY" && <Badge>{ORDER_KIND_LABEL[o.kind]}</Badge>}
+                      <KindBadge kind={o.kind} brand={o.device?.brand} />
                       {o.inDebt && <DebtBadge amount={seesMoney ? owedBy.get(o.id) : undefined} />}
                     </>
                   }

@@ -39,13 +39,15 @@ export interface OrderFilterState {
   sort: string;
   /** Аутсорс: "" — все заказы, "1" — все клиенты-аутсорс, иначе id одного из них. */
   outsource: string;
+  /** Тип заказа: "" — все, paid — платные, warranty — гарантийные (27.10.2026). */
+  okind?: "" | "paid" | "warranty";
 }
 
 /** Сколько фильтров выбрано: каждая стадия, каждый тип техники, метка, аутсорс. Сортировка — не фильтр. */
 export const filterCount = (f: OrderFilterState) =>
-  f.stages.length + f.kinds.length + f.kindsNot.length + (f.color ? 1 : 0) + (f.outsource ? 1 : 0);
+  f.stages.length + f.kinds.length + f.kindsNot.length + (f.color ? 1 : 0) + (f.outsource ? 1 : 0) + (f.okind ? 1 : 0);
 
-export const EMPTY_FILTERS: OrderFilterState = { stages: [], kinds: [], kindsNot: [], color: "", sort: "default", outsource: "" };
+export const EMPTY_FILTERS: OrderFilterState = { stages: [], kinds: [], kindsNot: [], color: "", sort: "default", outsource: "", okind: "" };
 
 /**
  * Выбор из набора с кнопкой «Все».
@@ -144,7 +146,7 @@ export function ActiveFilters({
   const color = value.color === "none" ? "Без метки" : customerColor(value.color)?.label;
   const sort = value.sort !== "default" ? sorts.find((s) => s.value === value.sort)?.label : null;
   const partner = value.outsource && value.outsource !== "1" ? outsource?.find((c) => c.id === value.outsource) : null;
-  if (!picked.length && !value.kinds.length && !value.kindsNot.length && !value.color && !sort && !value.outsource) return null;
+  if (!picked.length && !value.kinds.length && !value.kindsNot.length && !value.color && !sort && !value.outsource && !value.okind) return null;
 
   const Chip = ({ label, cls, onRemove }: { label: string; cls?: string | null; onRemove: () => void }) => (
     <button type="button" onClick={onRemove} className={chip(true, cls) + " pr-2.5"} title="Снять">
@@ -172,6 +174,9 @@ export function ActiveFilters({
           label={value.outsource === "1" ? "Аутсорс: все" : `Аутсорс: ${partner ? partner.name : "выбранный"}`}
           onRemove={() => onChange({ ...value, outsource: "" })}
         />
+      )}
+      {value.okind && (
+        <Chip label={value.okind === "warranty" ? "Гарантийные" : "Платные"} onRemove={() => onChange({ ...value, okind: "" })} />
       )}
       {sort && <span className="ml-1 text-[13px] text-ink-dim">Сортировка: {sort}</span>}
     </div>
@@ -338,6 +343,20 @@ export function OrderFiltersModal({
           </Section>
         )}
 
+        <Section title="Тип заказа">
+          {(
+            [
+              ["", "Все"],
+              ["paid", "Платные"],
+              ["warranty", "Гарантийные"],
+            ] as const
+          ).map(([k, label]) => (
+            <button key={k || "all"} type="button" aria-pressed={(draft.okind ?? "") === k} onClick={() => setDraft((d) => ({ ...d, okind: k }))} className={chip((draft.okind ?? "") === k)} data-filter-okind={k || "all"}>
+              {label}
+            </button>
+          ))}
+        </Section>
+
         <Section title="Сортировка">
           {sorts.map((s) => (
             <button
@@ -407,6 +426,7 @@ export function recallFilters(key: string): OrderFilterState | null {
       color: (typeof v.color === "string" ? v.color : "") as OrderFilterState["color"],
       sort: typeof v.sort === "string" && v.sort ? v.sort : "default",
       outsource: typeof v.outsource === "string" ? v.outsource : "",
+      okind: v.okind === "paid" || v.okind === "warranty" ? v.okind : "",
     };
   } catch {
     return null;

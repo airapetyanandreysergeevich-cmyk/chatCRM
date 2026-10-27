@@ -43,6 +43,7 @@ const SAMPLE: BoardCard = {
   id: "sample",
   number: "Р-2026-00123",
   isUrgent: true,
+  kind: "BRAND_WARRANTY",
   acceptedAt: new Date().toISOString(),
   dueAt: new Date(Date.now() + 86400000).toISOString(),
   status: { id: "s", name: "В работе", group: "IN_PROGRESS", color: "" },

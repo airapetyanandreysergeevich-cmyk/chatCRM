@@ -58,6 +58,9 @@ import {
   seesMoney,
 } from "./orders.service";
 
+/** Гарантийные типы заказа: по гарантии производителя и наш гарантийный возврат. */
+const WARRANTY_KINDS: Array<"BRAND_WARRANTY" | "WARRANTY"> = ["BRAND_WARRANTY", "WARRANTY"];
+
 export const ordersRouter = Router();
 ordersRouter.use(authenticate, requireTenant, enforceTenantStatus);
 
@@ -176,6 +179,8 @@ ordersRouter.get(
         kind: z.string().max(600).optional(),
         /** Все типы, кроме этих (через запятую): «Все» в окне и снятые лишние. */
         kindNot: z.string().max(600).optional(),
+        /** Тип заказа: paid — платные, warranty — гарантийные (27.10.2026). */
+        okind: z.enum(["paid", "warranty"]).optional(),
         /** Исправлять раскладку: «yjen,er» → «ноутбук». Включается на устройстве. */
         layout: z.string().optional(),
         ...pageFields,
@@ -241,6 +246,8 @@ ordersRouter.get(
       ...(kindsNot.length
         ? { NOT: kindsNot.map((k) => ({ device: { is: { kind: { equals: k, mode: "insensitive" as const } } } })) }
         : {}),
+      // Платные / гарантийные: гарантия производителя и наш гарантийный возврат — гарантийные.
+      ...(q.okind ? { kind: q.okind === "warranty" ? { in: WARRANTY_KINDS } : { notIn: WARRANTY_KINDS } } : {}),
     } satisfies Prisma.OrderWhereInput;
 
     // Каждое слово запроса — отдельным условием (lib/search.ts).
@@ -382,7 +389,7 @@ const acceptSchema = z.object({
     model: z.string().trim().optional(),
     serial: z.string().trim().optional(),
   }),
-  kind: z.enum(["REPAIR", "DIAGNOSTICS", "WARRANTY", "REPEAT"]).default("REPAIR"),
+  kind: z.enum(["REPAIR", "DIAGNOSTICS", "WARRANTY", "REPEAT", "BRAND_WARRANTY"]).default("REPAIR"),
   parentOrderId: z.string().uuid().optional(),
   isUrgent: z.boolean().default(false),
 

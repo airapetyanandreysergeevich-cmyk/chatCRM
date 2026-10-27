@@ -26,6 +26,7 @@ const ORDER_KIND_LABEL: Record<string, string> = {
   DIAGNOSTICS: "Диагностика",
   WARRANTY: "Гарантийный возврат",
   REPEAT: "Повторное обращение",
+  BRAND_WARRANTY: "Гарантия производителя",
 };
 
 const CUSTOMER_TYPE_LABEL: Record<string, string> = {

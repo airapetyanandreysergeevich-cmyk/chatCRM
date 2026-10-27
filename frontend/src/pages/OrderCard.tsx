@@ -16,6 +16,7 @@ import { Photo } from "../components/OrderPhoto";
 import { DeviceHistory } from "../components/DeviceHistory";
 import { OrderLabels, canLabel } from "../components/OrderLabels";
 import { OrderChat } from "../components/OrderChat";
+import { useHistoryDock, useWidth } from "../lib/historyDock";
 import { OrderEditModal } from "../components/OrderEditModal";
 import { Modal } from "../components/Modal";
 import { ROUTER_BASE } from "../lib/basePath";
@@ -323,6 +324,38 @@ export default function OrderCard() {
   /** Окно поиска у поставщиков: что искать и какую строку заполнить найденным (-1 — новая). */
   const [suppliers, setSuppliers] = useState<{ q: string; row: number } | null>(null);
   const folder = useOrderFolder();
+  // История ремонта — на своём месте или колонкой сбоку (27.10.2026).
+  // Колонка — только если рядом хватает места заказу: иначе три колонки
+  // превращаются в узкие полоски, и панель остаётся на своём месте.
+  const [historyDock, setHistoryDock] = useHistoryDock();
+  const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null);
+  const frameWidth = useWidth(frameEl);
+  const dockFits = frameWidth >= 1180;
+  const docked = historyDock && dockFits ? historyDock : null;
+  // Высота прикреплённой колонки — до низа окна от того места, где она сейчас:
+  // пока страница не прокручена, сверху ещё шапка заказа и баннеры, и колонка
+  // во всю высоту окна уходила бы низом (с полем ввода) за край.
+  const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
+  const [dockH, setDockH] = useState<number | null>(null);
+  useEffect(() => {
+    if (!dockEl) return;
+    let raf = 0;
+    const put = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const top = Math.max(16, dockEl.getBoundingClientRect().top);
+        setDockH(Math.max(360, window.innerHeight - top - 16));
+      });
+    };
+    put();
+    window.addEventListener("scroll", put, { passive: true });
+    window.addEventListener("resize", put);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", put);
+      window.removeEventListener("resize", put);
+    };
+  }, [dockEl]);
   const [finish, setFinish] = useState<Finish>({ diagnosis: "", masterComment: "", recommendation: "", warrantyDays: "" });
   const [returnReason, setReturnReason] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -565,9 +598,33 @@ export default function OrderCard() {
   /** Все снимки подряд — для листания: сначала при приёме, потом после ремонта. */
   const photos = [...intake, ...completion];
 
+  const chat = (
+    <OrderChat
+      orderId={order.id}
+      myId={myId}
+      canModerate={can("orders.edit")}
+      found={found}
+      refreshKey={order}
+      dock={{ value: historyDock, docked, fits: dockFits, set: setHistoryDock }}
+    />
+  );
+  // Прикреплённая история — колонка во всю высоту окна, прилипает при прокрутке.
+  const dockColumn = (
+    <aside
+      ref={setDockEl}
+      className="sticky top-4 w-[420px] shrink-0"
+      style={{ height: dockH ?? "calc(100dvh - 2rem)" }}
+      data-history-docked={docked ?? undefined}
+    >
+      {chat}
+    </aside>
+  );
+
   return (
-    // Пока видна плавающая «Сохранить» — запас снизу, чтобы она не закрывала последние поля.
-    <div className={"space-y-5 " + (canEditWork && dirty ? "pb-24" : "")}>
+    <div ref={setFrameEl} className={docked ? "flex items-start gap-5" : undefined} data-history-dock={docked ?? undefined}>
+    {docked === "left" && dockColumn}
+    {/* Пока видна плавающая «Сохранить» — запас снизу, чтобы она не закрывала последние поля. */}
+    <div className={"space-y-5 " + (docked ? "min-w-0 flex-1 " : "") + (canEditWork && dirty ? "pb-24" : "")}>
       <button data-back-to-list onClick={() => (dirty ? setLeaveTo(backTo) : navigate(backTo))} className="text-[13.5px] font-semibold text-ink-muted hover:text-ink">
         ‹ К списку заказов
       </button>
@@ -606,8 +663,11 @@ export default function OrderCard() {
               <span className="tag tag-urgent px-3 py-1 text-[12.5px]">срочный</span>
             )}
             {order.kind !== "REPAIR" && (
-              <span className={"tag px-3 py-1 text-[12.5px] " + (order.kind === "WARRANTY" ? "tag-warranty" : "tag-neutral")}>
-                {ORDER_KIND_LABEL[order.kind]}
+              <span
+                className={"tag px-3 py-1 text-[12.5px] " + (order.kind === "WARRANTY" ? "tag-warranty" : order.kind === "BRAND_WARRANTY" ? "tag-factory" : "tag-neutral")}
+                data-order-kind={order.kind}
+              >
+                {order.kind === "BRAND_WARRANTY" && order.device?.brand ? `Гарантия ${order.device.brand}` : ORDER_KIND_LABEL[order.kind]}
               </span>
             )}
           </div>
@@ -881,7 +941,7 @@ export default function OrderCard() {
             </div>
           </Card>
 
-          <OrderChat orderId={order.id} myId={myId} canModerate={can("orders.edit")} found={found} refreshKey={order} />
+          {!docked && chat}
         </div>
 
         <div className="space-y-4">
@@ -1414,6 +1474,8 @@ export default function OrderCard() {
           }}
         />
       )}
+    </div>
+    {docked === "right" && dockColumn}
     </div>
   );
 }

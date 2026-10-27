@@ -16,8 +16,7 @@ export function UpdateBadge() {
   const lines = update.notes
     .split("\n")
     .map((l) => l.replace(/^[•\-*]\s*/, "").trim())
-    .filter(Boolean)
-    .slice(0, 12);
+    .filter(Boolean);
   return (
     <>
       <button
@@ -40,12 +39,22 @@ export function UpdateBadge() {
               Сейчас установлена {update.current}.{" "}
               {update.ready ? "Обновление уже загружено — можно ставить." : update.download ? "Откроется загрузка новой версии." : ""}
             </p>
+            {/* Весь список изменений; длинный — прокручивается, кнопки остаются
+                на виду (Андрей, 27.10.2026: «не весь текст влезает»). */}
             {lines.length > 0 && (
-              <ul className="list-disc space-y-1 pl-5 text-[13.5px] leading-snug text-ink-soft">
-                {lines.map((l, i) => (
-                  <li key={i}>{l}</li>
-                ))}
-              </ul>
+              <div className="max-h-[min(52vh,460px)] overflow-y-auto rounded-field border border-line bg-surface-input/40 py-3 pl-2 pr-3" data-update-notes>
+                <ul className="list-disc space-y-2 pl-5 text-[13.5px] leading-snug text-ink-soft">
+                  {lines.map((l, i) =>
+                    /^\d+\.\d+\.\d+:?$/.test(l) ? (
+                      <li key={i} className="-ml-5 list-none pt-1 text-[11.5px] font-bold uppercase tracking-[0.08em] text-ink-dim">
+                        Версия {l.replace(/:$/, "")}
+                      </li>
+                    ) : (
+                      <li key={i}>{l}</li>
+                    )
+                  )}
+                </ul>
+              </div>
             )}
             <p className="text-[12.5px] text-ink-dim">
               {update.download

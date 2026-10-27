@@ -37,6 +37,7 @@ import SmsPhoneLink from "./pages/SmsPhoneLink";
 import Orders from "./pages/Orders";
 import Purchases from "./pages/Purchases";
 import ServicesPage from "./pages/Services";
+import IntakeSettingsPage from "./pages/IntakeSettings";
 import Staff from "./pages/Staff";
 import Stock from "./pages/Stock";
 import Tenants from "./pages/platform/Tenants";
@@ -98,6 +99,7 @@ export default function App() {
           <Route path="/settings/data" element={<DataPage />} />
           <Route path="/settings/remote-access" element={<RemoteAccess />} />
           <Route path="/settings/services" element={<ServicesPage />} />
+          <Route path="/settings/intake" element={<IntakeSettingsPage />} />
           <Route path="/settings/interface" element={<InterfacePage />} />
           <Route path="/settings/print" element={<PrintFormsPage />} />
           <Route path="/settings/peripherals" element={<PeripheralsPage />} />

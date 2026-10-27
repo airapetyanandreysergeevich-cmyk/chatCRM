@@ -214,6 +214,21 @@ function setup({ version = "0.2.0", answers = [], checkError = null, downloadErr
     check((await up.act()).result === "nothing", "нет обновления — «установить» ничего не делает");
   }
 
+  // Своё окно «Доступна новая версия» (27.10.2026): весь список изменений, кнопки — отдельно.
+  {
+    const { up, log } = setup({ answers: [] });
+    let got = null;
+    up.ui.askUpdate = async (a) => ((got = a), log.push("askUpdate"), false);
+    const r = await up.check({ manual: true });
+    check(log.includes("askUpdate") && !log.some((l) => l.startsWith("ask:")), "есть своё окно — системное не открывается");
+    check(
+      got && got.title === "Доступна новая версия 0.2.0" && got.current === "0.1.0" && got.notes === "• Новое окно\n• Быстрее" &&
+        got.buttons[0] === "Загрузить обновление" && got.buttons[1] === "Позже" && /База заказов/.test(got.footer),
+      "в окно уходят заголовок, текущая версия, весь список изменений, пояснение и кнопки"
+    );
+    check(r.result === "declined" && !log.includes("download"), "«Позже» в своём окне — ничего не качаем");
+  }
+
   console.log(fails === 0 ? "\nвсе проверки прошли" : `\nпровалов: ${fails}`);
   process.exitCode = fails === 0 ? 0 : 1;
 })();

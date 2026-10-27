@@ -1,4 +1,5 @@
 import { UpdateDot } from "./UpdateBadge";
+import { SideToggle, useRailTips } from "./SideRail";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -19,8 +20,6 @@ import {
   IconCash,
   IconSalary,
   IconStats,
-  IconChevronLeft,
-  IconChevronRight,
   IconClients,
   IconDashboard,
   IconJournal,
@@ -61,7 +60,8 @@ function pageWidth(path: string): "narrow" | "card" | "wide" {
   if (/^\/(orders|clients)\/[^/]+$/.test(path)) return "card";
   return "wide";
 }
-const PAGE_MAX = { narrow: "max-w-[1240px]", card: "max-w-[1600px]", wide: "max-w-none" } as const;
+// Карточка с прикреплённой историей ремонта — шире на колонку истории (420 + 20).
+const PAGE_MAX = { narrow: "max-w-[1240px]", card: "max-w-[1600px] has-[[data-history-dock]]:max-w-[2040px]", wide: "max-w-none" } as const;
 
 export default function Layout() {
   const { me, can, logout, applyToken } = useAuth();
@@ -88,23 +88,36 @@ export default function Layout() {
    * на ноутбуке приёмщика место на экране дороже подписей, на большом мониторе
    * мастерской — наоборот. Поэтому выбор живёт в этом браузере и никуда не
    * уезжает вместе с человеком.
+   *
+   * В карточке заказа — свой выбор (Андрей, 27.10.2026): по умолчанию меню
+   * там свёрнуто, заказу нужно место; развернули в карточке — запомнили, и в
+   * следующих карточках оно развёрнуто. На остальных экранах — как было.
    */
-  const [collapsed, setCollapsed] = useState(() => {
+  const onCard = /^\/orders\/(?!new$)[^/]+$/.test(location.pathname);
+  const readFlag = (key: string, fallback: boolean) => {
     try {
-      return localStorage.getItem("sidebar:collapsed") === "1";
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : v === "1";
     } catch {
-      // Приватное окно или запрещённые данные сайта — меню просто развёрнуто.
-      return false;
+      // Приватное окно или запрещённые данные сайта — по умолчанию.
+      return fallback;
     }
-  });
+  };
+  const [collapsedMain, setCollapsedMain] = useState(() => readFlag("sidebar:collapsed", false));
+  const [collapsedCard, setCollapsedCard] = useState(() => readFlag("sidebar:collapsed:card", true));
+  const collapsed = onCard ? collapsedCard : collapsedMain;
+  const toggleSidebar = () => (onCard ? setCollapsedCard((v) => !v) : setCollapsedMain((v) => !v));
 
   useEffect(() => {
     try {
-      localStorage.setItem("sidebar:collapsed", collapsed ? "1" : "0");
+      localStorage.setItem("sidebar:collapsed", collapsedMain ? "1" : "0");
+      localStorage.setItem("sidebar:collapsed:card", collapsedCard ? "1" : "0");
     } catch {
       /* не сохранилось — переживём, это всего лишь ширина меню */
     }
-  }, [collapsed]);
+  }, [collapsedMain, collapsedCard]);
+
+  const rail = useRailTips(collapsed);
 
   // Окно программы FineCRM — станция печати: печатает задания мастерской
   // на принтеры этого компьютера (lib/printing.ts). В браузере и на
@@ -309,10 +322,15 @@ export default function Layout() {
             "hidden shrink-0 border-r border-line bg-surface p-3 transition-[width] duration-200 lg:flex lg:min-h-screen lg:flex-col " +
             (collapsed ? "w-[76px] items-center" : "w-[240px]")
           }
+          data-sidebar={collapsed ? "collapsed" : "expanded"}
+          {...rail.bind}
         >
-          <div className={"mb-6 flex items-center gap-2 pt-1.5 " + (collapsed ? "" : "justify-between px-1.5")}>
+          {rail.node}
+          <div className={"mb-6 flex gap-2 pt-1.5 " + (collapsed ? "flex-col items-center" : "items-center justify-between px-1.5")}>
             {collapsed ? <BrandMark size={34} /> : <BrandRow />}
+            {collapsed && <SideToggle collapsed onToggle={toggleSidebar} />}
             {!collapsed && (
+              <div className="flex items-center gap-0.5">
               <NavLink
                 to="/settings/notifications"
                 aria-label="Оповещения"
@@ -328,6 +346,8 @@ export default function Layout() {
                   </span>
                 )}
               </NavLink>
+              <SideToggle collapsed={false} onToggle={toggleSidebar} />
+              </div>
             )}
           </div>
 
@@ -336,7 +356,7 @@ export default function Layout() {
                 колокольчик встаёт в тот же ряд: отдельная кнопка сверху
                 в узкой полосе выглядит потерянной. */}
             {collapsed && (
-              <NavLink to="/settings/notifications" className={sideLink} title="Оповещения">
+              <NavLink to="/settings/notifications" className={sideLink} aria-label="Оповещения" data-rail-tip="Оповещения" data-rail-badge={unread || undefined}>
                 <span className="relative [&>svg]:h-[19px] [&>svg]:w-[19px]">
                   <IconBell />
                   {!!unread && (
@@ -355,8 +375,11 @@ export default function Layout() {
                 end={i.to === "/"}
                 className={sideLink}
                 // В свёрнутом виде подпись остаётся только подсказкой: без неё
-                // ряд одинаковых значков приходится разгадывать.
-                title={collapsed ? i.label : undefined}
+                // ряд одинаковых значков приходится разгадывать. Подсказка —
+                // своя, плавная (useRailTips), а не системный title.
+                aria-label={collapsed ? i.label : undefined}
+                data-rail-tip={collapsed ? i.label : undefined}
+                data-rail-badge={collapsed && i.badge ? i.badge : undefined}
               >
                 {({ isActive }) => (
                   <>
@@ -389,25 +412,6 @@ export default function Layout() {
           </nav>
 
           <div className={"mt-auto border-t border-line pt-3 " + (collapsed ? "w-[52px]" : "w-full")}>
-            <button
-              onClick={() => setCollapsed((v) => !v)}
-              aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
-              title={collapsed ? "Развернуть меню" : "Свернуть меню"}
-              className={
-                "flex h-10 items-center rounded-field text-[13.5px] font-medium text-ink-dim transition-colors duration-150 hover:bg-surface-raised hover:text-ink " +
-                (collapsed ? "w-full justify-center" : "w-full gap-3 px-3")
-              }
-            >
-              {collapsed ? (
-                <IconChevronRight className="h-[18px] w-[18px]" />
-              ) : (
-                <>
-                  <IconChevronLeft className="h-[18px] w-[18px]" />
-                  Свернуть меню
-                </>
-              )}
-            </button>
-
             {!collapsed && (
               <div className="px-2 pb-2 pt-1">
                 <p className="truncate text-[13.5px] font-semibold">{title}</p>
@@ -418,7 +422,7 @@ export default function Layout() {
             <button
               onClick={() => void logout()}
               aria-label="Выйти"
-              title={collapsed ? "Выйти" : undefined}
+              data-rail-tip={collapsed ? "Выйти" : undefined}
               className={
                 "flex h-10 items-center rounded-field text-[14px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink " +
                 (collapsed ? "w-full justify-center" : "w-full gap-3 px-3")

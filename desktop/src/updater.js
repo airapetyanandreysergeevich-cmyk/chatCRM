@@ -186,16 +186,21 @@ class Updater {
     if (!manual && this.ui.available) return this.quiet(info);
 
     const notes = notesText(info);
-    const yes = await this.ui.ask(
-      `Доступна новая версия ${info.version}`,
-      `Сейчас установлена ${this.currentVersion}.` +
-        (notes ? `\n\nЧто нового:\n${notes}` : "") +
-        (this.openDownload
-          ? "\n\nОткроется загрузка новой версии. Закройте FineCRM, откройте скачанный файл и перетащите " +
-            "FineCRM в «Программы» с заменой. База заказов и настройки останутся на месте."
-          : "\n\nБаза заказов и настройки останутся на месте. Загрузка идёт в фоне — можно работать дальше."),
-      [this.openDownload ? "Скачать" : "Загрузить обновление", "Позже"]
-    );
+    const title = `Доступна новая версия ${info.version}`;
+    const footer = this.openDownload
+      ? "Откроется загрузка новой версии. Закройте FineCRM, откройте скачанный файл и перетащите " +
+        "FineCRM в «Программы» с заменой. База заказов и настройки останутся на месте."
+      : "База заказов и настройки останутся на месте. Загрузка идёт в фоне — можно работать дальше.";
+    const buttons = [this.openDownload ? "Скачать" : "Загрузить обновление", "Позже"];
+    // Своё окно с прокруткой (27.10.2026): системное окно Windows с длинным
+    // «что нового» уезжало за край экрана вместе с кнопками.
+    const yes = this.ui.askUpdate
+      ? await this.ui.askUpdate({ title, current: this.currentVersion, notes, footer, buttons })
+      : await this.ui.ask(
+          title,
+          `Сейчас установлена ${this.currentVersion}.` + (notes ? `\n\nЧто нового:\n${notes}` : "") + `\n\n${footer}`,
+          buttons
+        );
     if (!yes) {
       this.declined = info.version;
       this.state = "idle";

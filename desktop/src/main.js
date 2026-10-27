@@ -852,6 +852,62 @@ function showInstalling(version) {
   });
 }
 
+/**
+ * Окно «Доступна новая версия» (27.10.2026). Системное окно Windows не умеет
+ * прокручивать: длинный список изменений вытягивал его за край экрана, и
+ * кнопки «Загрузить» / «Позже» оказывались внизу, куда не достать. Здесь
+ * список прокручивается, окно можно растянуть, кнопки всегда видны.
+ *
+ * Ответ — переход внутри страницы на «#answer-<номер кнопки>»; закрыли
+ * окно крестиком — «Позже». Не открылось окно — спрашиваем как раньше.
+ */
+function askUpdateWindow({ title, current, notes, footer, buttons }, fallback) {
+  return new Promise((resolve) => {
+    let done = false;
+    const parent = win && !win.isDestroyed() ? win : undefined;
+    const w = new BrowserWindow({
+      width: 620,
+      height: 580,
+      minWidth: 460,
+      minHeight: 360,
+      parent,
+      modal: !!parent,
+      minimizable: false,
+      maximizable: false,
+      title,
+      backgroundColor: "#0F1117",
+      autoHideMenuBar: true,
+      show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    w.setMenu(null);
+    const finish = (yes) => {
+      if (done) return;
+      done = true;
+      resolve(yes);
+      if (!w.isDestroyed()) w.close();
+    };
+    w.webContents.on("did-navigate-in-page", (_e, url) => {
+      const m = /#answer-(\d+)$/.exec(url);
+      if (m) finish(Number(m[1]) === 0);
+    });
+    // Ссылок наружу в окне нет; на всякий случай никуда не уходим.
+    w.webContents.on("will-navigate", (e) => e.preventDefault());
+    w.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    w.on("closed", () => finish(false));
+    w.once("ready-to-show", () => w.show());
+    w.loadFile(path.join(__dirname, "update-ask.html"), {
+      search: `d=${encodeURIComponent(JSON.stringify({ title, current, notes, footer, buttons }))}`,
+    }).catch(() => {
+      if (done) return;
+      done = true;
+      if (!w.isDestroyed()) w.destroy();
+      const text = `Сейчас установлена ${current}.` + (notes ? `\n\nЧто нового:\n${notes}` : "") + `\n\n${footer}`;
+      fallback(title, text, buttons).then(resolve, () => resolve(false));
+    });
+  });
+}
+
 /** Установка не состоялась: окно убираем, программа работает дальше. */
 function hideInstalling() {
   if (installWin && !installWin.isDestroyed()) installWin.close();
@@ -969,6 +1025,7 @@ function startUpdater() {
     currentVersion: app.getVersion(),
     ui: {
       ask: box("question"),
+      askUpdate: (a) => askUpdateWindow(a, box("question")),
       info: box("info"),
       error: box("warning"),
       // Фоновое обновление загружено — значок у часов на главной (окно не
