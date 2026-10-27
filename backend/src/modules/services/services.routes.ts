@@ -3,7 +3,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { clientIp, safeDiff, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
-import { ah, badRequest, notFound } from "../../lib/errors";
+import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
   actorUserId,
@@ -43,7 +43,158 @@ const serviceSchema = z.object({
   price: z.coerce.number().min(0, "Цена не может быть отрицательной").max(10_000_000),
   note: z.string().trim().max(300).optional(),
   isPinned: z.coerce.boolean().optional(),
+  /** Категория прайса; null — «Без категории». */
+  categoryId: z.string().uuid().nullable().optional(),
 });
+
+// ------------------------------------------------------------ категории прайса
+//
+// Как на складе (Андрей, 28.10.2026): категории верхнего уровня — цветные
+// карточки, внутри — подкатегории. Удаляется категория без потерь: услуги и
+// подкатегории уходят в указанную или на уровень выше.
+
+type CatRow = { id: string; parentId: string | null };
+
+/** Категория и все её подкатегории — чтобы не перенести категорию внутрь неё самой. */
+function withDescendants(id: string, all: CatRow[]): Set<string> {
+  const out = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const c of all) if (c.parentId && out.has(c.parentId) && !out.has(c.id)) (out.add(c.id), (grew = true));
+  }
+  return out;
+}
+
+async function assertCategory(tx: Prisma.TransactionClient, id: string | null | undefined): Promise<string | null> {
+  if (!id) return null;
+  const c = await tx.serviceCategory.findFirst({ where: { id }, select: { id: true } });
+  if (!c) throw badRequest("Такой категории нет — обновите страницу");
+  return c.id;
+}
+
+const categoryName = z.string().trim().min(1, "Назовите категорию").max(80);
+const categoryColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Цвет — в виде #45C08A").nullable().optional();
+
+servicesRouter.get(
+  "/categories",
+  ah(async (req, res) => {
+    const out = await withTenant(tenantOf(req), async (tx) => {
+      const [cats, counts, total] = await Promise.all([
+        tx.serviceCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+        tx.service.groupBy({ by: ["categoryId"], _count: { _all: true } }),
+        tx.service.count(),
+      ]);
+      const n = new Map(counts.map((c) => [c.categoryId, c._count._all]));
+      return {
+        items: cats.map((c) => ({ id: c.id, parentId: c.parentId, name: c.name, color: c.color, sortOrder: c.sortOrder, count: n.get(c.id) ?? 0 })),
+        uncategorized: n.get(null) ?? 0,
+        total,
+      };
+    });
+    res.json(out);
+  })
+);
+
+servicesRouter.post(
+  "/categories",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const body = z.object({ name: categoryName, parentId: z.string().uuid().nullable().optional(), color: categoryColor }).parse(req.body);
+    const tenantId = tenantOf(req);
+    const created = await withTenant(tenantId, async (tx) => {
+      const parentId = await assertCategory(tx, body.parentId);
+      const same = await tx.serviceCategory.findFirst({ where: { parentId, name: { equals: body.name, mode: "insensitive" } } });
+      if (same) throw conflict(`Категория «${same.name}» здесь уже есть`);
+      const c = await tx.serviceCategory.create({ data: { tenantId, parentId, name: body.name, color: body.color ?? null } });
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "ServiceCategory", entityId: c.id, action: "CREATE", diff: { name: c.name }, ip: clientIp(req) });
+      return c;
+    });
+    res.status(201).json({ id: created.id, name: created.name, parentId: created.parentId });
+  })
+);
+
+servicesRouter.patch(
+  "/categories/:id",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const body = z.object({ name: categoryName.optional(), parentId: z.string().uuid().nullable().optional(), color: categoryColor }).parse(req.body);
+    const tenantId = tenantOf(req);
+    await withTenant(tenantId, async (tx) => {
+      const cat = await tx.serviceCategory.findFirst({ where: { id: req.params.id } });
+      if (!cat) throw notFound("Категория не найдена");
+      let parentId = cat.parentId;
+      if (body.parentId !== undefined) {
+        parentId = await assertCategory(tx, body.parentId);
+        const all = await tx.serviceCategory.findMany({ select: { id: true, parentId: true } });
+        if (parentId && withDescendants(cat.id, all).has(parentId)) throw badRequest("Категорию нельзя перенести внутрь неё самой");
+      }
+      const name = body.name ?? cat.name;
+      const same = await tx.serviceCategory.findFirst({ where: { id: { not: cat.id }, parentId, name: { equals: name, mode: "insensitive" } } });
+      if (same) throw conflict(`Категория «${same.name}» здесь уже есть`);
+      await tx.serviceCategory.update({ where: { id: cat.id }, data: { name, parentId, ...(body.color !== undefined ? { color: body.color } : {}) } });
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "ServiceCategory", entityId: cat.id, action: "UPDATE", diff: body as Record<string, unknown>, ip: clientIp(req) });
+    });
+    res.json({ ok: true });
+  })
+);
+
+servicesRouter.delete(
+  "/categories/:id",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const { moveTo } = z.object({ moveTo: z.string().uuid().optional().or(z.literal("")) }).parse(req.query);
+    const tenantId = tenantOf(req);
+    const result = await withTenant(tenantId, async (tx) => {
+      const cat = await tx.serviceCategory.findFirst({ where: { id: req.params.id } });
+      if (!cat) throw notFound("Категория не найдена");
+      const all = await tx.serviceCategory.findMany({ select: { id: true, parentId: true } });
+      const target = moveTo ? await assertCategory(tx, moveTo) : cat.parentId;
+      if (target && withDescendants(cat.id, all).has(target)) throw badRequest("Нельзя перенести в удаляемую категорию или её подкатегорию");
+      const services = await tx.service.updateMany({ where: { categoryId: cat.id }, data: { categoryId: target } });
+      const children = await tx.serviceCategory.updateMany({ where: { parentId: cat.id }, data: { parentId: target } });
+      await tx.serviceCategory.delete({ where: { id: cat.id } });
+      await writeAudit(tx, { tenantId, userId: actorUserId(req), entity: "ServiceCategory", entityId: cat.id, action: "DELETE", diff: { name: cat.name, services: services.count, children: children.count }, ip: clientIp(req) });
+      return { services: services.count, children: children.count };
+    });
+    res.json({ ok: true, ...result });
+  })
+);
+
+/** Действия разом над отмеченными услугами: перенести в категорию или удалить. */
+servicesRouter.post(
+  "/bulk",
+  requirePermission(PERMISSIONS.SETTINGS_MANAGE),
+  ah(async (req, res) => {
+    const body = z
+      .discriminatedUnion("action", [
+        z.object({ action: z.literal("move"), ids: z.array(z.string().uuid()).min(1).max(1000), categoryId: z.string().uuid().nullable() }),
+        z.object({ action: z.literal("delete"), ids: z.array(z.string().uuid()).min(1).max(1000) }),
+      ])
+      .parse(req.body);
+    const tenantId = tenantOf(req);
+    const changed = await withTenant(tenantId, async (tx) => {
+      let n: number;
+      if (body.action === "move") {
+        const categoryId = await assertCategory(tx, body.categoryId);
+        n = (await tx.service.updateMany({ where: { id: { in: body.ids } }, data: { categoryId } })).count;
+      } else {
+        n = (await tx.service.deleteMany({ where: { id: { in: body.ids } } })).count;
+      }
+      await writeAudit(tx, {
+        tenantId,
+        userId: actorUserId(req),
+        entity: "Service",
+        entityId: tenantId,
+        action: body.action === "delete" ? "DELETE" : "UPDATE",
+        diff: { bulk: body.action, count: n, ...(body.action === "move" ? { categoryId: body.categoryId } : {}) },
+        ip: clientIp(req),
+      });
+      return n;
+    });
+    res.json({ ok: true, changed });
+  })
+);
 
 servicesRouter.get(
   "/",
@@ -58,6 +209,7 @@ servicesRouter.get(
         price: num(s.price),
         note: s.note,
         isPinned: s.isPinned,
+        categoryId: s.categoryId,
       }))
     );
   })
@@ -79,6 +231,7 @@ servicesRouter.post(
             price: body.price,
             note: body.note || null,
             isPinned: body.isPinned ?? false,
+            categoryId: await assertCategory(tx, body.categoryId),
           },
         });
         await writeAudit(tx, {
@@ -112,9 +265,14 @@ servicesRouter.patch(
         const service = await tx.service.findFirst({ where: { id: req.params.id } });
         if (!service) throw notFound("Услуга не найдена");
 
+        const { categoryId, ...rest } = body;
         await tx.service.update({
           where: { id: service.id },
-          data: { ...body, ...(body.note !== undefined ? { note: body.note || null } : {}) },
+          data: {
+            ...rest,
+            ...(body.note !== undefined ? { note: body.note || null } : {}),
+            ...(categoryId !== undefined ? { categoryId: await assertCategory(tx, categoryId) } : {}),
+          },
         });
         await writeAudit(tx, {
           tenantId,

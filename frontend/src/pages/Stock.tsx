@@ -22,11 +22,13 @@ import {
   IconUpload,
   IconCart,
   IconJournal,
+  IconGlobe,
 } from "../components/icons";
+import { openSearch } from "../components/WebSearch";
 import { PartsSearch } from "../components/PartsSearch";
 import { SuggestInput } from "../components/SuggestInput";
 import { buildTree, CategoryDialog, flatTree, indent, rootColor, STOCK_PALETTE, type CategoryDialogKind, type TreeNode } from "../components/StockTree";
-import { CategoryPicker, ContextMenu, MenuItem, useMenuTrigger, type MenuAt, type MenuEntry } from "../components/StockMenu";
+import { CategoryPicker, Check, ContextMenu, MenuItem, tidy, useMenuTrigger, type MenuAt, type MenuEntry } from "../components/StockMenu";
 import { Badge, Banner, Button, EmptyState, Field, GrowText, Input, List, ListRow, PageHeader, SearchInput, Select, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -586,7 +588,10 @@ export default function Stock() {
       ...(one && item.sku
         ? [{ label: "Копировать артикул", icon: <CopyIcon />, onClick: () => void copyText(item.sku!).then((ok) => say({ text: ok ? `Скопировано: ${item.sku}` : "Не удалось скопировать", tone: ok ? undefined : "error" })) }]
         : []),
-      ...(one ? [{ label: "Найти у поставщиков", icon: <IconSearch className={ico} />, onClick: () => setSuppliers(item.name) }] : []),
+      // Поиск по названию (Андрей, 28.10.2026): в Google — в браузере (в
+      // программе — во внешнем); у поставщиков — окно поиска по нашим магазинам.
+      ...(one ? [{ label: "Искать в Google", icon: <IconGlobe className={ico} />, hint: sheet ? undefined : "в браузере", onClick: () => openSearch("google", item.name) }] : []),
+      ...(one ? [{ label: "Искать у поставщиков", icon: <IconSearch className={ico} />, hint: sheet ? undefined : "наши магазины", onClick: () => setSuppliers(item.name) }] : []),
       ...(one ? [{ label: "История движений", icon: <ClockIcon />, onClick: () => setHistory(item) }] : []),
       ...(canMove ? [{ label: "Выгрузить в Excel", icon: <IconDownload className={ico} />, onClick: () => void exportItems(ids, one ? item.name : "Склад — выбранное") }] : []),
       ...(canMove ? ([{ sep: true }, { label: "Удалить…", icon: <IconDelete className={ico} />, danger: true, hint: sheet ? undefined : "Del", onClick: () => setDeleteFor(ids) }] as MenuEntry[]) : []),
@@ -1277,45 +1282,11 @@ export default function Stock() {
 }
 
 /** Убрать разделители в начале, в конце и подряд — пункты меню зависят от прав. */
-function tidy(entries: MenuEntry[]): MenuEntry[] {
-  const out: MenuEntry[] = [];
-  for (const e of entries) {
-    if ("sep" in e && (!out.length || "sep" in out[out.length - 1])) continue;
-    out.push(e);
-  }
-  while (out.length && "sep" in out[out.length - 1]) out.pop();
-  return out;
-}
 
 const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toLocaleString("ru-RU", { maximumFractionDigits: 3 }));
 
 // ------------------------------------------------------------------ мелочи
 
-function Check({ on, part, label, onClick, disabled }: { on: boolean; part?: boolean; label: string; onClick: (e: React.MouseEvent) => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={part ? "mixed" : on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick(e);
-      }}
-      className="-m-2 flex h-[34px] w-[34px] shrink-0 items-center justify-center p-2 disabled:opacity-40"
-    >
-      <span
-        className={
-          "flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border-[1.6px] transition-colors " +
-          (on || part ? "border-brand bg-brand text-white" : "border-line-strong bg-surface-input")
-        }
-      >
-        {part ? <span className="h-[2px] w-[9px] rounded bg-white" /> : on ? <svg viewBox="0 0 12 10" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 5l3.5 3.5L11 1.5" /></svg> : null}
-      </span>
-    </button>
-  );
-}
 
 function ChipBtn({
   children,

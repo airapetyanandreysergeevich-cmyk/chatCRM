@@ -7,7 +7,7 @@ import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
 import type { ApprovalHint, ReadyHint } from "../lib/sms";
 import { printingApi } from "../lib/printing";
-import { IconCamera, IconFolder, IconPlus, IconSearch } from "../components/icons";
+import { IconCamera, IconFolder, IconPlus, IconSearch, IconServices } from "../components/icons";
 import { useOrderFolder } from "../components/OrderFolder";
 import { PartsSearch, type PickedOffer } from "../components/PartsSearch";
 import { PhotoShooter } from "../components/PhotoShooter";
@@ -16,6 +16,7 @@ import { Photo } from "../components/OrderPhoto";
 import { DeviceHistory } from "../components/DeviceHistory";
 import { OrderLabels, canLabel } from "../components/OrderLabels";
 import { OrderChat } from "../components/OrderChat";
+import { ServicePicker, type PickerCategory } from "../components/ServicePicker";
 import { useHistoryDock, useWidth } from "../lib/historyDock";
 import { OrderEditModal } from "../components/OrderEditModal";
 import { Modal } from "../components/Modal";
@@ -109,11 +110,14 @@ function ServiceNameInput({
   onChange,
   onPick,
   services,
+  onOpenPrice,
 }: {
   value: string;
   onChange: (name: string) => void;
   onPick: (service: Service) => void;
   services: Service[];
+  /** «+» справа в поле — панель прайса с категориями (28.10.2026). */
+  onOpenPrice?: (anchor: HTMLElement) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -158,7 +162,20 @@ function ServiceNameInput({
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={onKeyDown}
+        className={onOpenPrice ? "pr-12" : undefined}
       />
+      {onOpenPrice && (
+        <button
+          type="button"
+          aria-label="Выбрать из прайса"
+          title="Выбрать из прайса"
+          onClick={(e) => onOpenPrice(e.currentTarget)}
+          data-price-picker-open
+          className="absolute right-1.5 top-[5px] flex h-8 w-8 items-center justify-center rounded-[9px] bg-brand/15 text-brand-ink transition-colors hover:bg-brand/25 [&>svg]:h-[18px] [&>svg]:w-[18px]"
+        >
+          <IconPlus />
+        </button>
+      )}
       {show && (
         <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-field border border-line bg-surface-raised shadow-modal">
           {hits.map((s, i) => (
@@ -196,6 +213,7 @@ function LineEditor<T extends OrderWork>({
   services,
   actions,
   nameInput,
+  serviceCategories,
 }: {
   /** Своё поле названия (у запчастей — с подсказками со склада). */
   nameInput?: (row: T, update: (patch: Partial<T>) => void) => React.ReactNode;
@@ -208,9 +226,30 @@ function LineEditor<T extends OrderWork>({
   actions?: React.ReactNode;
   /** Прайс для подсказок. Не передан — поле обычное, как было. */
   services?: Service[];
+  /** Категории прайса — для панели «+». */
+  serviceCategories?: PickerCategory[];
 }) {
   const update = (i: number, patch: Partial<T>) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  // Панель прайса: у какой строки открыта (null — «Из прайса» внизу, новые строки).
+  const [picker, setPicker] = useState<{ row: number | null; anchor: HTMLElement } | null>(null);
+
+  /**
+   * Выбранное в панели — в заказ. Строка, у которой нажали «+», пустая —
+   * первая услуга встаёт в неё, остальные — новыми строками следом.
+   */
+  function pickInto(row: number | null, picked: Service[]) {
+    const line = (s: Service): T => ({ ...empty, name: s.name, qty: 1, price: s.price });
+    const next = [...rows];
+    let at = row === null ? next.length : row + 1;
+    let rest = picked;
+    if (row !== null && next[row] && !next[row].name.trim() && !(Number(next[row].price) > 0)) {
+      next[row] = { ...next[row], name: picked[0].name, price: picked[0].price };
+      rest = picked.slice(1);
+    }
+    for (const s of rest) next.splice(at++, 0, line(s));
+    setRows(next);
+  }
 
   const addService = (s: Service) =>
     setRows([...rows, { ...empty, name: s.name, qty: 1, price: s.price }]);
@@ -238,6 +277,7 @@ function LineEditor<T extends OrderWork>({
                 services={services}
                 onChange={(name) => update(i, { name } as Partial<T>)}
                 onPick={(s) => update(i, { name: s.name, price: s.price } as Partial<T>)}
+                onOpenPrice={(anchor) => setPicker((p) => (p?.row === i ? null : { row: i, anchor }))}
               />
             ) : (
               <GrowText
@@ -299,8 +339,34 @@ function LineEditor<T extends OrderWork>({
         <Button type="button" variant="secondary" icon={<IconPlus />} onClick={() => setRows([...rows, { ...empty }])}>
           Добавить строку
         </Button>
+        {services && services.length > 0 && !nameInput && (
+          <Button
+            type="button"
+            variant="secondary"
+            icon={<IconServices />}
+            onClick={(e) => {
+              const anchor = e.currentTarget;
+              setPicker((p) => (p && p.row === null ? null : { row: null, anchor }));
+            }}
+            data-price-picker-add
+          >
+            Из прайса
+          </Button>
+        )}
         {actions}
       </div>
+      {picker && services && (
+        <ServicePicker
+          services={services}
+          categories={serviceCategories ?? []}
+          anchor={picker.anchor}
+          onClose={() => setPicker(null)}
+          onPick={(picked) => {
+            pickInto(picker.row, picked);
+            setPicker(null);
+          }}
+        />
+      )}
     </Card>
   );
 }
@@ -1147,6 +1213,7 @@ export default function OrderCard() {
             setRows={setWorks}
             empty={{ name: "", qty: 1, price: 0, masterId: null }}
             services={ref?.services ?? []}
+            serviceCategories={ref?.serviceCategories ?? []}
             // Чья работа — для зарплаты: два мастера на заказе делят деньги по
             // строкам. Выбирает тот, кто правит любой заказ; мастер пишет на себя.
             extraColumn={

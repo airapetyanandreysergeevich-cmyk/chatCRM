@@ -21,6 +21,9 @@ import { badRequest } from "../../lib/errors";
 import { Prisma } from "@prisma/client";
 import {
   debtorSortOf,
+  ISSUED,
+  issuedDaysOf,
+  issuedSortOf,
   kindKey,
   MAX_CARDS,
   normalizePrefs,
@@ -412,7 +415,7 @@ summaryRouter.get(
     const table = view === "table" ? await tableOf(req, mineWhere, contacts, money) : null;
 
     const stages = await withTenant(tenantOf(req), async (tx) => {
-      const out: Array<{ key: StageKey; total: number; filtered: number; items: unknown[] }> = [];
+      const out: Array<{ key: StageKey | typeof ISSUED; total: number; filtered: number; items: unknown[]; days?: number }> = [];
 
       for (const key of STAGE_KEYS) {
         // Выключенную колонку не считаем вовсе: её не видно, а время — идёт.
@@ -436,7 +439,40 @@ summaryRouter.get(
           // Сколько спрятал фильтр — чтобы заказ не «потерялся»: число под
           // колонкой напоминает, что он есть, просто не здесь.
           filtered: all.length - rows.length,
-          items: rows.slice(0, MAX_CARDS).map((o) => ({
+          items: rows.slice(0, MAX_CARDS).map(card),
+        });
+      }
+
+      // «Выдано» (28.10.2026): заказы, отданные клиенту за последние N дней.
+      // Панель по умолчанию выключена — включают в списке панелей.
+      // issuedAt сбрасывается при возврате в работу, так что вернувшийся
+      // заказ отсюда уходит сам.
+      const days = issuedDaysOf(prefs);
+      if (prefs.hidden.includes(ISSUED) || table) {
+        out.push({ key: ISSUED, total: 0, filtered: 0, items: [], days });
+      } else {
+        const all = await tx.order.findMany({
+          where: { deletedAt: null, ...mineWhere, issuedAt: { gte: new Date(Date.now() - days * 86_400_000) } },
+          orderBy: { issuedAt: "desc" },
+          take: STAGE_SCAN,
+          select: { ...cardSelect, issuedAt: true },
+        });
+        const hiddenKinds = new Set(prefs.panels[ISSUED]?.hiddenKinds ?? []);
+        const rows = hiddenKinds.size ? all.filter((o) => !hiddenKinds.has(kindKey(o.device?.kind))) : all;
+        if (issuedSortOf(prefs) === "number") rows.sort(STAGE_ORDER.number);
+        out.push({
+          key: ISSUED,
+          total: rows.length,
+          filtered: all.length - rows.length,
+          days,
+          items: rows.slice(0, MAX_CARDS).map((o) => ({ ...card(o), issuedAt: o.issuedAt })),
+        });
+      }
+
+      return out;
+
+      function card(o: CardRow) {
+        return {
             id: o.id,
             number: o.number,
             isUrgent: o.isUrgent,
@@ -455,11 +491,8 @@ summaryRouter.get(
             labels: o.labelMarks.map((m) => ({ id: m.labelId, setAt: m.setAt, setBy: m.setBy?.fullName ?? null })),
             // Сумма — только тем, кто видит деньги заказа.
             ...(money ? { total: Number(o.total) } : {}),
-          })),
-        });
+        };
       }
-
-      return out;
     });
 
     // Просроченные долги. Полоса показывается только когда они есть: пустая

@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
  * стрелкой: меню открыто — стрелка «‹» (свернуть), закрыто — «›». Стрелка
  * поворачивается, а левая полоса панели «заполнена», пока меню открыто.
  */
-export function SideToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+export function SideToggle({ collapsed, onToggle, narrow = false }: { collapsed: boolean; onToggle: () => void; narrow?: boolean }) {
   const label = collapsed ? "Развернуть меню" : "Свернуть меню";
   return (
     <button
@@ -17,7 +17,7 @@ export function SideToggle({ collapsed, onToggle }: { collapsed: boolean; onTogg
       aria-expanded={!collapsed}
       data-rail-tip={label}
       data-sidebar-toggle={collapsed ? "collapsed" : "expanded"}
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-field text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+      className={(narrow ? "w-8 " : "w-9 ") + "flex h-9 shrink-0 items-center justify-center rounded-field text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"}
     >
       <svg viewBox="0 0 24 24" className="h-[19px] w-[19px]" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <rect x="3" y="4" width="18" height="16" rx="3" />

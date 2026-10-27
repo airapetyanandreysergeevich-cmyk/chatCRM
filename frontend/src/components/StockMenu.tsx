@@ -291,7 +291,7 @@ export function ContextMenu({ at, entries, onClose }: { at: MenuAt; entries: Men
         aria-label={at.title}
         onKeyDown={onKey}
         onContextMenu={(e) => e.preventDefault()}
-        className="fixed z-[90] max-h-[calc(100vh-16px)] w-[256px] overflow-y-auto rounded-field border border-line bg-surface-raised py-1 shadow-raised"
+        className="fixed z-[90] max-h-[calc(100vh-16px)] w-[308px] overflow-y-auto rounded-field border border-line bg-surface-raised py-1 shadow-raised"
         style={{ left: pos.left, top: pos.top, visibility: pos.ready ? "visible" : "hidden" }}
       >
         <p className="truncate px-3 pb-1 pt-1 text-[11.5px] font-bold uppercase tracking-[0.07em] text-ink-dim">{at.title}</p>
@@ -463,5 +463,43 @@ export function CategoryPicker({
         </button>
       )}
     </div>
+  );
+}
+
+/** Убрать разделители в начале, в конце и подряд — после условных пунктов. */
+export function tidy(entries: MenuEntry[]): MenuEntry[] {
+  const out: MenuEntry[] = [];
+  for (const e of entries) {
+    if ("sep" in e && (!out.length || "sep" in out[out.length - 1])) continue;
+    out.push(e);
+  }
+  while (out.length && "sep" in out[out.length - 1]) out.pop();
+  return out;
+}
+
+/** Галочка строки и карточки (склад, прайс услуг): «часть» — когда отмечены не все. */
+export function Check({ on, part, label, onClick, disabled }: { on: boolean; part?: boolean; label: string; onClick: (e: React.MouseEvent) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={part ? "mixed" : on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(e);
+      }}
+      className="-m-2 flex h-[34px] w-[34px] shrink-0 items-center justify-center p-2 disabled:opacity-40"
+    >
+      <span
+        className={
+          "flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border-[1.6px] transition-colors " +
+          (on || part ? "border-brand bg-brand text-white" : "border-line-strong bg-surface-input")
+        }
+      >
+        {part ? <span className="h-[2px] w-[9px] rounded bg-white" /> : on ? <svg viewBox="0 0 12 10" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 5l3.5 3.5L11 1.5" /></svg> : null}
+      </span>
+    </button>
   );
 }

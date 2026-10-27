@@ -142,7 +142,8 @@ function OrderCardTile({
 }) {
   const menu = menuFromBoard(card);
   // Тянуть можно то, чей статус человеку можно менять: мастер с правом «только свои» — свои.
-  const canDrag = om.canStatus(menu);
+  // Выданный заказ не тянется: вернуть его в работу — через меню, с причиной.
+  const canDrag = !card.issuedAt && om.canStatus(menu);
 
   return (
     <Link
@@ -302,6 +303,22 @@ function PanelShell({
   );
 }
 
+/**
+ * «Выдано» — не стадия, а хвост работы: заказы, отданные клиенту за
+ * последние дни. Колонка того же вида, что стадии, цвет — как у плашки
+ * «Выдан» в списке заказов. Бросить в неё карточку нельзя: выдача — это
+ * касса и подпись, а не перетаскивание.
+ */
+const ISSUED_STAGE = {
+  key: "ISSUED",
+  label: "Выдано",
+  glow: "bg-[rgb(var(--tag-issued)/0.85)] shadow-[0_0_14px_1px_rgb(var(--tag-issued)/0.5)]",
+  dot: "bg-[rgb(var(--tag-issued))] shadow-[0_0_8px_1px_rgb(var(--tag-issued)/0.75)]",
+  chip: "",
+  pill: "",
+  text: "",
+} as unknown as Stage;
+
 function StageColumnPanel({
   stage,
   column,
@@ -337,13 +354,16 @@ function StageColumnPanel({
   const shown = column.items.slice(0, limit);
   const hidden = column.total - shown.length;
   const filtered = column.filtered ?? 0;
+  const issued = (stage.key as string) === "ISSUED";
+  const href = issued ? "/orders?group=CLOSED" : `/orders?group=${stage.key}`;
+  const days = column.days ?? 7;
 
   return (
     <PanelShell
-      title={stage.label}
+      title={issued ? `${stage.label} · ${days === 1 ? "сутки" : `${days} дн.`}` : stage.label}
       count={column.total}
-      titleHref={`/orders?group=${stage.key}`}
-      titleHint={`Все заказы: ${stage.label.toLowerCase()}`}
+      titleHref={href}
+      titleHint={issued ? "Все выданные заказы" : `Все заказы: ${stage.label.toLowerCase()}`}
       glow={stage.glow}
       dot={stage.dot}
       gear={gear}
@@ -352,7 +372,7 @@ function StageColumnPanel({
       {shown.length === 0 ? (
         <p className="px-0.5 pb-2 text-[13px] text-ink-dim">Пусто</p>
       ) : (
-        <div className="space-y-2" data-cards>
+        <div className="space-y-2" data-cards {...(issued ? { "data-issued-cards": "" } : {})}>
           {shown.map((card) => (
             <OrderCardTile
               key={card.id}
@@ -369,7 +389,7 @@ function StageColumnPanel({
 
       {hidden > 0 && (
         <Link
-          to={`/orders?group=${stage.key}`}
+          to={href}
           className="mt-2 block px-0.5 text-[12.5px] font-semibold text-brand-ink hover:underline"
         >
           ещё {plural(hidden, "заказ", "заказа", "заказов")}
@@ -722,13 +742,13 @@ export default function Dashboard() {
 
   const gearFor = (key: ColumnKey) => {
     const panel = prefs.panels[key];
-    const active = Boolean(panel?.sort || panel?.limit || panel?.hiddenKinds?.length);
+    const active = Boolean(panel?.sort || panel?.limit || panel?.hiddenKinds?.length || panel?.days);
     return (
       <div className="shrink-0">
         <GearButton open={menu === key} active={active} onClick={() => setMenu((m) => (m === key ? null : key))} />
         {menu === key && (
           <PanelMenu
-            kind={key === "DEBTORS" ? "debtors" : "stage"}
+            kind={key === "DEBTORS" ? "debtors" : key === "ISSUED" ? "issued" : "stage"}
             title={panelLabel(key)}
             prefs={panel ?? {}}
             onChange={(next) => changePrefs(withPanel(prefs, key, next))}
@@ -804,7 +824,7 @@ export default function Dashboard() {
                 <DebtorsPanel key={key} data={data.debtors} fit={fit} prefs={prefs.panels.DEBTORS} gear={gearFor(key)} />
               ) : null;
             }
-            const stage = STAGES.find((s) => s.key === key)!;
+            const stage = key === "ISSUED" ? ISSUED_STAGE : STAGES.find((s) => s.key === key)!;
             return (
               <StageColumnPanel
                 key={key}

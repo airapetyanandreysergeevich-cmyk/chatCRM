@@ -261,13 +261,21 @@ async function servicesSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   const items = await tx.service.findMany({
     orderBy: { name: "asc" },
     take: MAX_ROWS,
-    select: { name: true, price: true, note: true, isPinned: true },
+    select: { name: true, price: true, note: true, isPinned: true, categoryId: true },
   });
+  // Категория — путём «Ремонт/Пайка», как категории склада в файле.
+  const cats = await tx.serviceCategory.findMany({ select: { id: true, parentId: true, name: true } });
+  const byId = new Map(cats.map((c) => [c.id, c]));
+  const pathOf = (id: string | null): string => {
+    const parts: string[] = [];
+    for (let c = id ? byId.get(id) : undefined, guard = 0; c && guard < 20; c = c.parentId ? byId.get(c.parentId) : undefined, guard++) parts.unshift(c.name);
+    return parts.join("/");
+  };
 
   return {
     name: def.sheet,
     columns: def.columns.map((c) => ({ title: c.title, width: c.width })),
-    rows: items.map((s) => [s.name, num(s.price), s.note, s.isPinned ? "да" : ""]),
+    rows: items.map((s) => [s.name, num(s.price), s.note, s.isPinned ? "да" : "", pathOf(s.categoryId) || null]),
   };
 }
 

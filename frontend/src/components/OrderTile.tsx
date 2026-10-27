@@ -2,7 +2,7 @@ import { kindBadge } from "../lib/orders";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { copyable, deviceText } from "./CopyMenu";
 import { customerColor, nameStyle } from "../lib/customerColor";
-import { dueLabel, formatDate, shortName } from "../lib/format";
+import { dueLabel, formatDate, formatDateShort, shortName } from "../lib/format";
 import { money } from "../lib/orders";
 import { STAGES } from "../lib/stages";
 import { DEFAULT_TILE, TILE_LABEL, tileRows, type TileElement, type TileKey, type TileLayout } from "../lib/tile";
@@ -94,6 +94,17 @@ function valueOf(k: TileKey, card: BoardCard, defs?: LabelDef[]): { node: ReactN
     case "note":
       return card.note?.trim() ? { node: card.note.trim(), tone: "text-ink-dim italic", copy: copyable("text", card.note.trim(), "примечание") } : null;
     case "due": {
+      // Выданному срок уже ни к чему — на его месте дата выдачи (панель «Выдано»).
+      if (card.issuedAt) {
+        const at = new Date(card.issuedAt);
+        const today = at.toDateString() === new Date().toDateString();
+        const time = at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        return {
+          node: today ? `выдан сегодня, ${time}` : `выдан ${formatDateShort(at)}`,
+          tone: "text-ink-dim",
+          copy: copyable("text", formatDate(card.issuedAt), "дату выдачи"),
+        };
+      }
       const due = dueLabel(card.dueAt);
       if (!due) return null;
       return {

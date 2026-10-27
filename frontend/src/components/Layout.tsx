@@ -56,6 +56,8 @@ function Badge({ count }: { count: number }) {
  * расползаются на полэкрана. Остальное — списки, сводка, касса — во всё окно.
  */
 function pageWidth(path: string): "narrow" | "card" | "wide" {
+  // Прайс услуг — список с категориями, как склад: во всю ширину (28.10.2026).
+  if (path === "/settings/services") return "wide";
   if (path.startsWith("/settings") || path === "/orders/new") return "narrow";
   if (/^\/(orders|clients)\/[^/]+$/.test(path)) return "card";
   return "wide";
@@ -328,7 +330,32 @@ export default function Layout() {
           {rail.node}
           <div className={"mb-6 flex gap-2 pt-1.5 " + (collapsed ? "flex-col items-center" : "items-center justify-between px-1.5")}>
             {collapsed ? <BrandMark size={34} /> : <BrandRow />}
-            {collapsed && <SideToggle collapsed onToggle={toggleSidebar} />}
+            {/* Свёрнутое меню: колокольчик — в одном ряду с кнопкой «Развернуть»,
+                а не в списке разделов, где его принимали за раздел
+                (Андрей, 28.10.2026). Ряд чуть шире полосы значков — выходит
+                в поля панели, чтобы обе кнопки остались удобного размера. */}
+            {collapsed && (
+              <div className="-mx-2 flex items-center gap-1" data-rail-top>
+                <NavLink
+                  to="/settings/notifications"
+                  aria-label="Оповещения"
+                  data-rail-tip="Оповещения"
+                  data-rail-badge={unread || undefined}
+                  className={({ isActive }) =>
+                    "relative flex h-9 w-8 shrink-0 items-center justify-center rounded-field transition-colors duration-150 " +
+                    (isActive ? "bg-brand-tint text-brand" : "text-ink-muted hover:bg-surface-raised hover:text-ink")
+                  }
+                >
+                  <IconBell className="h-[18px] w-[18px]" />
+                  {!!unread && (
+                    <span className="absolute -right-1.5 -top-1">
+                      <Badge count={unread} />
+                    </span>
+                  )}
+                </NavLink>
+                <SideToggle collapsed narrow onToggle={toggleSidebar} />
+              </div>
+            )}
             {!collapsed && (
               <div className="flex items-center gap-0.5">
               <NavLink
@@ -352,22 +379,6 @@ export default function Layout() {
           </div>
 
           <nav className={"space-y-1 " + (collapsed ? "w-[52px]" : "")}>
-            {/* Свёрнутое меню — это ряд значков без подписей, поэтому
-                колокольчик встаёт в тот же ряд: отдельная кнопка сверху
-                в узкой полосе выглядит потерянной. */}
-            {collapsed && (
-              <NavLink to="/settings/notifications" className={sideLink} aria-label="Оповещения" data-rail-tip="Оповещения" data-rail-badge={unread || undefined}>
-                <span className="relative [&>svg]:h-[19px] [&>svg]:w-[19px]">
-                  <IconBell />
-                  {!!unread && (
-                    <span className="absolute -right-2.5 -top-1.5">
-                      <Badge count={unread} />
-                    </span>
-                  )}
-                </span>
-              </NavLink>
-            )}
-
             {items.map((i) => (
               <NavLink
                 key={i.to}

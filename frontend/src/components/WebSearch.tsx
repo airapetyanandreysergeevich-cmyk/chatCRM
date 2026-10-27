@@ -58,7 +58,7 @@ export function webQuery(device: DeviceLike, text: string | null | undefined): s
   return [...head, shortText(text)].filter(Boolean).join(" ").trim();
 }
 
-function openSearch(engine: Engine, q: string) {
+export function openSearch(engine: Engine, q: string) {
   window.open(searchUrl(engine, q), "_blank", "noopener,noreferrer");
 }
 

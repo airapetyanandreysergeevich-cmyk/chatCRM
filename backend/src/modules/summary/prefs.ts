@@ -15,7 +15,7 @@ import { z } from "zod";
  */
 
 /** Колонки главного экрана. Порядок здесь — порядок по умолчанию. */
-export const COLUMN_KEYS = ["NEW", "WAITING", "IN_PROGRESS", "DONE", "DEBTORS"] as const;
+export const COLUMN_KEYS = ["NEW", "WAITING", "IN_PROGRESS", "DONE", "ISSUED", "DEBTORS"] as const;
 export type ColumnKey = (typeof COLUMN_KEYS)[number];
 
 export const STAGE_KEYS = ["NEW", "WAITING", "IN_PROGRESS", "DONE"] as const;
@@ -30,6 +30,18 @@ export type StageSort = (typeof STAGE_SORTS)[number];
 export const DEBTOR_SORTS = ["sum", "old", "promised"] as const;
 export type DebtorSort = (typeof DEBTOR_SORTS)[number];
 
+/**
+ * «Выдано» (Андрей, 28.10.2026): заказы, выданные за последние дни. Панель —
+ * по желанию: тем, у кого её ещё не было в настройках, она приходит
+ * выключенной (не все хотят видеть закрытое на доске работы).
+ */
+export const ISSUED = "ISSUED";
+export const ISSUED_SORTS = ["recent", "number"] as const;
+export type IssuedSort = (typeof ISSUED_SORTS)[number];
+/** За сколько дней показывать выданные. */
+export const ISSUED_DAYS = [1, 7, 30] as const;
+export const ISSUED_DAYS_DEFAULT = 7;
+
 /** Больше шестидесяти карточек в столбце всё равно никто не просматривает. */
 export const MAX_CARDS = 60;
 
@@ -39,6 +51,8 @@ export interface PanelPrefs {
   limit?: number | null;
   /** Скрытые типы техники, в нормальном виде (см. kindKey). "" — «без типа». */
   hiddenKinds?: string[];
+  /** «Выдано»: за сколько дней (1, 7, 30). Пусто — неделя. */
+  days?: number;
 }
 
 export interface DashboardPrefs {
@@ -187,6 +201,7 @@ const panelSchema = z
     sort: z.string().max(20).optional(),
     limit: z.number().int().min(1).max(MAX_CARDS).nullable().optional(),
     hiddenKinds: z.array(z.string().max(80)).max(200).optional(),
+    days: z.number().int().optional(),
   })
   .strip();
 
@@ -225,19 +240,25 @@ export function normalizePrefs(raw: unknown): DashboardPrefs {
   for (const k of COLUMN_KEYS) if (!order.includes(k)) order.push(k);
 
   const hidden = [...new Set(strings(p.hidden).filter((k) => isColumn(k) || k === OVERDUE))];
+  // «Выдано» — новая панель по желанию: кто её ещё не видел в своём порядке, у
+  // того она выключена. Включил — встала в порядок и дальше остаётся.
+  if (!strings(p.order).includes(ISSUED) && !hidden.includes(ISSUED)) hidden.push(ISSUED);
 
   const panels: DashboardPrefs["panels"] = {};
   for (const [key, rawPanel] of Object.entries(obj(p.panels))) {
     if (!isColumn(key)) continue;
     const value = obj(rawPanel);
-    const sorts: readonly string[] = isStage(key) ? STAGE_SORTS : DEBTOR_SORTS;
+    const sorts: readonly string[] = isStage(key) ? STAGE_SORTS : key === ISSUED ? ISSUED_SORTS : DEBTOR_SORTS;
     const out: PanelPrefs = {};
     if (typeof value.sort === "string" && sorts.includes(value.sort) && value.sort !== sorts[0]) out.sort = value.sort;
     if (typeof value.limit === "number" && Number.isInteger(value.limit) && value.limit >= 1 && value.limit <= MAX_CARDS) {
       out.limit = value.limit;
     }
     const kinds = strings(value.hiddenKinds).slice(0, 200);
-    if (isStage(key) && kinds.length) out.hiddenKinds = [...new Set(kinds.map(kindKey))].sort();
+    if ((isStage(key) || key === ISSUED) && kinds.length) out.hiddenKinds = [...new Set(kinds.map(kindKey))].sort();
+    if (key === ISSUED && typeof value.days === "number" && (ISSUED_DAYS as readonly number[]).includes(value.days) && value.days !== ISSUED_DAYS_DEFAULT) {
+      out.days = value.days;
+    }
     if (Object.keys(out).length) panels[key] = out;
   }
 
@@ -252,6 +273,9 @@ export function normalizePrefs(raw: unknown): DashboardPrefs {
 
 export const stageSortOf = (prefs: DashboardPrefs, key: StageKey): StageSort =>
   (prefs.panels[key]?.sort as StageSort | undefined) ?? "urgent";
+
+export const issuedSortOf = (prefs: DashboardPrefs): IssuedSort => (prefs.panels.ISSUED?.sort as IssuedSort | undefined) ?? "recent";
+export const issuedDaysOf = (prefs: DashboardPrefs): number => prefs.panels.ISSUED?.days ?? ISSUED_DAYS_DEFAULT;
 
 export const debtorSortOf = (prefs: DashboardPrefs): DebtorSort =>
   (prefs.panels.DEBTORS?.sort as DebtorSort | undefined) ?? "sum";

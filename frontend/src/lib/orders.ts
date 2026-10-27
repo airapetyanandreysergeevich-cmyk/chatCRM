@@ -198,6 +198,8 @@ export interface Reference {
   labels?: LabelDef[];
   /** Прайс мастерской — для подсказок при наборе выполненных работ. */
   services: Service[];
+  /** Категории прайса — для панели «+» в названии работы. */
+  serviceCategories?: Array<{ id: string; parentId: string | null; name: string; color?: string | null }>;
 }
 
 export type OrderKind = "REPAIR" | "DIAGNOSTICS" | "WARRANTY" | "REPEAT" | "BRAND_WARRANTY";

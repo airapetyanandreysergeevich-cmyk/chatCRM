@@ -75,6 +75,7 @@ const ORDER: readonly string[] = [
   "deviceHint",
   "quickPick",
   "service",
+  "serviceCategory",
   "orderStatus",
   "device",
   "customer",

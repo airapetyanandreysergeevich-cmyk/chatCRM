@@ -16,6 +16,7 @@ const TENANT_DELEGATES = new Set([
   "stockCategory",
   "sale", "saleItem",
   "orderLabel", "orderLabelMark", "orderEvent",
+  "serviceCategory",
 ]);
 
 const WHERE_OPS = new Set([

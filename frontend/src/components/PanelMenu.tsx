@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import { IconSettings } from "./icons";
 import {
   DEBTOR_SORT_LABELS,
+  ISSUED_DAYS,
+  ISSUED_DAYS_DEFAULT,
+  ISSUED_SORT_LABELS,
   STAGE_SORT_LABELS,
   summaryApi,
   type DeviceKindOption,
@@ -134,7 +137,8 @@ export function PanelMenu({
   onKindsToAll,
   onClose,
 }: {
-  kind: "stage" | "debtors";
+  /** issued — панель «Выдано»: своя сортировка и период. */
+  kind: "stage" | "debtors" | "issued";
   /** Название панели — заголовок листа на телефоне. */
   title?: string;
   prefs: PanelPrefs;
@@ -166,17 +170,19 @@ export function PanelMenu({
   }, [onClose]);
 
   useEffect(() => {
-    if (kind !== "stage") return;
+    if (kind === "debtors") return;
     loadKinds()
       .then(setKinds)
       .catch(() => setKindsError(true));
   }, [kind]);
 
-  const sorts: Record<string, string> = kind === "stage" ? STAGE_SORT_LABELS : DEBTOR_SORT_LABELS;
+  const sorts: Record<string, string> =
+    kind === "stage" ? STAGE_SORT_LABELS : kind === "issued" ? ISSUED_SORT_LABELS : DEBTOR_SORT_LABELS;
   const defaultSort = Object.keys(sorts)[0];
   const sort = prefs.sort ?? defaultSort;
   const hidden = new Set(prefs.hiddenKinds ?? []);
-  const touched = Boolean(prefs.sort || prefs.limit || prefs.hiddenKinds?.length);
+  const touched = Boolean(prefs.sort || prefs.limit || prefs.hiddenKinds?.length || prefs.days);
+  const days = prefs.days ?? ISSUED_DAYS_DEFAULT;
 
   const setHidden = (next: Set<string>) => onChange({ ...prefs, hiddenKinds: [...next].sort() });
 
@@ -208,10 +214,34 @@ export function PanelMenu({
         </button>
       ))}
 
+      {kind === "issued" && (
+        <>
+          <Heading>За какой срок</Heading>
+          <div className="flex gap-1.5 px-2 pb-1" data-issued-days>
+            {ISSUED_DAYS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                role="radio"
+                aria-checked={days === d}
+                data-days={d}
+                onClick={() => onChange({ ...prefs, days: d === ISSUED_DAYS_DEFAULT ? undefined : d })}
+                className={
+                  "min-h-[34px] flex-1 rounded-field border px-2 text-[13px] font-semibold transition-colors " +
+                  (days === d ? "border-brand bg-brand/10 text-brand-ink" : "border-line text-ink-muted hover:text-ink")
+                }
+              >
+                {d === 1 ? "Сутки" : d === 7 ? "7 дней" : "30 дней"}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <Heading>Сколько показывать</Heading>
       <LimitField value={prefs.limit} onChange={(limit) => onChange({ ...prefs, limit })} />
 
-      {kind === "stage" && (
+      {kind !== "debtors" && (
         <>
           <Heading>Техника</Heading>
           {kindsError ? (

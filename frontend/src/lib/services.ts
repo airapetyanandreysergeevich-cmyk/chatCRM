@@ -15,6 +15,18 @@ export interface Service {
   note: string | null;
   /** Вынесена отдельной кнопкой в карточку заказа. */
   isPinned: boolean;
+  /** Категория прайса (28.10.2026); null — «Без категории». */
+  categoryId?: string | null;
+}
+
+/** Категория прайса — как категория склада: цвет карточки, подкатегории. */
+export interface ServiceCategory {
+  id: string;
+  parentId: string | null;
+  name: string;
+  color?: string | null;
+  /** Услуг прямо в этой категории (без подкатегорий). */
+  count: number;
 }
 
 /** Сколько кнопок помещается в панель работ, не превращая её в стену. */
@@ -47,4 +59,14 @@ export const servicesApi = {
   create: (body: Omit<Service, "id">) => api.post<{ id: string; name: string }>("/services", body),
   update: (id: string, body: Partial<Omit<Service, "id">>) => api.patch(`/services/${id}`, body),
   remove: (id: string) => api.del(`/services/${id}`),
+  categories: () => api.get<{ items: ServiceCategory[]; uncategorized: number; total: number }>("/services/categories"),
+  createCategory: (name: string, parentId: string | null) =>
+    api.post<{ id: string; name: string; parentId: string | null }>("/services/categories", { name, parentId }),
+  updateCategory: (id: string, body: { name?: string; parentId?: string | null; color?: string | null }) =>
+    api.patch(`/services/categories/${id}`, body),
+  deleteCategory: (id: string, moveTo?: string | null) =>
+    api.del<{ ok: true; services: number; children: number }>(`/services/categories/${id}${moveTo ? `?moveTo=${moveTo}` : ""}`),
+  /** Отмеченные услуги разом: перенести в категорию или удалить. */
+  bulk: (body: { action: "move"; ids: string[]; categoryId: string | null } | { action: "delete"; ids: string[] }) =>
+    api.post<{ ok: true; changed: number }>("/services/bulk", body),
 };

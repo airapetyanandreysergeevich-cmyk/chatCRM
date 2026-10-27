@@ -12,13 +12,13 @@ const check = (ok: boolean, msg: string, extra?: unknown) => {
 };
 
 let p = normalizePrefs(null);
-check(p.order.join() === COLUMN_KEYS.join() && p.hidden.length === 0 && Object.keys(p.panels).length === 0, "пусто — всё по умолчанию", p);
+check(p.order.join() === COLUMN_KEYS.join() && p.hidden.join() === "ISSUED" && Object.keys(p.panels).length === 0, "пусто — всё по умолчанию, «Выдано» выключено", p);
 
 p = normalizePrefs({ order: ["DEBTORS", "DONE", "мусор", "DONE"] });
-check(p.order.join() === "DEBTORS,DONE,NEW,WAITING,IN_PROGRESS", "порядок: известные по разу, недостающие в конец", p.order);
+check(p.order.join() === "DEBTORS,DONE,NEW,WAITING,IN_PROGRESS,ISSUED", "порядок: известные по разу, недостающие в конец", p.order);
 
 p = normalizePrefs({ hidden: ["NEW", "OVERDUE", "что-то", "NEW"] });
-check(p.hidden.join() === "NEW,OVERDUE", "выключенные: только известные, без повторов", p.hidden);
+check(p.hidden.join() === "NEW,OVERDUE,ISSUED", "выключенные: только известные, без повторов", p.hidden);
 
 p = normalizePrefs({
   panels: {
@@ -43,6 +43,14 @@ p = normalizePrefs({ panels: { NEW: { limit: 500 } } });
 check(p.panels.NEW === undefined, "количество больше 60 — не принимается");
 p = normalizePrefs("битое");
 check(p.order.length === COLUMN_KEYS.length, "битые настройки — по умолчанию");
+
+// «Выдано» (28.10.2026)
+p = normalizePrefs({ order: [...COLUMN_KEYS], hidden: [] });
+check(!p.hidden.includes("ISSUED"), "включённое «Выдано» остаётся включённым", p.hidden);
+p = normalizePrefs({ panels: { ISSUED: { sort: "number", days: 30, hiddenKinds: ["Ноутбук"] } } });
+check(JSON.stringify(p.panels.ISSUED) === JSON.stringify({ sort: "number", hiddenKinds: ["ноутбук"], days: 30 }), "«Выдано»: сортировка, период, техника", p.panels.ISSUED);
+p = normalizePrefs({ panels: { ISSUED: { sort: "urgent", days: 5 } } });
+check(p.panels.ISSUED === undefined, "«Выдано»: чужая сортировка и период — выброшены", p.panels.ISSUED);
 
 check(kindKey("  Игровая   Приставка ") === "игровая приставка" && kindKey(null) === "", "kindKey");
 

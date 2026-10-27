@@ -34,7 +34,8 @@ DECLARE
     'Integration','SmsMessage','SmsPhone','SmsApproval',
     'StockCategory',
     'Sale','SaleItem',
-    'OrderLabel','OrderLabelMark','OrderEvent'
+    'OrderLabel','OrderLabelMark','OrderEvent',
+    'ServiceCategory'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

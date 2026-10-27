@@ -110,6 +110,7 @@ model Tenant {
   devices             Device[]
   orderStatuses       OrderStatus[]
   services            Service[]
+  serviceCategories ServiceCategory[]
   deviceHints         DeviceHint[]
   quickPicks          QuickPick[]
   orders              Order[]
@@ -841,13 +842,37 @@ model Service {
   price    Decimal @default(0) @db.Decimal(12, 2)
   note     String? // уточнение для приёмщика: что входит, что нет
   isPinned Boolean @default(false) // вынесена кнопкой в карточку заказа
+  /// Категория прайса (28.10.2026); пусто — «Без категории».
+  categoryId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  category ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([tenantId, categoryId])
+}
+
+/// Категории прайса — как категории склада (Андрей, 28.10.2026): цвет карточки,
+/// подкатегории, порядок.
+model ServiceCategory {
+  id        String   @id @default(uuid())
+  tenantId  String
+  parentId  String?
+  name      String
+  sortOrder Int      @default(0)
+  /// Цвет карточки категории («#45C08A»); пусто — по палитре.
+  color     String?
+  createdAt DateTime @default(now())
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  parent   ServiceCategory?  @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children ServiceCategory[] @relation("ServiceCategoryTree")
+  services Service[]
+
   @@index([tenantId])
 }
 

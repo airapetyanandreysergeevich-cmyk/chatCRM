@@ -29,10 +29,14 @@ export interface BoardCard {
   labels?: Array<{ id: string; setAt: string; setBy: string | null }>;
   /** Итог заказа — только тем, кто видит деньги. */
   total?: number;
+  /** Когда выдан — у карточек панели «Выдано». */
+  issuedAt?: string | null;
 }
 
 export interface StageColumn {
-  key: StageKey;
+  key: StageKey | "ISSUED";
+  /** «Выдано»: за сколько последних дней. */
+  days?: number;
   /** Всего заказов на стадии после фильтра — items может быть обрезан. */
   total: number;
   /** Сколько заказов спрятал фильтр по технике. */
@@ -55,10 +59,15 @@ export interface Debtor {
 
 // ------------------------------------------------------- настройки главной
 
-export type ColumnKey = StageKey | "DEBTORS";
+export type ColumnKey = StageKey | "ISSUED" | "DEBTORS";
+/** Панель «Выдано» — заказы, отданные клиенту за последние дни (28.10.2026). */
+export const ISSUED_KEY = "ISSUED";
 export const OVERDUE_KEY = "OVERDUE";
 export type StageSort = "urgent" | "due" | "old" | "new" | "number";
 export type DebtorSort = "sum" | "old" | "promised";
+export type IssuedSort = "recent" | "number";
+export const ISSUED_DAYS = [1, 7, 30] as const;
+export const ISSUED_DAYS_DEFAULT = 7;
 
 export interface PanelPrefs {
   sort?: string;
@@ -66,6 +75,8 @@ export interface PanelPrefs {
   limit?: number | null;
   /** Выключенные типы техники в нормальном виде (см. kindKey). */
   hiddenKinds?: string[];
+  /** «Выдано»: период в днях — 1, 7 или 30. */
+  days?: number;
 }
 
 export interface DashboardPrefs {
@@ -167,6 +178,11 @@ export const STAGE_SORT_LABELS: Record<StageSort, string> = {
   due: "По сроку",
   old: "Старые сверху",
   new: "Новые сверху",
+  number: "По номеру",
+};
+
+export const ISSUED_SORT_LABELS: Record<IssuedSort, string> = {
+  recent: "Последние выданные сверху",
   number: "По номеру",
 };
 

@@ -22,7 +22,7 @@ const tenantOf = (req: Request) => currentTenantId(req)!;
 referenceRouter.get(
   "/",
   ah(async (req, res) => {
-    const [statuses, masters, services, completeness, appearance, complaint, labels] = await withTenant(tenantOf(req), async (tx) => [
+    const [statuses, masters, services, completeness, appearance, complaint, labels, serviceCategories] = await withTenant(tenantOf(req), async (tx) => [
       await tx.orderStatus.findMany({ orderBy: { sortOrder: "asc" } }),
       await listMasters(tx),
       // Прайс едет вместе со справочниками, чтобы подсказки в карточке
@@ -36,6 +36,7 @@ referenceRouter.get(
       await listQuickPicks(tx, "complaint"),
       // Ярлыки заказов мастерской — «Индивидуальные оповещения».
       await tx.orderLabel.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+      await tx.serviceCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     ] as const);
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantOf(req) }, select: { plateOcr: true, settings: true } });
 
@@ -73,7 +74,10 @@ referenceRouter.get(
         price: Number(s.price),
         note: s.note,
         isPinned: s.isPinned,
+        categoryId: s.categoryId,
       })),
+      // Категории прайса — для панели «+» в названии работы (28.10.2026).
+      serviceCategories: serviceCategories.map((c) => ({ id: c.id, parentId: c.parentId, name: c.name, color: c.color, sortOrder: c.sortOrder })),
     });
   })
 );

@@ -148,7 +148,10 @@ const fakeTx = {
     price: 1500,
     note: null,
     isPinned: true,
+    categoryId: "sc2",
   }),
+  // Категории прайса (28.10.2026): в файле — путём «Ремонт/Экраны».
+  serviceCategory: { findMany: async () => [{ id: "sc1", parentId: null, name: "Ремонт" }, { id: "sc2", parentId: "sc1", name: "Экраны" }] },
 };
 
 async function main(): Promise<void> {
@@ -179,6 +182,7 @@ async function main(): Promise<void> {
   check(services.matchBy === "Название", "услуги сливаются по названию");
   const [svc] = await buildSheets(fakeTx as never, ["services"]);
   check(svc.rows[0][0] === "Замена экрана", "название услуги попадает в первую колонку");
+  check(svc.rows[0][4] === "Ремонт/Экраны", "категория услуги — путём «Ремонт/Экраны»");
   check(svc.rows[0][1] === 1500, "цена выгружается числом, а не строкой");
   check(svc.rows[0][3] === "да", "закреплённая услуга помечена словом, понятным в Excel");
 

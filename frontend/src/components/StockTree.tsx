@@ -70,16 +70,30 @@ export type CategoryDialogKind =
   | { kind: "edit"; node: TreeNode }
   | { kind: "delete"; node: TreeNode };
 
+/** Чем заводит, правит и удаляет категории окно: склад или прайс услуг. */
+export interface CategoryApi {
+  createCategory: (name: string, parentId: string | null) => Promise<{ id: string }>;
+  updateCategory: (id: string, body: { name?: string; parentId?: string | null }) => Promise<unknown>;
+  deleteCategory: (id: string, moveTo: string | null) => Promise<unknown>;
+}
+
 export function CategoryDialog({
   dialog,
   roots,
   onClose,
   onDone,
+  api = stockApi,
+  unit = "поз.",
+  example = "Матрицы",
 }: {
   dialog: CategoryDialogKind;
   roots: TreeNode[];
   onClose: () => void;
   onDone: (selectId?: string) => void;
+  api?: CategoryApi;
+  /** Что лежит в категории — для «В категории 5 поз.»: «поз.», «услуг». */
+  unit?: string;
+  example?: string;
 }) {
   const flat = flatTree(roots);
   const node = dialog.kind === "create" ? null : dialog.node;
@@ -101,13 +115,13 @@ export function CategoryDialog({
     setError(null);
     try {
       if (dialog.kind === "create") {
-        const c = await stockApi.createCategory(name.trim(), parentId || null);
+        const c = await api.createCategory(name.trim(), parentId || null);
         onDone(c.id);
       } else if (dialog.kind === "edit") {
-        await stockApi.updateCategory(dialog.node.id, { name: name.trim(), parentId: parentId || null });
+        await api.updateCategory(dialog.node.id, { name: name.trim(), parentId: parentId || null });
         onDone();
       } else {
-        await stockApi.deleteCategory(dialog.node.id, moveTo || null);
+        await api.deleteCategory(dialog.node.id, moveTo || null);
         onDone(moveTo || "");
       }
     } catch (err) {
@@ -139,7 +153,7 @@ export function CategoryDialog({
           <>
             <p className="text-[14px] leading-relaxed text-ink-soft">
               {dialog.node.total > 0 || dialog.node.children.length > 0
-                ? `В категории ${dialog.node.total} поз.${dialog.node.children.length ? ` и подкатегории (${dialog.node.children.length})` : ""}. Куда их перенести?`
+                ? `В категории ${dialog.node.total} ${unit}${dialog.node.children.length ? ` и подкатегории (${dialog.node.children.length})` : ""}. Куда их перенести?`
                 : "Категория пустая — удалится сразу."}
             </p>
             {(dialog.node.total > 0 || dialog.node.children.length > 0) &&
@@ -148,7 +162,7 @@ export function CategoryDialog({
         ) : (
           <>
             <Field label="Название">
-              <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="Матрицы" maxLength={80} />
+              <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder={example} maxLength={80} />
             </Field>
             {parentSelect("Внутри категории", parentId, setParentId, "— верхний уровень —")}
           </>

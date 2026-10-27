@@ -351,6 +351,8 @@ async function applyService(
     price: numOrUndef(v["Цена, ₽"]),
     note: val(v["Примечание"]),
     isPinned: /^(да|1|true|yes|\+)$/i.test((v["В карточке заказа"] ?? "").trim()) || undefined,
+    // Категория путём «Ремонт/Пайка»: нет такой — заводим. Пустая ячейка не трогает.
+    categoryId: await serviceCategoryPath(tx, tenantId, val(v["Категория"])),
   };
 
   if (row.existingId) {
@@ -367,8 +369,28 @@ async function applyService(
       price: data.price ?? 0,
       note: data.note,
       isPinned: data.isPinned ?? false,
+      categoryId: data.categoryId ?? null,
     },
   });
+}
+
+/** Категория прайса по пути «Ремонт/Пайка»: находим или заводим по уровням. undefined — пустая ячейка. */
+async function serviceCategoryPath(tx: Prisma.TransactionClient, tenantId: string, raw: string | null | undefined): Promise<string | undefined> {
+  const parts = (raw ?? "")
+    .split("/")
+    .map((p) => p.trim().replace(/\s+/g, " "))
+    .filter(Boolean)
+    .slice(0, 6);
+  if (!parts.length) return undefined;
+  let parentId: string | null = null;
+  for (const name of parts) {
+    const found: { id: string } | null = await tx.serviceCategory.findFirst({
+      where: { parentId, name: { equals: name.slice(0, 80), mode: "insensitive" } },
+      select: { id: true },
+    });
+    parentId = found ? found.id : (await tx.serviceCategory.create({ data: { tenantId, parentId, name: name.slice(0, 80) }, select: { id: true } })).id;
+  }
+  return parentId ?? undefined;
 }
 
 // ------------------------------------------------------------------ заказы
