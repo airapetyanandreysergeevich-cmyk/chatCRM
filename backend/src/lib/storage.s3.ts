@@ -63,12 +63,19 @@ export async function url(key: string, seconds = 900): Promise<string> {
 }
 
 /** Открыть файл для отдачи через наш сервер. null — нет такого. */
-export async function open(key: string): Promise<{ body: NodeJS.ReadableStream; size?: number } | null> {
+export async function open(
+  key: string,
+  range?: { start: number; end: number }
+): Promise<{ body: NodeJS.ReadableStream; size?: number; total?: number } | null> {
   if (!validKey(key)) return null;
   try {
-    const out = await s3.send(new GetObjectCommand({ Bucket: env.s3Bucket, Key: key }));
+    const out = await s3.send(
+      new GetObjectCommand({ Bucket: env.s3Bucket, Key: key, ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}) })
+    );
     if (!out.Body) return null;
-    return { body: out.Body as NodeJS.ReadableStream, size: out.ContentLength };
+    // «bytes 0-1023/52341» — сколько всего, для ответа 206.
+    const total = range && out.ContentRange ? Number(out.ContentRange.split("/")[1]) || undefined : undefined;
+    return { body: out.Body as NodeJS.ReadableStream, size: out.ContentLength, total };
   } catch {
     return null;
   }

@@ -1,6 +1,7 @@
 import { copyable, copyRow } from "../components/CopyMenu";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { backState } from "../lib/listState";
 import { IconOrders } from "../components/icons";
 import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
@@ -97,7 +98,7 @@ function OverduePanel({ rows, total }: { rows: OverdueDebt[]; total: number }) {
             key={r.orderId}
             className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-field bg-surface/70 px-3 py-2"
           >
-            <Link to={`/orders/${r.orderId}`} className="font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
+            <Link to={`/orders/${r.orderId}`} state={{ back: "/" }} className="font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
               {r.number}
             </Link>
             <span className="min-w-[45%] flex-1 truncate text-[14px] sm:min-w-0" {...copyable("name", r.customer?.name)}>
@@ -141,6 +142,8 @@ function OrderCardTile({
   onDragEnd: () => void;
 }) {
   const menu = menuFromBoard(card);
+  // Из сводки — в заказ, а оттуда «‹ К сводке» (Андрей, 28.10.2026).
+  const location = useLocation();
   // Тянуть можно то, чей статус человеку можно менять: мастер с правом «только свои» — свои.
   // Выданный заказ не тянется: вернуть его в работу — через меню, с причиной.
   const canDrag = !card.issuedAt && om.canStatus(menu);
@@ -148,6 +151,7 @@ function OrderCardTile({
   return (
     <Link
       to={`/orders/${card.id}`}
+      state={backState(location.pathname, location.search)}
       data-card={card.id}
       {...om.bind(menu)}
       {...copyRow(menu.copy ?? [])}
@@ -665,6 +669,9 @@ export default function Dashboard() {
       .savePrefs(prefs)
       .then(() => {
         setSaveError(null);
+        // Пока сохранялось, человек успел щёлкнуть ещё — не перечитываем: ответ
+        // сервера с прежними настройками на миг вернул бы старую сортировку.
+        if (pending.current) return;
         return load();
       })
       .catch((err) => setSaveError(err instanceof ApiError ? err.message : "Не удалось сохранить настройки"));

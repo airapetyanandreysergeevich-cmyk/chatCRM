@@ -33,6 +33,8 @@ const ORDER: readonly string[] = [
   "auditLog",
   "feedback",
   // SMS и подключения: ни на что, кроме мастерской, не ссылаются
+  // звонки ссылаются на телефон, клиента, заказ и запись (вложение) — первыми
+  "callRecord",
   "smsApproval",
   "smsMessage",
   "smsPhone",

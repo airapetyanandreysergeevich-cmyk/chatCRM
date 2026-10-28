@@ -20,6 +20,7 @@ import {
   type TemplateKey,
 } from "../lib/sms";
 import { ordersApi, type OrderStatus } from "../lib/orders";
+import { CallsPanel } from "../components/CallsPanel";
 
 /**
  * «Настройки → Интеграции»: внешние сервисы мастерской. Пока одна панель —
@@ -83,6 +84,8 @@ export default function IntegrationsPage() {
       {error && <Banner tone="error">{error}</Banner>}
       {!saved && !error && <Spinner />}
       {saved && <SmsPanel saved={saved} onSaved={setSaved} />}
+      {/* Звонки клиентов (28.10.2026) — тот же телефон, что и для SMS. */}
+      {saved && <CallsPanel />}
     </div>
   );
 }
@@ -216,7 +219,7 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
         {error && <Banner tone="error">{error}</Banner>}
 
         <p className="text-[13px] text-ink-dim">
-          SMS уходят с вашего телефона на Android с приложением FineCRM SMS — без сторонних сервисов, платите только
+          SMS уходят с вашего телефона на Android с приложением FineCRM Телефон (раньше — FineCRM SMS) — без сторонних сервисов, платите только
           оператору за SIM-карту.
         </p>
 
@@ -276,7 +279,7 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
               <h3 className="text-[15px] font-bold">Согласование по SMS</h3>
               <p className="mt-0.5 max-w-[640px] text-[12.5px] text-ink-dim">
                 Клиент получает вопрос с ценой и отвечает на SMS «да» или «нет». Ответ приходит в заказ: «да» — заказ сам
-                переходит дальше, «нет» — остаётся с пометкой, непонятный ответ — решаете вы. Нужно приложение FineCRM SMS
+                переходит дальше, «нет» — остаётся с пометкой, непонятный ответ — решаете вы. Нужно приложение FineCRM Телефон
                 1.2 или новее с разрешением читать SMS: оно пересылает только ответы клиентов, которых спросили.
               </p>
             </div>
@@ -606,7 +609,7 @@ function PairModal({ known, onClose, onPaired }: { known: Set<string>; onClose: 
             <li>
               Установите на телефон приложение{" "}
               <a href={SMS_APP_URL} className="font-semibold text-brand hover:text-brand-ink">
-                FineCRM SMS
+                FineCRM Телефон
               </a>{" "}
               — файл скачается прямо на телефон.
             </li>

@@ -26,6 +26,8 @@ import { customerColor, nameStyle } from "../lib/customerColor";
 import { formatDateShort, plural } from "../lib/format";
 import { money, statusGlyphTone, statusPill, type Order } from "../lib/orders";
 import { ClientModal, type Client } from "./Clients";
+import { CallLine } from "../components/CallLine";
+import { callsApi, type CallItem } from "../lib/calls";
 
 /**
  * Карточка клиента: кто он, сколько раз приходил и сколько заплатил.
@@ -255,6 +257,7 @@ export default function ClientCard() {
       </div>
 
       <ClientPurchases customerId={c.id} />
+      <ClientCalls customerId={c.id} />
 
       {editing && (
         <ClientModal
@@ -297,6 +300,33 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: Rea
  * Покупки клиента со склада (продажи без ремонта). Нет покупок — блока нет:
  * у большинства клиентов мастерской их и не будет.
  */
+/**
+ * Звонки клиента (28.10.2026): все, и те, что без заказа. Пусто — блока нет.
+ * Звонок без заказа отсюда можно положить в нужный заказ.
+ */
+function ClientCalls({ customerId }: { customerId: string }) {
+  const { can } = useAuth();
+  const [items, setItems] = useState<CallItem[] | null>(null);
+  const load = useCallback(() => {
+    callsApi
+      .ofCustomer(customerId)
+      .then((r) => setItems(r.items))
+      .catch(() => setItems([]));
+  }, [customerId]);
+  useEffect(load, [load]);
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="space-y-2.5" data-client-calls>
+      <SectionLabel>{plural(items.length, "звонок", "звонка", "звонков")}</SectionLabel>
+      <Card className="space-y-2.5">
+        {items.map((call) => (
+          <CallLine key={call.id} call={call} showOrder canMove={can("orders.edit")} onMoved={load} />
+        ))}
+      </Card>
+    </div>
+  );
+}
+
 function ClientPurchases({ customerId }: { customerId: string }) {
   const navigate = useNavigate();
   const [page, setPage] = useState<SalesPage | null>(null);

@@ -65,12 +65,20 @@ export async function remove(key: string): Promise<void> {
 // ------------------------------------------------------------------- чтение
 
 /** Открыть файл для отдачи. null — нет такого. */
-export async function open(key: string): Promise<{ body: NodeJS.ReadableStream; size: number } | null> {
+export async function open(
+  key: string,
+  range?: { start: number; end: number }
+): Promise<{ body: NodeJS.ReadableStream; size: number; total?: number } | null> {
   const full = resolveKey(key);
   if (!full) return null;
   try {
     const st = await stat(full);
     if (!st.isFile()) return null;
+    // Кусок файла — плееру записи разговора, чтобы перематывать (28.10.2026).
+    if (range && range.start < st.size) {
+      const end = Math.min(range.end, st.size - 1);
+      return { body: createReadStream(full, { start: range.start, end }), size: end - range.start + 1, total: st.size };
+    }
     return { body: createReadStream(full), size: st.size };
   } catch {
     return null;

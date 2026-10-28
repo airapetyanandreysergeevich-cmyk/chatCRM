@@ -42,6 +42,9 @@ import { statsRouter } from "./modules/stats/stats.routes";
 import { printingRouter } from "./modules/printing/printing.routes";
 import { smsRouter } from "./modules/sms/sms.routes";
 import { smsPhoneRouter } from "./modules/sms/sms.phone";
+import { callsPhoneRouter } from "./modules/calls/calls.phone";
+import { callsRouter } from "./modules/calls/calls.routes";
+import { startCallsCleanup } from "./modules/calls/calls";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
@@ -160,7 +163,10 @@ app.use("/api/salary", salaryRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/printing", printingRouter);
 // Телефон-шлюз «FineCRM SMS» — до smsRouter: у телефона свой ключ, а не вход сотрудника.
+// Звонки клиентов от того же телефона (28.10.2026) — тем же ключом, раньше SMS.
+app.use("/api/sms/phone/calls", callsPhoneRouter);
 app.use("/api/sms/phone", smsPhoneRouter);
+app.use("/api/calls", callsRouter);
 app.use("/api/sms", smsRouter);
 app.use("/api", staffRouter);
 
@@ -193,6 +199,8 @@ ensureBucket().catch((err) => console.error("Не удалось подгото�
 
 if (pushConfigured) startOverdueWatch();
 else console.warn("Оповещения выключены: не заданы VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY");
+// Срок хранения записей звонков — раз в час, независимо от оповещений.
+startCallsCleanup();
 
 const server = app.listen(env.port, env.bindHost, () => {
   console.log(`RepairShop API слушает ${env.bindHost}:${env.port}`);

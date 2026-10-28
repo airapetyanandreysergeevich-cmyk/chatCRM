@@ -66,7 +66,7 @@ public class GatewayService extends Service {
         instance = this;
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel ch = new NotificationChannel(CHANNEL, "Связь с FineCRM", NotificationManager.IMPORTANCE_LOW);
-            ch.setDescription("Пока этот значок есть, телефон отправляет SMS клиентам мастерской");
+            ch.setDescription("Пока этот значок есть, телефон отправляет SMS клиентам мастерской и сообщает о звонках");
             ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch);
         }
         foreground("Подключаемся к FineCRM…");
@@ -127,10 +127,13 @@ public class GatewayService extends Service {
                 online();
                 // От кого ждём ответа на согласование. Старый сервер списка не шлёт — никого не ждём.
                 Store.setWatch(this, r.optJSONArray("watch"));
+                // Звонки клиентов (1.3): включены ли в FineCRM и нужны ли записи разговоров.
+                Calls.setConfig(this, r.optJSONObject("calls"));
                 JSONObject job = r.optJSONObject("job");
                 if (job != null) {
                     SmsSender.send(this, job.getString("id"), job.getString("phone"), job.getString("text"));
                 }
+                Calls.tick(this, base, token);
                 backoff = 5000;
             } catch (Http.Unauthorized e) {
                 Store.unpair(this, e.getMessage());
@@ -227,6 +230,8 @@ public class GatewayService extends Service {
             o.put("appVersion", BuildInfo.VERSION);
             o.put("android", Build.VERSION.RELEASE);
             o.put("model", Build.MANUFACTURER + " " + Build.MODEL);
+            // Звонки (1.3): разрешения и где нашлись записи разговоров — для «Интеграций».
+            o.put("calls", Calls.state(c));
         } catch (Exception ignored) {
             // что успели собрать — то и отправим
         }
@@ -242,7 +247,7 @@ public class GatewayService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
         String workshop = Store.workshop(this);
         return b.setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle(workshop.isEmpty() ? "FineCRM SMS" : "FineCRM SMS · " + workshop)
+                .setContentTitle(workshop.isEmpty() ? "FineCRM Телефон" : "FineCRM Телефон · " + workshop)
                 .setContentText(text)
                 .setContentIntent(tap)
                 .setOngoing(true)

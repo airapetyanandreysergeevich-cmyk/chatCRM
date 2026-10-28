@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { copyable, deviceText } from "../components/CopyMenu";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { backTarget } from "../lib/listState";
+import { backLabel, backTarget } from "../lib/listState";
 import { PrintDialog } from "../components/PrintDialog";
 import { LabelDialog } from "../components/LabelDialog";
 import { OrderSms, SmsModal } from "../components/OrderSms";
@@ -692,7 +692,7 @@ export default function OrderCard() {
     {/* Пока видна плавающая «Сохранить» — запас снизу, чтобы она не закрывала последние поля. */}
     <div className={"space-y-5 " + (docked ? "min-w-0 flex-1 " : "") + (canEditWork && dirty ? "pb-24" : "")}>
       <button data-back-to-list onClick={() => (dirty ? setLeaveTo(backTo) : navigate(backTo))} className="text-[13.5px] font-semibold text-ink-muted hover:text-ink">
-        ‹ К списку заказов
+        ‹ {backLabel(backTo)}
       </button>
 
       <div className="flex flex-wrap items-start justify-between gap-4">

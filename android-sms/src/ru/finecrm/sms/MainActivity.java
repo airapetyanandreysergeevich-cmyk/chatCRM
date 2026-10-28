@@ -2,6 +2,7 @@ package ru.finecrm.sms;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -38,6 +39,8 @@ public class MainActivity extends Activity {
     private static final int REQ_SMS = 1;
     private static final int REQ_NOTIFY = 2;
     private static final int REQ_RECEIVE = 3;
+    private static final int REQ_CALLS = 4;
+    private static final int REQ_AUDIO = 5;
 
     private static final int INK = Color.parseColor("#161A22");
     private static final int MUTED = Color.parseColor("#5B6475");
@@ -53,6 +56,8 @@ public class MainActivity extends Activity {
     private boolean busy;
 
     private String shown = "";
+    /** Идёт «Проверить» записи разговоров. */
+    private boolean checking;
 
     /**
      * Раз в две секунды — перерисовать, если что-то изменилось. Только если
@@ -70,7 +75,9 @@ public class MainActivity extends Activity {
         return Store.paired(this) + "|" + Store.online(this) + "|" + Store.status(this) + "|" + Store.sentToday(this)
                 + "|" + Store.lastError(this) + "|" + granted(Manifest.permission.SEND_SMS)
                 + "|" + (Build.VERSION.SDK_INT >= 33 && granted(Manifest.permission.POST_NOTIFICATIONS))
-                + "|" + batteryFree();
+                + "|" + batteryFree()
+                + "|" + Calls.enabled(this) + "|" + Calls.logGranted(this) + "|" + Calls.audioGranted(this)
+                + "|" + Recorder.learnedFolder(this) + "|" + Calls.sentToday(this) + "|" + checking;
     }
 
     private boolean batteryFree() {
@@ -143,8 +150,8 @@ public class MainActivity extends Activity {
     private void render() {
         shown = signature();
         root.removeAllViews();
-        text("FineCRM SMS", 26, INK, true);
-        text("Этот телефон отправляет SMS клиентам мастерской со своей SIM-карты — сам, по заданиям FineCRM.", 15, MUTED, false);
+        text("FineCRM Телефон", 26, INK, true);
+        text("Этот телефон отправляет SMS клиентам мастерской со своей SIM-карты и сообщает FineCRM о звонках клиентов.", 15, MUTED, false);
         space(18);
 
         if (!Store.paired(this)) {
@@ -237,7 +244,9 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        text("На Xiaomi, Huawei, Honor и Samsung также включите для FineCRM SMS «Автозапуск» и уберите ограничения фоновой работы в настройках приложения.", 13, MUTED, false);
+        text("На Xiaomi, Huawei, Honor и Samsung также включите для FineCRM Телефон «Автозапуск» и уберите ограничения фоновой работы в настройках приложения.", 13, MUTED, false);
+        space(18);
+        renderCalls();
         space(18);
         text("Телефону лучше лежать на зарядке и быть в сети: Wi-Fi или мобильный интернет.", 13, MUTED, false);
         space(18);
@@ -247,6 +256,79 @@ public class MainActivity extends Activity {
                 unpair();
             }
         });
+    }
+
+    /**
+     * Звонки клиентов (1.3): разрешения, где нашлись записи разговоров и как
+     * включить запись именно на этом телефоне.
+     */
+    private void renderCalls() {
+        text("Звонки клиентов", 18, INK, true);
+        if (!Calls.enabled(this)) {
+            text("Выключено. Включается в FineCRM: «Настройки → Интеграции → Звонки клиентов». Тогда звонки с номеров ваших клиентов "
+                    + "появятся в истории ремонта, а пропущенные — оповещением.", 13, MUTED, false);
+            return;
+        }
+        text("Сегодня передано звонков: " + Calls.sentToday(this), 15, INK, false);
+        check(Calls.logGranted(this), "Журнал звонков", "Разрешить", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.READ_CALL_LOG}, REQ_CALLS);
+            }
+        });
+        if (!Calls.logGranted(this)) {
+            text("Если Android пишет «Ограниченная настройка»: «О приложении» → ⋮ → «Разрешить ограниченные настройки», затем снова «Разрешить».", 13, MUTED, false);
+        }
+        check(Calls.audioGranted(this), "Доступ к записям разговоров", "Разрешить", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Calls.audioPermission()}, REQ_AUDIO);
+            }
+        });
+        String folder = Recorder.learnedFolder(this);
+        String dialer = Recorder.dialer(this);
+        text("Телефон: " + Recorder.brand() + " " + Build.MODEL + (dialer.isEmpty() ? "" : " · звонилка " + dialer), 13, MUTED, false);
+        if (!folder.isEmpty()) {
+            text("✓  Записи разговоров находятся: " + folder, 15, OK, false);
+        } else {
+            text("Записей разговоров пока не видно.", 15, BAD, false);
+            text(Recorder.howTo(this), 13, MUTED, false);
+        }
+        text("В FineCRM уходят только звонки с номеров, которые есть в клиентах мастерской. Личные звонки и их записи остаются на телефоне.", 13, MUTED, false);
+        button(checking ? "Проверяем…" : "Проверить", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                recheck();
+            }
+        });
+    }
+
+    /** «Проверить»: найти папку записей заново и сразу рассказать о ней FineCRM. */
+    private void recheck() {
+        if (checking) return;
+        checking = true;
+        render();
+        final Context app = getApplicationContext();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String folder = Recorder.detect(app);
+                try {
+                    Http.request("POST", Store.base(app) + "api/sms/phone/state", Store.token(app), GatewayService.state(app), 20000);
+                } catch (Exception ignored) {
+                    // без связи — расскажем со следующим отчётом
+                }
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        checking = false;
+                        say(folder.isEmpty()
+                                ? "Записей звонков не нашлось. Включите автоматическую запись в звонилке, позвоните и проверьте снова."
+                                : "Записи разговоров находятся: " + folder, folder.isEmpty() ? BAD : OK);
+                    }
+                });
+            }
+        }).start();
     }
 
     // ------------------------------------------------------------ действия

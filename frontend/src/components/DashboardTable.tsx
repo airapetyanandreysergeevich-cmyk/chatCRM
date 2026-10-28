@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { backState } from "../lib/listState";
+import { looksLikePhone, phoneMatches } from "../lib/phone";
 import { copyable, copyRow, deviceText } from "./CopyMenu";
 import { orderCopyItems, type MenuOrder, type useOrderMenu } from "./OrderMenu";
 import { StatusPicker } from "./StatusPicker";
@@ -17,7 +19,8 @@ import { LabelDot } from "../lib/labelIcons";
 import { isWarrantyKind, kindBadge, money, type OrderStatus } from "../lib/orders";
 import { STAGES } from "../lib/stages";
 import { COL, DEFAULT_VIEW, MAX_PX, MIN_PX, colFlex, colPx, deviceLine, layoutCols, moneyText, type ColSpec } from "../lib/tableCols";
-import { summaryApi, type DashboardPrefs, type TablePrefs, type TableRow, type TableViewPrefs } from "../lib/workshop";
+import { withPanel } from "../lib/dashboard";
+import { ISSUED_DAYS, ISSUED_DAYS_DEFAULT, summaryApi, type DashboardPrefs, type TablePrefs, type TableRow, type TableViewPrefs } from "../lib/workshop";
 
 /**
  * Главная таблицей — вариант «А» (Андрей, 21.10.2026, по образцу HelloClient),
@@ -64,6 +67,8 @@ interface Quick {
   test: (r: TableRow) => boolean;
   money?: boolean;
   dot?: { icon: string; color: string };
+  /** Число не тревожное — серым, а не красным («Выданы»). */
+  calm?: boolean;
 }
 
 const QUICK: Quick[] = [
@@ -94,8 +99,6 @@ const menuOf = (r: TableRow): MenuOrder => ({
   labels: r.labels?.map((l) => l.id) ?? [],
 });
 
-const digits = (s: string) => s.replace(/\D+/g, "");
-
 /** Подходит ли заказ под слова поиска: номер, клиент, телефон, техника, серийник, жалоба, мастер. */
 function matches(r: TableRow, words: string[]) {
   const hay = [
@@ -115,12 +118,8 @@ function matches(r: TableRow, words: string[]) {
     .filter(Boolean)
     .join(" ")
     .toLocaleLowerCase("ru-RU");
-  const phone = digits(`${r.customer.phone ?? ""} ${r.customer.phone2 ?? ""}`);
-  // Телефон — по цифрам: «9021739851» находит «+7 902 173-98-51».
-  return words.every((w) => {
-    const dw = digits(w);
-    return hay.includes(w) || (dw.length >= 3 && dw.length === w.replace(/[\s()+-]/g, "").length && phone.includes(dw));
-  });
+  // Телефон — по последним 10 цифрам: «89021739851» находит «+7 902 173-98-51».
+  return words.every((w) => hay.includes(w) || (looksLikePhone(w) && phoneMatches(w, r.customer.phone, r.customer.phone2)));
 }
 
 function sorter(sort: string): (a: TableRow, b: TableRow) => number {
@@ -180,6 +179,9 @@ export function DashboardTable({
   onReload: () => unknown;
 }) {
   const navigate = useNavigate();
+  // Заказ, открытый из таблицы, ведёт «‹ К сводке» — с теми же фильтрами и видом.
+  const location = useLocation();
+  const back = backState(location.pathname, location.search);
   const { can, me } = useAuth();
   const myId = me?.kind === "tenant" ? me.user.id : null;
   const [params, setParams] = useSearchParams();
@@ -216,8 +218,18 @@ export function DashboardTable({
   const allowed = (c: ColSpec | undefined) => !!c && (!c.money || seesMoney) && (!c.contacts || contacts);
   const cols = view.cols.filter((c) => allowed(COL.get(c.k)));
 
+  // «Выданы» (28.10.2026) — срок общий с панелью «Выдано» на доске.
+  const issuedDays = prefs.panels.ISSUED?.days ?? ISSUED_DAYS_DEFAULT;
+  const daysText = (d: number) => (d === 1 ? "сутки" : `${d} дн.`);
   const quickList: Quick[] = [
     ...QUICK.filter((x) => !x.money || seesMoney),
+    {
+      key: "issued",
+      label: `Выданы · ${daysText(issuedDays)}`,
+      hint: "Отданы клиенту за выбранный срок",
+      test: (r: TableRow) => !!r.issuedAt && Date.now() - new Date(r.issuedAt).getTime() <= issuedDays * 86_400_000,
+      calm: true,
+    },
     // Ярлыки с галочкой «кнопкой в быстрых фильтрах» — рядом с остальными.
     ...labelDefs
       .filter((l) => l.quickFilter)
@@ -363,7 +375,7 @@ export function DashboardTable({
     if (window.getSelection()?.toString()) return;
     if ((e.target as Element).closest("a,button,input,[role=menu]")) return;
     if (e.ctrlKey || e.metaKey) window.open(`/orders/${r.id}`, "_blank");
-    else navigate(`/orders/${r.id}`);
+    else navigate(`/orders/${r.id}`, { state: back });
   };
 
   const pad = dense ? "py-1.5" : "py-2.5";
@@ -378,7 +390,7 @@ export function DashboardTable({
         const kb = isWarrantyKind(r.kind) ? kindBadge(r.kind, r.device?.brand) : null;
         return (
           <>
-            <Link to={`/orders/${r.id}`} className="whitespace-nowrap font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
+            <Link to={`/orders/${r.id}`} state={back} className="whitespace-nowrap font-mono text-[13px] font-bold hover:underline" {...copyable("order", r.number)}>
               {r.number}
               {r.isUrgent && (
                 <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">
@@ -696,7 +708,7 @@ export function DashboardTable({
               <span
                 className={
                   "rounded-pill px-1.5 py-[1px] font-mono text-[11.5px] " +
-                  (x.key !== "all" && n > 0 ? "bg-state-off/15 text-state-off" : "bg-surface-raised text-ink-muted")
+                  (x.key !== "all" && !x.calm && n > 0 ? "bg-state-off/15 text-state-off" : "bg-surface-raised text-ink-muted")
                 }
               >
                 {n}
@@ -704,6 +716,26 @@ export function DashboardTable({
             </button>
           );
         })}
+        {quick === "issued" && (
+          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-pill border border-line bg-surface p-0.5" data-issued-days role="radiogroup" aria-label="За какой срок">
+            {ISSUED_DAYS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                role="radio"
+                aria-checked={issuedDays === d}
+                data-days={d}
+                onClick={() => onPrefs(withPanel(prefs, "ISSUED", { ...prefs.panels.ISSUED, days: d === ISSUED_DAYS_DEFAULT ? undefined : d }))}
+                className={
+                  "min-h-[30px] rounded-pill px-2.5 text-[12.5px] font-semibold transition-colors " +
+                  (issuedDays === d ? "bg-brand-tint text-brand-ink" : "text-ink-muted hover:text-ink")
+                }
+              >
+                {d === 1 ? "Сутки" : `${d} дней`}
+              </button>
+            ))}
+          </span>
+        )}
       </div>
 
       {(statusChips.length > 0 || hasOutsource || hasKinds) && (
@@ -887,7 +919,7 @@ export function DashboardTable({
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="flex min-w-0 items-center gap-2">
-                      <Link to={`/orders/${r.id}`} className="font-mono text-[14px] font-bold">
+                      <Link to={`/orders/${r.id}`} state={back} className="font-mono text-[14px] font-bold">
                         {r.number}
                         {r.isUrgent && (
                           <span title="Срочный" className="ml-1 inline-block align-[-2px] text-state-off">

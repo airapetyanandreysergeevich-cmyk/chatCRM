@@ -89,6 +89,8 @@ export async function wipeFiles(tx: Prisma.TransactionClient): Promise<string[]>
 }
 
 async function wipeOrders(tx: Prisma.TransactionClient, out: Wiped): Promise<void> {
+  // Звонки клиентов — часть истории ремонта; их записи — среди вложений ниже.
+  add(out, "callRecord", (await tx.callRecord.deleteMany({})).count);
   add(out, "attachment", (await tx.attachment.deleteMany({})).count);
 
   // Чужие ссылки на заказ обнуляем, сами записи не трогаем.

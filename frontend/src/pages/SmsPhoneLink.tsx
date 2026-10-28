@@ -32,7 +32,7 @@ export default function SmsPhoneLink() {
         href={intent}
         className="flex min-h-[50px] items-center justify-center rounded-field bg-brand px-4 text-[15px] font-bold text-white"
       >
-        Открыть в приложении FineCRM SMS
+        Открыть в приложении FineCRM Телефон
       </a>
       <a
         href={SMS_APP_URL}

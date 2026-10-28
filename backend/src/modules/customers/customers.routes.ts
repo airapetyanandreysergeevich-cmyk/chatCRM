@@ -1,3 +1,4 @@
+import { customerPhoneWhere, formatPhone, looksLikePhone, phoneTail } from "../../lib/phone";
 import { customerDevices } from "../orders/history";
 import { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
@@ -104,6 +105,8 @@ customersRouter.get(
         { name: { contains: w, mode: "insensitive" as const } },
         { phone: { contains: w } },
         { phone2: { contains: w } },
+        // «89189998877» находит «+7 918 999-88-77» и наоборот.
+        ...(looksLikePhone(w) ? customerPhoneWhere(w) : []),
         { email: { contains: w, mode: "insensitive" as const } },
         // Номер ищется, только если слово — число: иначе каждый поиск по
         // имени тащил бы за собой ещё и сравнение с номером.
@@ -215,7 +218,13 @@ customersRouter.get(
     const { phone } = z.object({ phone: z.string().trim().min(4) }).parse(req.query);
     const found = await withTenant(tenantOf(req), (tx) =>
       tx.customer.findFirst({
-        where: { phone: { contains: phone }, deletedAt: null },
+        where: {
+          deletedAt: null,
+          OR:
+            phoneTail(phone).length === 10
+              ? [{ phoneTail: phoneTail(phone) }, { phone2Tail: phoneTail(phone) }]
+              : [{ phone: { contains: phone } }, ...customerPhoneWhere(phone)],
+        },
         orderBy: { createdAt: "desc" },
       })
     );
@@ -270,16 +279,12 @@ customersRouter.get(
         // «8(921)5550011», «921 555 00 11». Сравнивать их как строки
         // бесполезно, поэтому с обеих сторон оставляем одни цифры.
         // Запрос идёт внутри withTenant, значит его дополнительно режет RLS.
-        const found = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT id FROM "Customer"
-          WHERE "tenantId" = ${tenantId}
-            AND "deletedAt" IS NULL
-            AND (
-              regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') LIKE ${"%" + digits + "%"}
-              OR regexp_replace(COALESCE(phone2, ''), '[^0-9]', '', 'g') LIKE ${"%" + digits + "%"}
-            )
-          LIMIT 8
-        `;
+        // «8918…» и «+7918…» — одно начало номера: ищем по хвосту из 10 цифр.
+        const found = await tx.customer.findMany({
+          where: { deletedAt: null, OR: customerPhoneWhere(digits) },
+          select: { id: true },
+          take: 8,
+        });
         for (const f of found) ids.add(f.id);
       }
 
@@ -469,8 +474,9 @@ const customerSchema = z.object({
   color: z.enum(CUSTOMER_COLORS).nullable().optional().or(z.literal("")),
   type: z.enum(["INDIVIDUAL", "COMPANY"]).default("INDIVIDUAL"),
   name: z.string().trim().min(2, "Укажите имя или название"),
-  phone: z.string().trim().min(6, "Укажите телефон"),
-  phone2: z.string().trim().optional(),
+  // Российский номер — всегда в одном виде «+7 918 999-88-77» (28.10.2026).
+  phone: z.string().trim().min(6, "Укажите телефон").transform(formatPhone),
+  phone2: z.string().trim().transform(formatPhone).optional(),
   email: z.string().email("Похоже, это не email").optional().or(z.literal("")),
   address: z.string().trim().optional(),
   inn: z.string().trim().optional(),

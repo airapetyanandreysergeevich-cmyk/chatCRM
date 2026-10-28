@@ -164,6 +164,17 @@ export async function parseRows(
   // Ключи уже разобранных строк: дубликат внутри одного файла — частая беда
   // выгрузок из старых программ, и молча схлопывать его нельзя.
   const seen = new Map<string, number>();
+  /** Склад: какое название у позиции с этим ключом — двойник артикула или повтор строки. */
+  const seenName = new Map<string, string>();
+  const seenTitle = new Map<string, string>();
+  const hello = dataset === "stock" && isHelloClientStock(headerRow.map(asText));
+  const extraHints: string[] = hello
+    ? [
+        "Похоже на выгрузку склада HelloClient. «/» в названии категории там — часть названия, а не подкатегория: " +
+          "«ШИМ/транзисторы» станет одной категорией «ШИМ, транзисторы». Артикулы HelloClient повторяются в разных " +
+          "категориях — такие позиции не теряются, а получают артикул с окончанием «-2».",
+      ]
+    : [];
   /** Сколько строк споткнулось о каждую колонку — по этому и виден съехавший заголовок. */
   const byColumn = new Map<string, number>();
 
@@ -178,6 +189,12 @@ export async function parseRows(
     const values: Record<string, string> = {};
     for (const [idx, col] of mapping) values[col.title] = asText(line[idx]);
 
+    if (dataset === "stock") {
+      // Пустую не трогаем: пустая ячейка при обновлении значит «оставить как было».
+      if (values["Единица"]) values["Единица"] = normUnit(values["Единица"]);
+      if (hello && values["Категория"]) values["Категория"] = values["Категория"].split("/").map((x) => x.trim()).filter(Boolean).join(", ");
+    }
+
     const rowIssues = validateRow(def, values, rowNo);
     if (dataset === "staff" && rowIssues.length === 0) rowIssues.push(...staffRowIssues(values, rowNo, opts));
     if (rowIssues.length) {
@@ -186,7 +203,28 @@ export async function parseRows(
       continue;
     }
 
-    const key = matchKey(dataset, values);
+    let key = matchKey(dataset, values);
+    // Склад: тот же артикул у другого товара — не повтор, а двойник (в HelloClient
+    // артикулы «01», «02»… считаются в каждой категории заново). Заводим его с
+    // артикулом «08-2», а не выбрасываем (28.10.2026).
+    if (key && dataset === "stock" && seen.has(key) && (values["Артикул"] ?? "").trim()) {
+      const name = serviceKey(values["Наименование"] ?? "");
+      if (seenName.get(key) !== name) {
+        const sku = values["Артикул"].trim();
+        let n = 2;
+        let twin = key;
+        do {
+          values["Артикул"] = `${sku}-${n}`;
+          twin = matchKey(dataset, values)!;
+          n += 1;
+        } while (seen.has(twin) && seenName.get(twin) !== name);
+        issues.push({
+          row: rowNo,
+          message: `артикул «${sku}» уже у «${(seenTitle.get(key) ?? "").slice(0, 60)}» (строка ${seen.get(key)}) — «${(values["Наименование"] ?? "").slice(0, 60)}» заведена с артикулом «${values["Артикул"]}»`,
+        });
+        key = twin;
+      }
+    }
     if (key) {
       const before = seen.get(key);
       if (before !== undefined) {
@@ -197,6 +235,10 @@ export async function parseRows(
         continue;
       }
       seen.set(key, rowNo);
+      if (dataset === "stock") {
+        seenName.set(key, serviceKey(values["Наименование"] ?? ""));
+        seenTitle.set(key, (values["Наименование"] ?? "").trim());
+      }
     }
 
     rows.push({ row: rowNo, values, action: "create" });
@@ -225,7 +267,7 @@ export async function parseRows(
       issuesTotal: issues.length,
       ignoredColumns,
       missingColumns,
-      hints: hintsFor(byColumn, body.length),
+      hints: [...extraHints, ...hintsFor(byColumn, body.length)],
       sample: rows.slice(0, 5).map((r) => r.values),
     },
   };
@@ -279,6 +321,31 @@ function validateRow(def: DatasetDef, values: Record<string, string>, row: numbe
     }
   }
   return out;
+}
+
+/**
+ * Выгрузка склада HelloClient: «Артикул, Название, Категория, Количество, Цена,
+ * Себестоимость, Гарантия, Единица измерения, Комментарий». Узнаём по набору
+ * колонок, которого нет ни у нас, ни у типичной таблицы, набранной руками.
+ */
+export function isHelloClientStock(headers: string[]): boolean {
+  const h = new Set(headers.map((x) => x.trim().toLowerCase()));
+  return ["артикул", "название", "категория", "количество", "цена", "себестоимость", "гарантия", "единица измерения"].every((x) => h.has(x));
+}
+
+/** Единица из чужой программы — к нашему виду: «Штуки», «Не указано (целое)» → «шт». */
+export function normUnit(raw: string): string {
+  const u = raw.trim().toLowerCase().replace(/\.$/, "");
+  if (!u || u.startsWith("не указ") || /^шт|^штук/.test(u)) return "шт";
+  if (/^метр/.test(u)) return "м";
+  if (/^сантиметр/.test(u)) return "см";
+  if (/^килограм/.test(u)) return "кг";
+  if (/^грамм/.test(u)) return "г";
+  if (/^литр/.test(u)) return "л";
+  if (/^комплект/.test(u)) return "компл";
+  if (/^пар/.test(u)) return "пар";
+  if (/^упаков/.test(u)) return "уп";
+  return raw.trim();
 }
 
 /** Название услуги без учёта регистра и лишних пробелов — как её узнаёт человек. */

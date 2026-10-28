@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  FineCRM SMS — телефон-шлюз: отправляет SMS клиентам мастерской со своей
-  SIM-карты по заданиям FineCRM. Подробности — README.md рядом.
+  FineCRM Телефон (бывший FineCRM SMS) — телефон-шлюз: отправляет SMS клиентам
+  мастерской со своей SIM-карты по заданиям FineCRM, а с 1.3 сообщает о звонках
+  клиентов и присылает записи разговоров. Подробности — README.md рядом.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="ru.finecrm.sms">
@@ -9,6 +10,11 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <!-- Ответы клиентов на согласование ремонта. Пересылаются только с номеров, которых спросили. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!-- Звонки клиентов (1.3): журнал звонков и записи разговоров встроенной звонилки.
+         В FineCRM уходят только звонки с номеров клиентов мастерской. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -22,7 +28,7 @@
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
-        android:label="FineCRM SMS"
+        android:label="FineCRM Телефон"
         android:icon="@drawable/ic_launcher"
         android:allowBackup="false"
         android:usesCleartextTraffic="true"

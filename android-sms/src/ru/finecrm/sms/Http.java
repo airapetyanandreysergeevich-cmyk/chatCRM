@@ -95,6 +95,50 @@ final class Http {
     }
 
     /**
+     * Файл записи разговора — телом запроса, как есть (с версии 1.3). Длину
+     * знаем заранее: так Android не держит весь файл в памяти.
+     */
+    static JSONObject upload(String url, String token, InputStream data, long length, String mime, int readTimeoutMs)
+            throws IOException, Unauthorized {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(readTimeoutMs);
+            conn.setUseCaches(false);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("User-Agent", "FineCRM-SMS/" + BuildInfo.VERSION);
+            conn.setRequestProperty("X-Phone-Token", token);
+            conn.setRequestProperty("Content-Type", mime);
+            if (length > 0) conn.setFixedLengthStreamingMode(length);
+            else conn.setChunkedStreamingMode(64 * 1024);
+            OutputStream out = conn.getOutputStream();
+            try {
+                byte[] chunk = new byte[64 * 1024];
+                int n;
+                while ((n = data.read(chunk)) > 0) out.write(chunk, 0, n);
+            } finally {
+                out.close();
+            }
+            int code = conn.getResponseCode();
+            InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            String text = in == null ? "" : read(in);
+            JSONObject json;
+            try {
+                json = text.isEmpty() ? new JSONObject() : new JSONObject(text);
+            } catch (JSONException e) {
+                throw new NotFineCrm(code);
+            }
+            if (code == 401) throw new Unauthorized(json.optString("error", "Телефон отключён от мастерской"));
+            if (code >= 400) throw new Refused(code, json.optString("error", "Сервер ответил ошибкой " + code));
+            return json;
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    /**
      * Ошибка связи — человеческими словами. Android пишет «failed to connect to
      * /26.124.34.218 (port 7373) from /192.168.1.246 … after 15000ms», а человеку
      * нужно понять, что делать.

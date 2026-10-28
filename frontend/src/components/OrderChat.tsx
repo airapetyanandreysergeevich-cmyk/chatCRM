@@ -9,6 +9,8 @@ import { LabelDot } from "../lib/labelIcons";
 import { STAGES } from "../lib/stages";
 import { PhotoViewer, type ViewerPhoto } from "./PhotoViewer";
 import { Banner, Card, SectionLabel } from "./ui";
+import { CallLine } from "./CallLine";
+import { useAuth } from "../lib/auth";
 
 /**
  * История ремонта — лента сообщений в карточке заказа, как в мессенджере.
@@ -67,6 +69,9 @@ export function OrderChat({
   const stick = useRef(true);
 
   const [events, setEvents] = useState<OrderEventRow[]>([]);
+  // Звонок переносят в другой заказ те, кто правит заказы.
+  const { can } = useAuth();
+  const canMoveCalls = can("orders.edit");
   // «Всё» — и сообщения, и служебные строки; «только сообщения» — переписка.
   // Выбор помнится на этом устройстве.
   const [onlyMessages, setOnlyMessages] = useState(() => {
@@ -218,7 +223,8 @@ export function OrderChat({
   const timeline: Item[] = messages
     ? [
         ...messages.map((m) => ({ at: m.createdAt, msg: m })),
-        ...(onlyMessages ? [] : events.map((ev) => ({ at: ev.at, ev }))),
+        // Звонки клиента — это разговор, они видны и в «только сообщения».
+        ...events.filter((ev) => !onlyMessages || ev.kind === "CALL").map((ev) => ({ at: ev.at, ev })),
       ].sort((a, b) => a.at.localeCompare(b.at))
     : [];
 
@@ -265,7 +271,11 @@ export function OrderChat({
               return (
                 <Fragment key={"ev" + item.ev.id}>
                   {newDay && <div className="py-1 text-center text-[12px] font-semibold text-ink-dim">{dayLabel(item.at)}</div>}
-                  <EventLine ev={item.ev} />
+                  {item.ev.kind === "CALL" && item.ev.call ? (
+                    <CallLine call={item.ev.call} canMove={canMoveCalls} onMoved={() => void load()} />
+                  ) : (
+                    <EventLine ev={item.ev} />
+                  )}
                 </Fragment>
               );
             }

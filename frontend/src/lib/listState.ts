@@ -91,3 +91,15 @@ export function backTarget(state: unknown, fallback: string): string {
   const b = (state as BackState | null)?.back;
   return typeof b === "string" && b.startsWith("/") && !b.startsWith("//") ? b : fallback;
 }
+
+/**
+ * Подпись «назад» в заказе — по тому, откуда в него пришли (Андрей, 28.10.2026):
+ * со сводки — «К сводке», из списка — «К списку заказов», из карточки клиента —
+ * «К клиенту». Не знаем откуда (ссылка, обновили страницу) — к списку заказов.
+ */
+export function backLabel(to: string): string {
+  const path = to.split("?")[0];
+  if (path === "/" || path === "") return "К сводке";
+  if (path.startsWith("/clients/")) return "К клиенту";
+  return "К списку заказов";
+}

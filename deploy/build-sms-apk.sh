@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Сборка приложения «FineCRM SMS» — телефон-шлюз для SMS клиентам (android-sms/).
+# Сборка приложения «FineCRM Телефон» (бывший «FineCRM SMS») — телефон-шлюз для SMS
+# и звонков клиентов (android-sms/).
 #
 # Без gradle и без интернета внутри сборки: только инструменты Android SDK из
 # того же образа, что собирает APK FineCRM (deploy/android/Dockerfile):

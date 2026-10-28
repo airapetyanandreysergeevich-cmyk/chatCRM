@@ -17,7 +17,8 @@ import {
   requireTenant,
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
-import { assertOrderAccess } from "./orders.service";
+import { assertOrderAccess, seesCustomerContacts } from "./orders.service";
+import { callSelect, callView } from "../calls/calls";
 
 /**
  * История ремонта — переписка мастеров в карточке заказа.
@@ -133,7 +134,7 @@ messagesRouter.get(
   ah(async (req, res) => {
     const out = await withTenant(tenantOf(req), async (tx) => {
       const order = await loadOrder(req, tx);
-      const [statuses, events] = await Promise.all([
+      const [statuses, events, calls] = await Promise.all([
         tx.orderStatusHistory.findMany({
           where: { orderId: order.id },
           orderBy: { createdAt: "asc" },
@@ -153,7 +154,13 @@ messagesRouter.get(
           take: 500,
           select: { id: true, createdAt: true, kind: true, data: true, user: { select: whoSelect } },
         }),
+        // Звонки клиента (28.10.2026) — в ту же ленту, по времени звонка.
+        tx.callRecord.findMany({ where: { orderId: order.id }, orderBy: { startedAt: "asc" }, take: 300, select: callSelect }),
       ]);
+      const opts = { contacts: seesCustomerContacts(req), listen: has(req, PERMISSIONS.CALLS_LISTEN) };
+      const callItems = await Promise.all(
+        calls.map(async (c) => ({ id: c.id, at: c.startedAt, kind: "CALL" as const, call: await callView(c, opts), who: null }))
+      );
       return [
         ...statuses.map((h) => ({
           id: h.id,
@@ -165,6 +172,7 @@ messagesRouter.get(
           who: whoOf(h.user),
         })),
         ...events.map((e) => ({ id: e.id, at: e.createdAt, kind: e.kind, data: e.data, who: whoOf(e.user) })),
+        ...callItems,
       ].sort((a, b) => a.at.getTime() - b.at.getTime());
     });
     res.json({ items: out });

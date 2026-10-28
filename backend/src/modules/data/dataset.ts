@@ -212,13 +212,14 @@ export const DATASETS: Record<DatasetKey, DatasetDef> = {
     columns: [
       { title: "Артикул", aliases: ["SKU", "Код"], width: 18 },
       { title: "Наименование", aliases: ["Название", "Товар"], width: 40, required: true },
-      { title: "Категория", width: 20 },
-      { title: "Единица", aliases: ["Ед. изм.", "Ед"], width: 10 },
+      { title: "Категория", aliases: ["Категория товара", "Группа товаров"], width: 20 },
+      { title: "Единица", aliases: ["Ед. изм.", "Ед", "Единица измерения"], width: 10 },
       { title: "Остаток", aliases: ["Количество", "Кол-во"], width: 12, kind: "number" },
       { title: "Себестоимость, ₽", aliases: ["Цена закупки", "Себестоимость"], width: 18, kind: "number" },
       { title: "Минимальный остаток", aliases: ["Мин. остаток"], width: 20, kind: "number" },
       { title: "Склад", aliases: ["Название склада"], width: 20 },
-      { title: "Цена продажи, ₽", aliases: ["Цена продажи", "Розница"], width: 16, kind: "number" },
+      // «Цена» — так её зовёт выгрузка HelloClient (28.10.2026): у склада это цена продажи.
+      { title: "Цена продажи, ₽", aliases: ["Цена продажи", "Розница", "Цена"], width: 16, kind: "number" },
       { title: "Место хранения", aliases: ["Место", "Ячейка"], width: 18 },
       { title: "Поставщик", width: 20 },
       { title: "Примечание", aliases: ["Комментарий", "Заметка"], width: 30 },

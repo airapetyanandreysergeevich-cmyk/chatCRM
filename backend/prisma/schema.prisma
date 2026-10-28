@@ -111,6 +111,7 @@ model Tenant {
   orderStatuses       OrderStatus[]
   services            Service[]
   serviceCategories ServiceCategory[]
+  callRecords       CallRecord[]
   deviceHints         DeviceHint[]
   quickPicks          QuickPick[]
   orders              Order[]
@@ -639,6 +640,10 @@ model Customer {
   name            String
   phone           String
   phone2          String?
+  /// Последние 10 цифр телефона — считает сама база (миграция phone_tail):
+  /// «89189998877» и «+7 918 999-88-77» дают одно и то же «9189998877».
+  phoneTail       String?   @default(dbgenerated())
+  phone2Tail      String?   @default(dbgenerated())
   email           String?
   address         String?
   source          String? // источник обращения
@@ -663,9 +668,12 @@ model Customer {
   orders       Order[]
   transactions Transaction[]
   sales        Sale[]
+  calls        CallRecord[]
 
   @@unique([tenantId, number])
   @@index([tenantId, phone])
+  @@index([tenantId, phoneTail])
+  @@index([tenantId, phone2Tail])
   @@index([tenantId, name])
   @@index([tenantId, isOutsource])
 }
@@ -816,6 +824,7 @@ model Order {
   statusHistory    OrderStatusHistory[]
   labelMarks       OrderLabelMark[]
   events           OrderEvent[]
+  calls            CallRecord[]
   purchaseRequests PurchaseRequest[]
   stockMovements   StockMovement[]
   transactions     Transaction[]
@@ -992,6 +1001,7 @@ enum AttachmentKind {
   DOCUMENT
   OTHER
   MESSAGE // фото в истории ремонта — к сообщению мастера
+  CALL // запись разговора с клиентом (28.10.2026)
 }
 
 model Attachment {
@@ -1014,6 +1024,7 @@ model Attachment {
   purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id])
   message         OrderMessage?    @relation(fields: [messageId], references: [id])
   uploadedBy      User?            @relation(fields: [uploadedById], references: [id])
+  call            CallRecord?
 
   @@index([tenantId, orderId])
   @@index([messageId])
@@ -1595,7 +1606,50 @@ model SmsPhone {
   revokedAt     DateTime?
   createdAt     DateTime  @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant Tenant       @relation(fields: [tenantId], references: [id])
+  calls  CallRecord[]
+}
+
+enum CallDirection {
+  IN
+  OUT
+  MISSED
+  REJECTED
+}
+
+/// Звонок клиенту или от клиента (28.10.2026): телефон «FineCRM Телефон» берёт
+/// его из журнала звонков, а запись разговора — из папки встроенной
+/// «звонилки». Хранится только звонок с номера, который есть у нас в клиентах:
+/// личные звонки с этого телефона остаются на телефоне.
+model CallRecord {
+  id          String        @id @default(uuid())
+  tenantId    String
+  phoneId     String?
+  direction   CallDirection
+  /// Номер собеседника в виде +7…
+  number      String
+  startedAt   DateTime
+  durationSec Int           @default(0)
+  customerId  String?
+  orderId     String?
+  /// Запись разговора — файл в том же хранилище, что и фотографии.
+  attachmentId String?      @unique
+  /// Ключ телефона: id строки журнала звонков и время — повтор не задваивает.
+  dedupeKey   String
+  /// Перенесли в другой заказ руками — автоматически больше не трогаем.
+  movedById   String?
+  createdAt   DateTime      @default(now())
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  phone      SmsPhone?   @relation(fields: [phoneId], references: [id], onDelete: SetNull)
+  customer   Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  order      Order?      @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  attachment Attachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, orderId])
+  @@index([tenantId, customerId, startedAt])
+  @@index([tenantId, startedAt])
 }
 
 

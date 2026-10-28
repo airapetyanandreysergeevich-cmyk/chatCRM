@@ -29,10 +29,18 @@ filesRouter.get(
     // путь: подсказывать, что именно не так, значит помогать подбирать.
     if (!verifyLink(key, expires, sig)) throw notFound("Ссылка недействительна");
 
-    const file = await openFile(key);
+    // Запись разговора плеер читает кусками: без ответа 206 нельзя перемотать.
+    const m = /^bytes=(\d+)-(\d*)$/.exec(String(req.headers.range ?? ""));
+    const range = m ? { start: Number(m[1]), end: m[2] ? Number(m[2]) : Number.MAX_SAFE_INTEGER } : undefined;
+    const file = await openFile(key, range && range.end >= range.start ? range : undefined);
     if (!file) throw notFound("Файл не найден");
 
     res.setHeader("Content-Type", mimeOfKey(key));
+    res.setHeader("Accept-Ranges", "bytes");
+    if (file.total !== undefined && range && file.size !== undefined) {
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${range.start}-${range.start + file.size - 1}/${file.total}`);
+    }
     if (file.size !== undefined) res.setHeader("Content-Length", String(file.size));
     // Кэш приватный: ссылка всё равно живёт пятнадцать минут, а общий кэш на
     // пути к браузеру хранить чужие снимки не должен. Подпись входит в адрес,

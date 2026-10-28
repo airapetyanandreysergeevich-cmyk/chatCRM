@@ -1,3 +1,4 @@
+import type { CallItem } from "./calls";
 import { chunks } from "./photos";
 import { api, type Page } from "./api";
 import { fileUrl } from "./basePath";
@@ -289,6 +290,8 @@ export interface OrderEventRow {
   comment?: string | null;
   data?: { name?: string; icon?: string; color?: string; from?: string | null; to?: string | null };
   who: { name: string; position: string | null } | null;
+  /** kind === "CALL": звонок клиента (28.10.2026). */
+  call?: CallItem;
 }
 
 export const labelsApi = {

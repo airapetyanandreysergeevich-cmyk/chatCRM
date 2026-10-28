@@ -1,3 +1,4 @@
+import { formatPhone } from "../../lib/phone";
 import { matchableSerial, realSerial } from "../../lib/serial";
 import type { Prisma } from "@prisma/client";
 import { createWithNumber } from "../../lib/customerNumber";
@@ -8,6 +9,9 @@ import { safeDiff, writeAudit } from "../../lib/audit";
 import { hashPassword } from "../../lib/password";
 import { parseNumber, phoneKey, roleKey, splitRoles, yesNo, type ParsedRow, type RowIssue } from "./import";
 import type { DatasetKey } from "./dataset";
+
+/** Второй телефон: пусто — не трогаем, иначе — в одном виде с первым. */
+const optPhone = (v: string | undefined) => (v === undefined ? undefined : formatPhone(v));
 
 /**
  * Запись разобранных строк в базу.
@@ -195,8 +199,8 @@ async function applyCustomer(
   const data = {
     type: type as "COMPANY" | "INDIVIDUAL",
     name: val(v["Имя"]) ?? "Без имени",
-    phone: val(v["Телефон"]) ?? "",
-    phone2: val(v["Ещё телефон"]),
+    phone: formatPhone(val(v["Телефон"]) ?? ""),
+    phone2: optPhone(val(v["Ещё телефон"])),
     email: val(v["Email"]),
     address: val(v["Адрес"]),
     inn: val(v["ИНН"]),
@@ -704,7 +708,7 @@ async function findOrCreateCustomer(
           tenantId,
           number,
           name: val(v["Клиент"]) ?? `Клиент №${number}`,
-          phone,
+          phone: formatPhone(phone),
           createdById: userId,
         },
         select: { id: true },

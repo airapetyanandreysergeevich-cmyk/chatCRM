@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { backState } from "../lib/listState";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { masterLabel, ordersApi, type Order, type OrderStatus, type Reference, type StatusGroup } from "../lib/orders";
@@ -141,6 +142,8 @@ const LONG_PRESS = 550;
 export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
   const { can, me } = useAuth();
   const navigate = useNavigate();
+  // «Открыть» из меню — с адресом, откуда пришли: заказ покажет «‹ К сводке» или «‹ К списку заказов».
+  const location = useLocation();
   const myId = me?.kind === "tenant" ? me.user.id : null;
   // Папка заказа на компьютере — только в программе FineCRM.
   const folder = useOrderFolder();
@@ -432,7 +435,7 @@ export function useOrderMenu({ onChanged }: { onChanged: () => unknown }) {
             setOpen(null);
             switch (a.kind) {
               case "open":
-                return navigate(`/orders/${o.id}`);
+                return navigate(`/orders/${o.id}`, { state: backState(location.pathname, location.search) });
               case "peek":
               case "photo":
               case "issue":

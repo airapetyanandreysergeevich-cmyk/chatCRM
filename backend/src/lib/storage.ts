@@ -27,10 +27,37 @@ const EXT: Record<string, string> = {
   "application/pdf": "pdf",
 };
 
+/**
+ * Записи разговоров (28.10.2026) — отдельно от снимков: загружать их можно
+ * только телефону мастерской, а не в фото заказа.
+ */
+const AUDIO_EXT: Record<string, string> = {
+  "audio/mp4": "m4a",
+  "audio/x-m4a": "m4a",
+  "audio/aac": "aac",
+  "audio/amr": "amr",
+  "audio/3gpp": "3gp",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "audio/opus": "opus",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+};
+
 /** Обратное соответствие — нужно локальной раздаче, чтобы назвать тип файла. */
-const MIME: Record<string, string> = Object.fromEntries(
-  Object.entries(EXT).map(([mime, ext]) => [ext, mime])
-);
+const MIME: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(AUDIO_EXT).map(([mime, ext]) => [ext, mime])),
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  ...Object.fromEntries(Object.entries(EXT).map(([mime, ext]) => [ext, mime])),
+};
+
+export const isAllowedAudio = (mime: string): boolean => mime in AUDIO_EXT;
+
+/** Запись разговора: ключ «мастерская/calls/uuid.m4a». */
+export function putCallFile(params: { tenantId: string; buffer: Buffer; mimeType: string }): Promise<string> {
+  return driver.put({ tenantId: params.tenantId, orderId: "calls", buffer: params.buffer, mimeType: params.mimeType, ext: AUDIO_EXT[params.mimeType] ?? "bin" });
+}
 
 export const isAllowedUpload = (mime: string): boolean => mime in EXT;
 
@@ -56,6 +83,6 @@ export const signedUrl = (key: string, seconds = 900): Promise<string> =>
 export const removeFile = (key: string): Promise<void> => driver.remove(key);
 
 /** Файл для раздачи по подписанной ссылке — из папки или из бакета. */
-export const openFile = (key: string) => driver.open(key);
+export const openFile = (key: string, range?: { start: number; end: number }) => driver.open(key, range);
 
 export { verify as verifyLink } from "./storage.sign";

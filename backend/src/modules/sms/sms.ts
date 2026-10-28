@@ -213,7 +213,7 @@ export async function sendSms(
       where: { revokedAt: null, tokenHash: { not: null }, lastSeenAt: { gte: new Date(Date.now() - PHONE_GRACE_MS) } },
     })
   );
-  return alive ? row : fail("Телефон-шлюз не на связи — проверьте, что он включён и приложение FineCRM SMS запущено");
+  return alive ? row : fail("Телефон-шлюз не на связи — проверьте, что он включён и приложение FineCRM Телефон запущено");
 }
 
 /** Телефон «есть», если выходил на связь за это время: короткий обрыв сети — не повод отказывать. */

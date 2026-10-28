@@ -1,3 +1,4 @@
+import { customerPhoneWhere, formatPhone, looksLikePhone, phoneTail } from "../../lib/phone";
 import { Prisma } from "@prisma/client";
 import { debtFields, debtList, debtMap } from "../../lib/debt";
 import { approvalHint, readyHint } from "../sms/sms.routes";
@@ -137,6 +138,8 @@ function searchWhere(search: string, withContacts: boolean): Prisma.OrderWhereIn
       ? [
           { customer: { is: { name: like } } },
           { customer: { is: { phone: { contains: search } } } },
+          // Номер в любой записи: «8918…» находит «+7 918…».
+          ...(looksLikePhone(search) ? customerPhoneWhere(search).map((w) => ({ customer: { is: w } })) : []),
         ]
       : []),
   ];
@@ -500,7 +503,14 @@ ordersRouter.post(
       let customer =
         (body.customer.id
           ? await tx.customer.findFirst({ where: { id: body.customer.id, deletedAt: null } })
-          : null) ?? (await tx.customer.findFirst({ where: { phone: body.customer.phone, deletedAt: null } }));
+          : null) ??
+        // «89189998877» и «+7 918 999-88-77» — один клиент: сличаем по последним 10 цифрам.
+        (phoneTail(body.customer.phone).length === 10
+          ? await tx.customer.findFirst({
+              where: { deletedAt: null, OR: [{ phoneTail: phoneTail(body.customer.phone) }, { phone2Tail: phoneTail(body.customer.phone) }] },
+              orderBy: { createdAt: "desc" },
+            })
+          : await tx.customer.findFirst({ where: { phone: body.customer.phone, deletedAt: null } }));
 
       if (!customer) {
         customer = await tx.customer.create({
@@ -509,8 +519,8 @@ ordersRouter.post(
             number: await nextCustomerNumber(tx, tenantId),
             type: body.customer.type,
             name: body.customer.name,
-            phone: body.customer.phone,
-            phone2: body.customer.phone2 || null,
+            phone: formatPhone(body.customer.phone),
+            phone2: body.customer.phone2 ? formatPhone(body.customer.phone2) : null,
             email: body.customer.email || null,
             address: body.customer.address || null,
             source: body.customer.source || null,

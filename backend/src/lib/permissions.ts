@@ -21,6 +21,9 @@ export const PERMISSIONS = {
   ORDERS_CUSTOMER_CONTACTS: "orders.customer_contacts",
   ORDERS_COST: "orders.cost",
 
+  /** Слушает записи разговоров с клиентами (28.10.2026). Сам звонок в истории видят все, кому виден заказ. */
+  CALLS_LISTEN: "calls.listen",
+
   CUSTOMERS_VIEW: "customers.view",
   CUSTOMERS_EDIT: "customers.edit",
 
@@ -62,7 +65,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
     name: "Управляющий",
     permissions: [
       P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_ASSIGN, P.ORDERS_STATUS, P.ORDERS_ISSUE,
-      P.ORDERS_DELETE, P.ORDERS_CUSTOMER_CONTACTS, P.ORDERS_COST,
+      P.ORDERS_DELETE, P.ORDERS_CUSTOMER_CONTACTS, P.ORDERS_COST, P.CALLS_LISTEN,
       P.CUSTOMERS_VIEW, P.CUSTOMERS_EDIT,
       P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_INVENTORY, P.STOCK_SELL,
       P.PURCHASES_VIEW, P.PURCHASES_CREATE, P.PURCHASES_APPROVE,
@@ -77,7 +80,7 @@ export const ROLE_PRESETS: Array<{ code: string; name: string; permissions: Perm
     name: "Приёмщик",
     permissions: [
       P.ORDERS_VIEW_ALL, P.ORDERS_CREATE, P.ORDERS_EDIT, P.ORDERS_STATUS, P.ORDERS_ISSUE,
-      P.ORDERS_CUSTOMER_CONTACTS,
+      P.ORDERS_CUSTOMER_CONTACTS, P.CALLS_LISTEN,
       P.CUSTOMERS_VIEW, P.CUSTOMERS_EDIT,
       P.STOCK_VIEW, P.STOCK_MOVE, P.STOCK_SELL,
       P.PURCHASES_VIEW, P.PURCHASES_CREATE,
@@ -145,6 +148,7 @@ export const PERMISSION_GROUPS: Array<{ group: string; items: Array<{ code: Perm
       { code: P.ORDERS_DELETE, label: "Удаляет заказы", hint: "Заказ убирается из списков; движения склада и кассы остаются" },
       { code: P.ORDERS_CUSTOMER_CONTACTS, label: "Видит контакты клиента" },
       { code: P.ORDERS_COST, label: "Видит себестоимость и маржу" },
+      { code: P.CALLS_LISTEN, label: "Слушает записи звонков", hint: "Записи разговоров с клиентами в истории ремонта и в карточке клиента. Сам звонок (когда, сколько длился) видят все, кому виден заказ" },
     ],
   },
   {

@@ -22,6 +22,7 @@ import { Prisma } from "@prisma/client";
 import {
   debtorSortOf,
   ISSUED,
+  ISSUED_DAYS,
   issuedDaysOf,
   issuedSortOf,
   kindKey,
@@ -206,7 +207,17 @@ async function tableOf(req: Request, mineWhere: Prisma.OrderWhereInput, contacts
           select: tableSelect,
         })
       : [];
-    const rows: TableRow[] = [...active, ...owedRows.filter((o) => !active.some((a) => a.id === o.id))];
+    // «Выданы» (28.10.2026): выданные за самый длинный срок фильтра — сутки,
+    // 7 или 30 дней выбирает сам фильтр в браузере.
+    const issued = await tx.order.findMany({
+      where: { deletedAt: null, ...mineWhere, issuedAt: { gte: new Date(Date.now() - Math.max(...ISSUED_DAYS) * 86_400_000) } },
+      orderBy: { issuedAt: "desc" },
+      take: STAGE_SCAN,
+      select: tableSelect,
+    });
+    const seen = new Set(active.map((a) => a.id));
+    const rows: TableRow[] = [...active];
+    for (const o of [...owedRows, ...issued]) if (!seen.has(o.id)) (seen.add(o.id), rows.push(o));
     // С какого момента заказ в нынешнем статусе — для «Статус дольше нормы».
     const since = new Map<string, Date>();
     for (let i = 0; i < active.length; i += 500) {

@@ -39,6 +39,16 @@ export interface SmsPhone {
   appVersion: string | null;
   sentToday: number;
   problems: string[];
+  /** Звонки (приложение 1.3+): разрешения и найденная запись разговоров. */
+  calls: {
+    log: boolean | null;
+    audio: boolean | null;
+    brand: string | null;
+    dialer: string | null;
+    folder: string | null;
+    lastRecordAt: number | null;
+    howTo: string | null;
+  } | null;
 }
 
 export interface PairCode {

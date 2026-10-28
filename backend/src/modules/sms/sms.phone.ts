@@ -6,6 +6,7 @@ import { withPlatform, withTenant } from "../../lib/db";
 import { ah, badRequest, notFound } from "../../lib/errors";
 import { PHONE_ONLINE_MS, expirePhoneQueue } from "./sms";
 import { handleIncoming, watchList } from "./sms.approval";
+import { loadCallSettings } from "../calls/calls";
 
 /**
  * Свой телефон-шлюз: приложение «FineCRM SMS» на Android (android/sms-gateway).
@@ -63,6 +64,24 @@ export interface PhoneView {
   appVersion: string | null;
   sentToday: number;
   problems: string[];
+  /** Звонки (1.3+): что телефон узнал о записи разговоров. */
+  calls: PhoneCallsInfo | null;
+}
+
+export interface PhoneCallsInfo {
+  /** Разрешение на журнал звонков. */
+  log: boolean | null;
+  /** Разрешение читать аудиофайлы. */
+  audio: boolean | null;
+  /** Марка и «звонилка», как их узнал телефон. */
+  brand: string | null;
+  dialer: string | null;
+  /** Папка, где нашлись записи, или null — не нашлись. */
+  folder: string | null;
+  /** Когда нашлась последняя запись. */
+  lastRecordAt: number | null;
+  /** Подсказка именно для этого телефона: где включить запись. */
+  howTo: string | null;
 }
 
 /** Подключённые телефоны мастерской — для «Интеграций». */
@@ -89,9 +108,22 @@ export async function listPhones(tenantId: string): Promise<PhoneView[]> {
       const version = typeof info.appVersion === "string" ? info.appVersion : "";
       if (version && /^1\.[01]$/.test(version)) problems.push("старая версия приложения — ответы клиентов на согласование не приходят, обновите до 1.2");
       else if (info.receivePermission === false) problems.push("нет разрешения читать SMS — ответы клиентов на согласование не придут");
+      const c = (info.calls ?? null) as Record<string, unknown> | null;
+      const calls: PhoneCallsInfo | null = c
+        ? {
+            log: typeof c.log === "boolean" ? c.log : null,
+            audio: typeof c.audio === "boolean" ? c.audio : null,
+            brand: typeof c.brand === "string" ? c.brand.slice(0, 60) : null,
+            dialer: typeof c.dialer === "string" ? c.dialer.slice(0, 80) : null,
+            folder: typeof c.folder === "string" ? c.folder.slice(0, 200) : null,
+            lastRecordAt: typeof c.lastRecordAt === "number" ? c.lastRecordAt : null,
+            howTo: typeof c.howTo === "string" ? c.howTo.slice(0, 600) : null,
+          }
+        : null;
       return {
         id: p.id,
         name: p.name,
+        calls,
         online: !!p.lastSeenAt && Date.now() - p.lastSeenAt.getTime() < PHONE_ONLINE_MS,
         lastSeenAt: p.lastSeenAt,
         battery: typeof info.battery === "number" ? info.battery : null,
@@ -136,7 +168,7 @@ async function phoneOf(req: Request): Promise<PhoneAuth | null> {
   return { tenantId: row.tenantId, phoneId: id };
 }
 
-async function requirePhone(req: Request, res: Response): Promise<PhoneAuth | null> {
+export async function requirePhone(req: Request, res: Response): Promise<PhoneAuth | null> {
   const auth = await phoneOf(req);
   if (!auth) {
     // 401 — знак приложению: ключ больше не действует (телефон отключили в
@@ -249,8 +281,9 @@ smsPhoneRouter.get(
       // Вместе с заданием — номера, от которых ждём ответа на согласование.
       // Приложение пересылает входящие только с них: личные SMS остаются на телефоне.
       if (job || gone || Date.now() >= deadline) {
-        const watch = await withTenant(auth.tenantId, (tx) => watchList(tx));
-        return res.json({ job: job ?? null, watch });
+        const { watch, calls } = await withTenant(auth.tenantId, async (tx) => ({ watch: await watchList(tx), calls: await loadCallSettings(tx) }));
+        // Звонки (приложение 1.3+): включены ли и нужны ли записи разговоров.
+        return res.json({ job: job ?? null, watch, calls: { enabled: calls.enabled, audio: calls.audio, missed: calls.missed } });
       }
       await sleep(1500);
     }

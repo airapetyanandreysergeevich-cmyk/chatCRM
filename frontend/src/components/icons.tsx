@@ -574,3 +574,53 @@ export const IconReturn = (p: IconProps) => (
     <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
   </Icon>
 );
+
+/** Трубка — звонок клиента (28.10.2026). */
+const HANDSET =
+  "M5.2 3.5h3l1.5 4-2 1.3a11 11 0 0 0 5.5 5.5l1.3-2 4 1.5v3a2 2 0 0 1-2.2 2A16 16 0 0 1 3.2 5.7a2 2 0 0 1 2-2.2Z";
+
+export const IconCall = (p: IconProps) => (
+  <Icon {...p}>
+    <path d={HANDSET} />
+  </Icon>
+);
+
+/** Входящий: стрелка к трубке. */
+export const IconCallIn = (p: IconProps) => (
+  <Icon {...p}>
+    <path d={HANDSET} />
+    <path d="M20.5 3.5 15 9" />
+    <path d="M15 5v4h4" />
+  </Icon>
+);
+
+/** Исходящий: стрелка от трубки. */
+export const IconCallOut = (p: IconProps) => (
+  <Icon {...p}>
+    <path d={HANDSET} />
+    <path d="M15 9l5.5-5.5" />
+    <path d="M16.5 3.5h4v4" />
+  </Icon>
+);
+
+/** Пропущенный: трубка с крестиком. */
+export const IconCallMissed = (p: IconProps) => (
+  <Icon {...p}>
+    <path d={HANDSET} />
+    <path d="M15.5 3.5l5 5" />
+    <path d="M20.5 3.5l-5 5" />
+  </Icon>
+);
+
+export const IconPlay = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 5.5v13l10.5-6.5Z" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
+export const IconPause = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="7" y="5.5" width="3.5" height="13" rx="1" fill="currentColor" stroke="none" />
+    <rect x="13.5" y="5.5" width="3.5" height="13" rx="1" fill="currentColor" stroke="none" />
+  </Icon>
+);
