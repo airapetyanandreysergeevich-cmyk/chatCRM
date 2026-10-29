@@ -8,6 +8,12 @@ import android.content.Intent;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent intent) {
-        if (Store.paired(c)) GatewayService.start(c);
+        if (!Store.paired(c)) return;
+        Watchdog.schedule(c);
+        try {
+            GatewayService.start(c);
+        } catch (Exception ignored) {
+            // не дали запустить сразу — поднимет сторож
+        }
     }
 }

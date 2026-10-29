@@ -1,6 +1,6 @@
 import { formatDate, formatDateTime } from "../lib/format";
 import type { Order } from "../lib/orders";
-import type { DocTexts, PrintForms } from "../lib/printForms";
+import { FIELD_LABELS, type DocTexts, type PrintForms, type SheetField, type SheetSection, type Talon } from "../lib/printForms";
 
 /**
  * Лист бланка — квитанция о приёме или акт выполненных работ.
@@ -56,8 +56,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Pairs({ items }: { items: Array<[string, React.ReactNode]> }) {
   return (
     <dl className="grid gap-y-1">
-      {items.map(([k, v]) => (
-        <div key={k} className="flex gap-2 text-[12px]">
+      {items.map(([k, v], i) => (
+        <div key={i} className="flex gap-2 text-[12px]">
           <dt className="shrink-0 text-black/55">{k}:</dt>
           <dd className="min-w-0 font-medium">{v}</dd>
         </div>
@@ -120,15 +120,18 @@ function LineTable({
   rows,
   showMoney,
 }: {
-  rows: Array<{ name: string; qty: number; price: number }>;
+  rows: Array<{ name: string; qty: number; price: number; warrantyDays?: number | null }>;
   showMoney: boolean;
 }) {
+  // Гарантия у строки (29.10.2026) — столбцом, только если она есть хоть у одной.
+  const withWarranty = rows.some((r) => r.warrantyDays);
   if (rows.length === 0) return <p className="text-[12px] text-black/50">Нет</p>;
   return (
     <table className="w-full border-collapse text-[12px]">
       <thead>
         <tr className="border-b border-black/30 text-left text-black/55">
           <th className="py-1 font-medium">Наименование</th>
+          {withWarranty && <th className="w-[84px] py-1 text-right font-medium">Гарантия</th>}
           <th className="w-[60px] py-1 text-right font-medium">Кол-во</th>
           {showMoney && <th className="w-[90px] py-1 text-right font-medium">Цена</th>}
           {showMoney && <th className="w-[100px] py-1 text-right font-medium">Сумма</th>}
@@ -138,6 +141,7 @@ function LineTable({
         {rows.map((r, i) => (
           <tr key={i} className="border-b border-black/10">
             <td className="py-1 pr-2">{r.name}</td>
+            {withWarranty && <td className="py-1 text-right tabular-nums">{r.warrantyDays ? `${r.warrantyDays} дн.` : "—"}</td>}
             <td className="py-1 text-right tabular-nums">{r.qty}</td>
             {showMoney && <td className="py-1 text-right tabular-nums">{money(r.price)}</td>}
             {showMoney && <td className="py-1 text-right tabular-nums">{money(r.qty * r.price)}</td>}
@@ -145,6 +149,124 @@ function LineTable({
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** Черта под запись от руки — у своего поля без текста. */
+const Blank = () => <span className="inline-block h-[1em] w-[45mm] border-b border-black/50 align-baseline" />;
+
+/**
+ * Значение строки бланка. null — строку не печатаем: необязательные поля
+ * (второй телефон, почта, пароль…) появляются, только если в заказе заполнены.
+ */
+function fieldValue(f: SheetField, order: Order, doc: Doc): React.ReactNode | null {
+  if (f.custom) return f.text ? <span className="whitespace-pre-line">{f.text}</span> : <Blank />;
+  const c = order.customer;
+  switch (f.key) {
+    case "customer":
+      return c.name ?? "—";
+    case "phone":
+      return c.phone ?? "—";
+    case "phone2":
+      return c.phone2 || null;
+    case "email":
+      return c.email || null;
+    case "address":
+      return c.address || null;
+    case "outsource":
+      return order.outsourceNumber || null;
+    case "device":
+      return deviceLine(order);
+    case "serial":
+      return order.device?.serial || "—";
+    case "passcode":
+      return order.devicePasscode || null;
+    case "acceptedAt":
+      return formatDateTime(order.acceptedAt);
+    case "dueAt":
+      return formatDate(order.dueAt);
+    case "completedAt":
+      return formatDateTime(order.completedAt);
+    case "issuedAt":
+      return order.issuedAt ? formatDateTime(order.issuedAt) : null;
+    case "acceptedBy":
+      return order.acceptedBy?.fullName || null;
+    case "master":
+      return order.assignedMaster?.fullName || null;
+    case "storage":
+      return order.storageLocation || null;
+    case "estimate":
+      return money(order.estimatedCost);
+    case "limit":
+      return money(order.approvedLimit);
+    case "prepayment":
+      return money(order.prepayment);
+    case "complaint":
+      return order.complaint || "—";
+    default:
+      void doc;
+      return null;
+  }
+}
+
+/** Строки раздела «пары» по настройке бланка. */
+function sectionPairs(sec: SheetSection, order: Order, doc: Doc): Array<[string, React.ReactNode]> {
+  const out: Array<[string, React.ReactNode]> = [];
+  for (const f of sec.fields) {
+    if (!f.on) continue;
+    // В акте доплаты «Выдана клиенту» — это повторная выдача; перед ней — первая.
+    let label = f.label;
+    if (doc === "extra" && f.key === "issuedAt") {
+      if (order.extra) out.push(["Выдана ранее", formatDateTime(order.extra.prevIssuedAt)]);
+      if (label === FIELD_LABELS.issuedAt) label = "Выдана повторно";
+    }
+    const v = fieldValue(f, order, doc);
+    if (v === null) continue;
+    out.push([label, v]);
+  }
+  return out;
+}
+
+/**
+ * Отрезной талон: под чертой с ножницами, клиент уносит его с собой.
+ * Номер заказа на нём всегда — без него талон ничего не значит.
+ */
+function TalonBlock({ talon, order, name, requisites }: { talon: Talon; order: Order; name: string; requisites: string | null }) {
+  const fields = talon.fields.filter((f) => f.on && f.key !== "sign");
+  const sign = talon.fields.find((f) => f.key === "sign" && f.on);
+  const items: Array<[string, React.ReactNode]> = [];
+  for (const f of fields) {
+    const v = fieldValue(f, order, "intake");
+    if (v !== null) items.push([f.label, v]);
+  }
+  const contact = (requisites ?? "").split("\n").map((x) => x.trim()).filter(Boolean).join(" · ");
+  return (
+    <div data-print-talon className="mt-8 break-inside-avoid">
+      <div className="flex items-center gap-2 text-[10px] text-black/50">
+        <span className="text-[13px] leading-none">✂</span>
+        <span className="h-0 flex-1 border-t border-dashed border-black/50" />
+        <span>линия отреза</span>
+        <span className="h-0 w-[12mm] border-t border-dashed border-black/50" />
+      </div>
+      <div className="mt-3 grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-x-[8mm]">
+        <div className="min-w-0">
+          <p className="text-[13px] font-extrabold leading-tight">{name}</p>
+          {contact && <p className="mt-0.5 text-[10.5px] leading-snug text-black/60">{contact}</p>}
+          <p className="mt-2 text-[12px] font-bold">{talon.title}</p>
+          <p className="font-mono text-[16px] font-bold">{order.number}</p>
+          {talon.note && <p className="mt-1.5 whitespace-pre-line text-[10.5px] leading-snug text-black/70">{talon.note}</p>}
+        </div>
+        <div className="min-w-0">
+          {items.length > 0 && <Pairs items={items} />}
+          {sign && (
+            <div className="mt-6">
+              <div className="h-[1px] w-full bg-black/60" />
+              <p className="mt-1 text-[10px] text-black/60">{sign.label}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -164,13 +286,24 @@ export function PrintSheet({
   // Деньги печатаем только тому, кому они видны в системе. Мастер, у которого
   // в карточке нет сумм, не должен получить их через кнопку печати.
   const showMoney = order.total !== undefined;
-  const works = order.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price }));
+  const works = order.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price, warrantyDays: w.warrantyDays ?? null }));
+  // Общая гарантия: заданная в заказе, а если её не задали — самая длинная из работ.
+  const worksWarranty = Math.max(0, ...works.map((w) => w.warrantyDays ?? 0)) || null;
+  const warrantyDays = order.warrantyDays || worksWarranty;
+  const warrantyBase = order.completedAt ?? order.issuedAt ?? null;
+  const warrantyUntil =
+    order.warrantyDays && order.warrantyUntil
+      ? order.warrantyUntil
+      : warrantyDays && warrantyBase
+        ? new Date(new Date(warrantyBase).getTime() + warrantyDays * 86_400_000).toISOString()
+        : null;
   const parts = order.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price }));
   const texts = doc === "intake" ? forms.intake : forms.act;
   // Приняли по гарантии — у квитанции свой заголовок («Акт приема … по гарантии»).
   const title =
     doc === "extra" ? EXTRA_TITLE : doc === "intake" && order.kind === "WARRANTY" ? forms.warrantyTitle : texts.title;
   const extra = order.extra ?? null;
+  const layout = doc === "intake" ? forms.layout.intake : forms.layout.act;
 
   // Лист A4. Ширина в миллиметрах, чтобы на экране было видно, как ляжет.
   // В предпросмотре настроек лист не ужимается под окно: его уменьшают
@@ -220,82 +353,59 @@ export function PrintSheet({
       </header>
 
       <Columns
-        left={
-          <>
-            <Section title="Клиент">
-              <Pairs
-                items={[
-                  ["Клиент", order.customer.name ?? "—"],
-                  ["Телефон", order.customer.phone ?? "—"],
-                  // Заказчику-аутсорсу — его номер: по нему он сверяет квитанцию со своей базой.
-                  ...(order.outsourceNumber ? ([["Номер аутсорса", order.outsourceNumber]] as Array<[string, string]>) : []),
-                ]}
-              />
-            </Section>
-            <Section title="Техника">
-              <Pairs
-                items={[
-                  ["Устройство", deviceLine(order)],
-                  ["Серийный номер", order.device?.serial || "—"],
-                  ["Принята", formatDateTime(order.acceptedAt)],
-                  [
-                    doc === "intake" ? "Срок готовности" : "Ремонт завершён",
-                    doc === "intake" ? formatDate(order.dueAt) : formatDateTime(order.completedAt),
-                  ],
-                  ...(doc === "extra" && extra
-                    ? ([["Выдана ранее", formatDateTime(extra.prevIssuedAt)]] as Array<[string, string]>)
-                    : []),
-                  ...(doc !== "intake" && order.issuedAt
-                    ? ([[doc === "extra" ? "Выдана повторно" : "Выдана клиенту", formatDateTime(order.issuedAt)]] as Array<
-                        [string, string]
-                      >)
-                    : []),
-                ]}
-              />
-            </Section>
-          </>
-        }
+        left={layout
+          .filter((sec) => sec.on && (sec.key === "client" || sec.key === "device"))
+          .map((sec) => {
+            const items = sectionPairs(sec, order, doc);
+            return items.length ? (
+              <Section key={sec.key} title={sec.title}>
+                <Pairs items={items} />
+              </Section>
+            ) : null;
+          })}
         right={
-          doc === "intake" ? (
-            <>
-              <Section title="Комплектность">
-                <Checked items={order.completeness} empty="Принято без дополнительных принадлежностей" />
+          <>
+            {doc === "extra" && extra && (
+              <Section title="Повторное обращение">
+                <p className="text-[12px] leading-relaxed">{extra.reason || "—"}</p>
               </Section>
-              <Section title="Внешнее состояние">
-                <Checked
-                  items={order.appearance}
-                  empty="Видимых дефектов не зафиксировано"
-                  strong={["Следы вскрытия", "Следы влаги"]}
-                />
-                {order.appearanceNote && <p className="mt-1 text-[12px]">{order.appearanceNote}</p>}
-              </Section>
-              <Section title="Неисправность со слов клиента">
-                <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
-              </Section>
-              {showMoney && (
-                <Section title="Предварительно">
-                  <Pairs
-                    items={[
-                      ["Ориентировочная стоимость", money(order.estimatedCost)],
-                      ["Согласовано клиентом до", money(order.approvedLimit)],
-                      ["Предоплата", money(order.prepayment)],
-                    ]}
-                  />
-                </Section>
-              )}
-            </>
-          ) : (
-            <>
-              {doc === "extra" && extra && (
-                <Section title="Повторное обращение">
-                  <p className="text-[12px] leading-relaxed">{extra.reason || "—"}</p>
-                </Section>
-              )}
-              <Section title="Заявленная неисправность">
-                <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
-              </Section>
-            </>
-          )
+            )}
+            {layout
+              .filter((sec) => sec.on && sec.key !== "client" && sec.key !== "device")
+              .map((sec) => {
+                if (sec.key === "completeness")
+                  return (
+                    <Section key={sec.key} title={sec.title}>
+                      <Checked items={order.completeness} empty="Принято без дополнительных принадлежностей" />
+                    </Section>
+                  );
+                if (sec.key === "appearance")
+                  return (
+                    <Section key={sec.key} title={sec.title}>
+                      <Checked
+                        items={order.appearance}
+                        empty="Видимых дефектов не зафиксировано"
+                        strong={["Следы вскрытия", "Следы влаги"]}
+                      />
+                      {order.appearanceNote && <p className="mt-1 text-[12px]">{order.appearanceNote}</p>}
+                    </Section>
+                  );
+                if (sec.key === "complaint")
+                  return (
+                    <Section key={sec.key} title={sec.title}>
+                      <p className="text-[12px] leading-relaxed">{order.complaint || "—"}</p>
+                    </Section>
+                  );
+                // Деньги — только тому, кому они видны в системе.
+                if (sec.key === "money" && !showMoney) return null;
+                const items = sectionPairs(sec, order, doc);
+                return items.length ? (
+                  <Section key={sec.key} title={sec.title}>
+                    <Pairs items={items} />
+                  </Section>
+                ) : null;
+              })}
+          </>
         }
       />
 
@@ -315,7 +425,7 @@ export function PrintSheet({
                 items={[
                   [
                     "На работы",
-                    order.warrantyDays ? `${order.warrantyDays} дн. — до ${formatDate(order.warrantyUntil)}` : "—",
+                    warrantyDays ? `${warrantyDays} дн.${warrantyUntil ? ` — до ${formatDate(warrantyUntil)}` : ""}` : "—",
                   ],
                   ["Мастер", order.assignedMaster?.fullName ?? "—"],
                 ]}
@@ -376,7 +486,7 @@ export function PrintSheet({
                 items={[
                   [
                     "На работы",
-                    order.warrantyDays ? `${order.warrantyDays} дн. — до ${formatDate(order.warrantyUntil)}` : "—",
+                    warrantyDays ? `${warrantyDays} дн.${warrantyUntil ? ` — до ${formatDate(warrantyUntil)}` : ""}` : "—",
                   ],
                   ["Мастер", order.assignedMaster?.fullName ?? "—"],
                 ]}
@@ -441,6 +551,10 @@ export function PrintSheet({
       {/* Строка внизу листа — если мастерская её задала. */}
       {forms.footer && (
         <p className="mt-8 border-t border-black/20 pt-2 text-center text-[10.5px] text-black/60">{forms.footer}</p>
+      )}
+
+      {doc === "intake" && forms.talon.on && (
+        <TalonBlock talon={forms.talon} order={order} name={forms.name || workshop} requisites={forms.requisites} />
       )}
     </div>
   );

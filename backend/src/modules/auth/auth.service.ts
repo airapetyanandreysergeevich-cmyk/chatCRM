@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Request } from "express";
 import { prisma, withPlatform, withTenant } from "../../lib/db";
 import { env } from "../../lib/env";
@@ -17,15 +17,19 @@ export const REFRESH_COOKIE = "rs_refresh";
  *  превращаться в способ проверять, кто зарегистрирован в системе. */
 const WRONG = "Неверный email или пароль";
 
-export function refreshCookieOptions() {
+export function refreshCookieOptions(remember = true) {
   return {
     httpOnly: true,
     secure: env.cookieSecure,
     sameSite: "lax" as const,
     path: "/api/auth",
-    maxAge: env.refreshTokenTtlDays * 24 * 60 * 60 * 1000,
+    // «Запомнить меня» снято — печенье без срока: браузер забудет его, когда его закроют.
+    maxAge: remember ? env.refreshTokenTtlDays * 24 * 60 * 60 * 1000 : undefined,
   };
 }
+
+/** Сколько живёт вход без «Запомнить меня», если браузер так и не закрыли: сутки, продлеваются при работе. */
+const SHORT_SESSION_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Метка «с этого браузера уже входили в программу».
@@ -53,11 +57,19 @@ async function issueRefresh(params: {
   userId?: string | null;
   platformUserId?: string | null;
   req: Request;
+  /** Цепочка этого устройства; нет — новый вход, своя цепочка. */
+  familyId?: string | null;
+  remember?: boolean;
 }) {
   const raw = randomBytes(48).toString("base64url");
-  const expiresAt = new Date(Date.now() + env.refreshTokenTtlDays * 24 * 60 * 60 * 1000);
+  const remember = params.remember ?? true;
+  const expiresAt = new Date(Date.now() + (remember ? env.refreshTokenTtlDays * 24 * 60 * 60 * 1000 : SHORT_SESSION_MS));
+  const id = randomUUID();
   await prisma.session.create({
     data: {
+      id,
+      familyId: params.familyId ?? id,
+      remember,
       tenantId: params.tenantId ?? null,
       userId: params.userId ?? null,
       platformUserId: params.platformUserId ?? null,
@@ -139,13 +151,14 @@ export interface LoginResult {
   accessToken: string;
   refresh: string;
   kind: "platform" | "tenant";
+  remember: boolean;
 }
 
 /**
  * Вход один на всех. Сначала ищем среди пользователей платформы, потом среди
  * сотрудников мастерских — email уникален по всей платформе, так что пересечься они не могут.
  */
-export async function login(input: { email: string; password: string; req: Request }): Promise<LoginResult> {
+export async function login(input: { email: string; password: string; req: Request; remember?: boolean }): Promise<LoginResult> {
   let email = input.email.toLowerCase().trim();
   // В локальной сети можно войти просто «nikita»: Основа знает своё имя и
   // допишет «@lenina» сама. В облаке своего имени нет — там логин полный.
@@ -168,8 +181,9 @@ export async function login(input: { email: string; password: string; req: Reque
     };
     return {
       accessToken: signAccessToken(payload),
-      refresh: await issueRefresh({ platformUserId: platformUser.id, req: input.req }),
+      refresh: await issueRefresh({ platformUserId: platformUser.id, req: input.req, remember: input.remember }),
       kind: "platform",
+      remember: input.remember ?? true,
     };
   }
 
@@ -214,8 +228,9 @@ export async function login(input: { email: string; password: string; req: Reque
   const payload = await tenantPayload(tenant.id, user.id);
   return {
     accessToken: signAccessToken(payload),
-    refresh: await issueRefresh({ tenantId: tenant.id, userId: user.id, req: input.req }),
+    refresh: await issueRefresh({ tenantId: tenant.id, userId: user.id, req: input.req, remember: input.remember }),
     kind: "tenant",
+    remember: input.remember ?? true,
   };
 }
 
@@ -229,7 +244,7 @@ export async function login(input: { email: string; password: string; req: Reque
  * покрывает такие гонки с запасом, а украденному токену не даёт ничего:
  * чтобы им воспользоваться, вор должен успеть раньше хозяина.
  */
-export const ROTATE_GRACE_MS = 60_000;
+export const ROTATE_GRACE_MS = 5 * 60_000;
 
 /**
  * Ротация: старая сессия гасится, выдаётся новая.
@@ -249,10 +264,20 @@ export async function rotateRefresh(raw: string, req: Request) {
     session.expiresAt.getTime() > now;
 
   if (session.revokedAt && !inGrace) {
-    await prisma.session.updateMany({
-      where: session.userId ? { userId: session.userId } : { platformUserId: session.platformUserId },
-      data: { revokedAt: new Date() },
-    });
+    // Погашенный ключ пришёл снова. Раньше гасились все входы сотрудника на всех
+    // устройствах — и мастерские жаловались, что «выкидывает»: телефон уснул
+    // посреди обновления, связь оборвалась, ответ не дошёл — и через минуту
+    // старый ключ гасил вход и на компьютере в приёмке. Теперь гаснет только
+    // цепочка этого устройства (29.10.2026). Вход, кончившийся выходом или сменой
+    // пароля, при этом просто остаётся погашенным.
+    const family = session.familyId ?? session.id;
+    if (!session.endReason || session.endReason === "rotated") {
+      await prisma.session.updateMany({
+        where: { familyId: family, revokedAt: null },
+        data: { revokedAt: new Date(), endReason: "reuse" },
+      });
+      console.warn(`Вход погашен: старый ключ пришёл повторно (сессия ${session.id.slice(0, 8)}, ${session.userAgent?.slice(0, 60) ?? "?"})`);
+    }
     throw unauthorized("Сессия отозвана, войдите заново");
   }
   if (session.expiresAt < new Date()) throw unauthorized("Сессия истекла, войдите заново");
@@ -261,7 +286,7 @@ export async function rotateRefresh(raw: string, req: Request) {
     const at = new Date(now);
     await prisma.session.update({
       where: { id: session.id },
-      data: { revokedAt: at, expiresAt: new Date(now + ROTATE_GRACE_MS) },
+      data: { revokedAt: at, expiresAt: new Date(now + ROTATE_GRACE_MS), endReason: "rotated" },
     });
   }
 
@@ -270,16 +295,16 @@ export async function rotateRefresh(raw: string, req: Request) {
     if (!tenant || tenant.deletedAt) throw unauthorized("Мастерская недоступна");
     assertTenantUsable(tenant.status);
     const payload = await tenantPayload(session.tenantId, session.userId);
-    const refresh = await issueRefresh({ tenantId: session.tenantId, userId: session.userId, req });
-    return { accessToken: signAccessToken(payload), refresh };
+    const refresh = await issueRefresh({ tenantId: session.tenantId, userId: session.userId, req, familyId: session.familyId ?? session.id, remember: session.remember });
+    return { accessToken: signAccessToken(payload), refresh, remember: session.remember };
   }
 
   if (session.platformUserId) {
     const user = await prisma.platformUser.findUnique({ where: { id: session.platformUserId } });
     if (!user || !user.isActive) throw unauthorized("Учётная запись отключена");
     const payload: PlatformTokenPayload = { kind: "platform", platformUserId: user.id, role: user.role };
-    const refresh = await issueRefresh({ platformUserId: user.id, req });
-    return { accessToken: signAccessToken(payload), refresh };
+    const refresh = await issueRefresh({ platformUserId: user.id, req, familyId: session.familyId ?? session.id, remember: session.remember });
+    return { accessToken: signAccessToken(payload), refresh, remember: session.remember };
   }
 
   throw unauthorized("Сессия недействительна");
@@ -289,14 +314,14 @@ export async function revokeRefresh(raw: string | undefined) {
   if (!raw) return;
   await prisma.session.updateMany({
     where: { refreshHash: hashToken(raw), revokedAt: null },
-    data: { revokedAt: new Date() },
+    data: { revokedAt: new Date(), endReason: "logout" },
   });
 }
 
 /** Гасит все сессии сотрудника — при увольнении, смене пароля или отключении учётки. */
-export async function revokeAllForUser(userId: string) {
+export async function revokeAllForUser(userId: string, reason = "staff") {
   const now = new Date();
-  await prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } });
+  await prisma.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now, endReason: reason } });
   // Льготная минута после ротации тоже кончается сразу.
   await prisma.session.updateMany({ where: { userId, expiresAt: { gt: now } }, data: { expiresAt: now } });
 }

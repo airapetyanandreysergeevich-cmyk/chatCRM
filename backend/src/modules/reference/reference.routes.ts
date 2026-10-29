@@ -75,6 +75,7 @@ referenceRouter.get(
         note: s.note,
         isPinned: s.isPinned,
         categoryId: s.categoryId,
+        warrantyDays: s.warrantyDays,
       })),
       // Категории прайса — для панели «+» в названии работы (28.10.2026).
       serviceCategories: serviceCategories.map((c) => ({ id: c.id, parentId: c.parentId, name: c.name, color: c.color, sortOrder: c.sortOrder })),

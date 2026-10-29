@@ -7,7 +7,23 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LOGO_TYPES, prepareLogo } from "../lib/branding";
 import type { Order } from "../lib/orders";
-import { DEFAULT_TEXTS, DEFAULT_WARRANTY_TITLE, printFormsApi, TEXT_LEADING, TEXT_SIZE, type DocTexts, type PrintForms } from "../lib/printForms";
+import {
+  CUSTOM_MAX,
+  DEFAULT_TEXTS,
+  DEFAULT_WARRANTY_TITLE,
+  defaultLayout,
+  defaultTalon,
+  FIELD_HINTS,
+    newCustomKey,
+  printFormsApi,
+  TEXT_LEADING,
+  TEXT_SIZE,
+  type DocTexts,
+  type PrintForms,
+  type SheetField,
+  type SheetSection,
+  type Talon,
+} from "../lib/printForms";
 
 /**
  * «Настройки → Бланки»: квитанция и акт так, как их увидит клиент.
@@ -335,6 +351,252 @@ function DocCard({
   );
 }
 
+/** Маленькая галочка в строке — большая кнопка Checkbox здесь заняла бы полстроки. */
+function Tick({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled: boolean; label: string }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={
+        "grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[6px] border transition-colors duration-150 disabled:opacity-50 " +
+        (checked ? "border-brand bg-brand text-white" : "border-line-strong bg-surface-input hover:border-ink-dim")
+      }
+    >
+      {checked && (
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
+          <path d="M3.5 8.5l3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+const iconBtn =
+  "grid h-8 w-8 shrink-0 place-items-center rounded-field border border-line bg-surface-raised text-[14px] font-semibold text-ink-muted " +
+  "hover:border-line-strong hover:text-ink disabled:opacity-30";
+
+/**
+ * Строки раздела: галочка, название (пусто — стандартное), ↑↓, у своих —
+ * текст и «убрать». Порядок здесь — порядок на листе.
+ */
+function FieldRows({
+  fields,
+  defaults,
+  onChange,
+  disabled,
+  attr,
+}: {
+  fields: SheetField[];
+  defaults: SheetField[];
+  onChange: (next: SheetField[]) => void;
+  disabled: boolean;
+  attr: string;
+}) {
+  const set = (i: number, p: Partial<SheetField>) => onChange(fields.map((f, j) => (j === i ? { ...f, ...p } : f)));
+  const move = (i: number, d: -1 | 1) => {
+    const next = [...fields];
+    const [x] = next.splice(i, 1);
+    next.splice(i + d, 0, x);
+    onChange(next);
+  };
+  const customs = fields.filter((f) => f.custom).length;
+  return (
+    <div className="space-y-1.5">
+      {fields.map((f, i) => {
+        const def = defaults.find((d) => d.key === f.key);
+        const hint = FIELD_HINTS[f.key];
+        return (
+          <div
+            key={f.key}
+            data-print-field={`${attr}:${f.key}`}
+            className={"rounded-field border px-2 py-1.5 " + (f.on ? "border-line bg-surface-input/40" : "border-line/60 opacity-70")}
+          >
+            <div className="flex items-center gap-2">
+              <Tick checked={f.on} disabled={disabled} label={`Печатать «${f.label}»`} onChange={(on) => set(i, { on })} />
+              <Input
+                value={f.label}
+                maxLength={60}
+                disabled={disabled}
+                placeholder={def?.label ?? "Название поля"}
+                aria-label="Название на бланке"
+                className="!min-h-[34px] h-[34px] min-w-0 flex-1 !px-2.5 !text-[13.5px]"
+                onChange={(e) => set(i, { label: e.target.value })}
+                onBlur={() => !f.label.trim() && set(i, { label: def?.label ?? "Своё поле" })}
+              />
+              <button type="button" className={iconBtn} disabled={disabled || i === 0} onClick={() => move(i, -1)} aria-label="Выше">
+                ↑
+              </button>
+              <button type="button" className={iconBtn} disabled={disabled || i === fields.length - 1} onClick={() => move(i, 1)} aria-label="Ниже">
+                ↓
+              </button>
+              {f.custom && (
+                <button
+                  type="button"
+                  className={iconBtn}
+                  disabled={disabled}
+                  onClick={() => onChange(fields.filter((_, j) => j !== i))}
+                  aria-label="Убрать поле"
+                  data-print-field-remove
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            {f.custom ? (
+              <Input
+                value={f.text ?? ""}
+                maxLength={200}
+                disabled={disabled}
+                placeholder="Текст; пусто — черта для руки"
+                className="mt-1.5 !min-h-[34px] h-[34px] !px-2.5 !text-[13px]"
+                data-print-field-text
+                onChange={(e) => set(i, { text: e.target.value || null })}
+              />
+            ) : (
+              (hint || (def && f.label !== def.label)) && (
+                <p className="mt-0.5 pl-[30px] text-[11.5px] text-ink-dim">
+                  {[def && f.label !== def.label ? `было «${def.label}»` : "", hint].filter(Boolean).join(" · ")}
+                </p>
+              )
+            )}
+          </div>
+        );
+      })}
+      {!disabled && customs < CUSTOM_MAX && (
+        <button
+          type="button"
+          data-print-field-add={attr}
+          className="text-[13px] font-semibold text-brand-ink hover:underline"
+          onClick={() => onChange([...fields, { key: newCustomKey(), on: true, label: "Своё поле", text: null, custom: true }])}
+        >
+          + Своё поле
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** «Поля на листе»: разделы квитанции или акта — включить, переименовать, строки внутри. */
+function LayoutCard({
+  title,
+  kind,
+  sections,
+  onChange,
+  onFocus,
+  disabled,
+}: {
+  title: string;
+  kind: "intake" | "act";
+  sections: SheetSection[];
+  onChange: (next: SheetSection[]) => void;
+  onFocus: () => void;
+  disabled: boolean;
+}) {
+  const defaults = defaultLayout(kind);
+  const set = (key: string, p: Partial<SheetSection>) => onChange(sections.map((s) => (s.key === key ? { ...s, ...p } : s)));
+  const changed = JSON.stringify(sections) !== JSON.stringify(defaults);
+  const customs = sections.reduce((n, s) => n + s.fields.filter((f) => f.custom).length, 0);
+  const summary = !changed
+    ? "Стандартные поля"
+    : ["Настроены", customs ? `своих полей: ${customs}` : ""].filter(Boolean).join(" · ");
+  return (
+    <Panel id={`print:${title}`} title={title} summary={summary}>
+      <div className="mt-4 space-y-4" onFocusCapture={onFocus} onClickCapture={onFocus} data-print-layout={kind}>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <Hint>
+            Галочка — печатать. Название можно поменять, строки — переставить стрелками. Пустые поля заказа на лист не
+            попадают.
+          </Hint>
+          {changed && !disabled && (
+            <button type="button" onClick={() => onChange(defaults)} className="text-[12.5px] font-semibold text-brand-ink hover:underline">
+              Вернуть стандартные
+            </button>
+          )}
+        </div>
+        {sections.map((sec) => {
+          const def = defaults.find((d) => d.key === sec.key)!;
+          return (
+            <div key={sec.key} data-print-section={`${kind}:${sec.key}`} className="rounded-field border border-line p-2.5">
+              <div className="flex items-center gap-2">
+                <Tick checked={sec.on} disabled={disabled} label={`Печатать раздел «${sec.title}»`} onChange={(on) => set(sec.key, { on })} />
+                <Input
+                  value={sec.title}
+                  maxLength={60}
+                  disabled={disabled}
+                  placeholder={def.title}
+                  aria-label="Название раздела"
+                  className="!min-h-[34px] h-[34px] min-w-0 flex-1 !px-2.5 !text-[13.5px] font-semibold"
+                  onChange={(e) => set(sec.key, { title: e.target.value })}
+                  onBlur={() => !sec.title.trim() && set(sec.key, { title: def.title })}
+                />
+              </div>
+              {sec.on && !sec.block && (
+                <div className="mt-2">
+                  <FieldRows
+                    attr={`${kind}:${sec.key}`}
+                    fields={sec.fields}
+                    defaults={def.fields}
+                    disabled={disabled}
+                    onChange={(fields) => set(sec.key, { fields })}
+                  />
+                </div>
+              )}
+              {sec.key === "money" && <Hint>Суммы печатаются только тем, кому они видны в заказе.</Hint>}
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+/** Отрезной талон под квитанцией. */
+function TalonCard({ talon, onChange, onFocus, disabled }: { talon: Talon; onChange: (t: Talon) => void; onFocus: () => void; disabled: boolean }) {
+  const d = defaultTalon();
+  return (
+    <Panel id="print:Отрезной талон" title="Отрезной талон" summary={talon.on ? "Печатается внизу квитанции" : "Выключен"}>
+      <div className="mt-4 space-y-4" onFocusCapture={onFocus} onClickCapture={onFocus} data-print-talon-card>
+        <div className="sm:max-w-[460px]">
+          <Checkbox
+            checked={talon.on}
+            disabled={disabled}
+            onChange={(on) => onChange({ ...talon, on })}
+            label="Печатать талон внизу квитанции — по линии ✂ отрезать и отдать клиенту"
+          />
+        </div>
+        {talon.on && (
+          <>
+            <div>
+              <FieldHead label="Заголовок талона" onReset={talon.title !== d.title ? () => onChange({ ...talon, title: d.title }) : undefined} />
+              <Input value={talon.title} maxLength={60} disabled={disabled} onChange={(e) => onChange({ ...talon, title: e.target.value })} />
+              <Hint>Номер заказа, название и реквизиты мастерской на талоне есть всегда.</Hint>
+            </div>
+            <div>
+              <FieldHead label="Строки талона" />
+              <FieldRows attr="talon" fields={talon.fields} defaults={d.fields} disabled={disabled} onChange={(fields) => onChange({ ...talon, fields })} />
+            </div>
+            <div>
+              <FieldHead label="Текст на талоне" count={(talon.note ?? "").length} max={300} />
+              <Textarea
+                rows={2}
+                value={talon.note ?? ""}
+                maxLength={300}
+                disabled={disabled}
+                placeholder="Технику выдают по этому талону. Потеряли — с паспортом."
+                onChange={(e) => onChange({ ...talon, note: e.target.value || null })}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 export default function PrintFormsPage() {
   const { me, can } = useAuth();
   const mayEdit = can("settings.manage");
@@ -521,6 +783,17 @@ export default function PrintFormsPage() {
             staffHint="Под строкой — только эта надпись: расписывается тот, кто принимает технику."
           />
 
+          <LayoutCard
+            title="Квитанция: поля на листе"
+            kind="intake"
+            sections={draft.layout.intake}
+            disabled={!mayEdit}
+            onFocus={() => setDoc("intake")}
+            onChange={(intake) => patch({ layout: { ...draft.layout, intake } })}
+          />
+
+          <TalonCard talon={draft.talon} disabled={!mayEdit} onFocus={() => setDoc("intake")} onChange={(talon) => patch({ talon })} />
+
           <DocCard
             title="Акт выполненных работ"
             kind="act"
@@ -531,6 +804,15 @@ export default function PrintFormsPage() {
             bodyLabel="Условия гарантии"
             bodyHint="Срок гарантии берётся из заказа — здесь только общие условия."
             staffHint="Под строкой — только эта надпись: расписывается тот, кто выдаёт технику."
+          />
+
+          <LayoutCard
+            title="Акт: поля на листе"
+            kind="act"
+            sections={draft.layout.act}
+            disabled={!mayEdit}
+            onFocus={() => setDoc("act")}
+            onChange={(act) => patch({ layout: { ...draft.layout, act } })}
           />
 
           <Panel id="print:Низ листа" title="Низ листа">

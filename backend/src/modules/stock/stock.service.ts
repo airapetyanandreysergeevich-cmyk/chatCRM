@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { badRequest, notFound } from "../../lib/errors";
+export { homeWarehouse, rehomeBalances, warehouseByName } from "./warehouses";
 
 /** Prisma отдаёт Decimal объектом — наружу и в расчёты берём число. */
 export const num = (v: Prisma.Decimal | number | null | undefined): number =>

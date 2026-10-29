@@ -370,6 +370,13 @@ model Session {
   revokedAt      DateTime?
   ip             String?
   userAgent      String?
+  /// Цепочка ротаций одного устройства (id первой сессии входа). Старый ключ,
+  /// пришедший повторно, гасит только эту цепочку, а не все входы сотрудника (29.10.2026).
+  familyId       String?
+  /// «Запомнить меня»: false — вход до закрытия браузера (печенье без срока, сессия на сутки).
+  remember       Boolean   @default(true)
+  /// Почему вход кончился: logout, reuse, password, disabled, deleted, coowner, platform.
+  endReason      String?
   createdAt      DateTime  @default(now())
 
   tenant       Tenant?       @relation(fields: [tenantId], references: [id])
@@ -378,6 +385,7 @@ model Session {
 
   @@index([userId])
   @@index([platformUserId])
+  @@index([familyId])
 }
 
 enum ApplicationStatus {
@@ -853,6 +861,8 @@ model Service {
   isPinned Boolean @default(false) // вынесена кнопкой в карточку заказа
   /// Категория прайса (28.10.2026); пусто — «Без категории».
   categoryId String?
+  /// Гарантия на эту работу, дней (29.10.2026): переходит в строку работы заказа и в акт.
+  warrantyDays Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -961,6 +971,8 @@ model OrderWork {
   qty       Decimal  @default(1) @db.Decimal(12, 3)
   price     Decimal  @db.Decimal(12, 2)
   masterId  String?
+  /// Гарантия на эту работу, дней — из прайса или вручную; печатается в акте.
+  warrantyDays Int?
   createdAt DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
@@ -1125,6 +1137,7 @@ model Warehouse {
   branch    Branch?         @relation(fields: [branchId], references: [id])
   balances  StockBalance[]
   movements StockMovement[]
+  items     StockItem[]
 
   @@index([tenantId])
 }
@@ -1142,6 +1155,9 @@ model StockItem {
   isActive Boolean @default(true)
 
   categoryId    String?
+  /// На каком складе лежит (29.10.2026). Пусто — основной склад. Тот же товар
+  /// на другом складе — отдельная позиция, как с местом хранения.
+  warehouseId   String?
   /// Где лежит: «Шкаф 2, ячейка 14».
   location      String?
   /// Цена закупки — последняя, которую ввели в карточке (средняя себестоимость — в StockBalance.avgCost).
@@ -1156,8 +1172,10 @@ model StockItem {
 
   tenant        Tenant                @relation(fields: [tenantId], references: [id])
   categoryRef   StockCategory?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  warehouse     Warehouse?            @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, categoryId])
+  @@index([tenantId, warehouseId])
   balances      StockBalance[]
   movements     StockMovement[]
   orderParts    OrderPart[]

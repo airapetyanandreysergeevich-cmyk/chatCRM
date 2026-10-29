@@ -283,7 +283,7 @@ staffRouter.patch(
     });
 
     // Отключили или поменяли права совладельца — пусть войдёт заново с новыми правами.
-    if (body.isActive === false || body.coOwner !== undefined) await revokeAllForUser(updated.id);
+    if (body.isActive === false || body.coOwner !== undefined) await revokeAllForUser(updated.id, body.isActive === false ? "disabled" : "coowner");
     res.json({ id: updated.id, fullName: updated.fullName, isActive: updated.isActive });
   })
 );
@@ -311,7 +311,7 @@ staffRouter.post(
     });
 
     // Смена пароля выбрасывает сотрудника со всех устройств — это и есть смысл смены.
-    await revokeAllForUser(req.params.id);
+    await revokeAllForUser(req.params.id, "password");
     res.json({ ok: true });
   })
 );
@@ -346,7 +346,7 @@ staffRouter.delete(
         ip: clientIp(req),
       });
     });
-    await revokeAllForUser(req.params.id);
+    await revokeAllForUser(req.params.id, "deleted");
     res.json({ ok: true });
   })
 );

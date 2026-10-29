@@ -35,7 +35,7 @@ interface AuthState {
   status: "loading" | "anon" | "ready";
   me: Me | null;
   can: (...codes: string[]) => boolean;
-  login: (v: { email: string; password: string }) => Promise<void>;
+  login: (v: { email: string; password: string; remember?: boolean }) => Promise<void>;
   applyToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadMe, reset]);
 
   const login = useCallback(
-    async (v: { email: string; password: string }) => {
+    async (v: { email: string; password: string; remember?: boolean }) => {
       const data = await api.post<{ accessToken?: string; redirect?: string }>("/auth/login", v);
       // Сотрудник коробочной мастерской вошёл не в облако, а в свою Основу:
       // пароль проверила она сама, печенье сессии уже выдано на её адрес —

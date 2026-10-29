@@ -42,6 +42,8 @@ const loginLimiter = rateLimit({
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().min(1, "Укажите логин"),
   password: z.string().min(1, "Укажите пароль"),
+  /** «Запомнить меня» (29.10.2026): по умолчанию — да, как было. */
+  remember: z.boolean().optional().default(true),
 });
 
 const asEmail = z.string().email();
@@ -67,7 +69,8 @@ async function loginThroughBox(
   login: { local: string; name: string },
   password: string,
   req: Request,
-  res: Response
+  res: Response,
+  remember = true
 ): Promise<void> {
   const found = await findWorkshop(login.name);
   const hub = relayHub();
@@ -93,7 +96,7 @@ async function loginThroughBox(
       "x-forwarded-for": req.ip ?? "",
       ...(req.headers["user-agent"] ? { "user-agent": String(req.headers["user-agent"]).slice(0, 300) } : {}),
     },
-    body: Buffer.from(JSON.stringify({ email: `${login.local}@${found.name}`, password }), "utf8"),
+    body: Buffer.from(JSON.stringify({ email: `${login.local}@${found.name}`, password, remember }), "utf8"),
   });
 
   if (reply.offline || reply.status === 502 || reply.status === 503 || reply.status === 504) {
@@ -140,10 +143,10 @@ authRouter.post(
     // Логин мастерской на облачном сервере — вход в её Основу через туннель.
     // В самой Основе узла связи нет, и такой логин — просто её собственный.
     const workshop = relayHub() ? splitWorkshopLogin(body.email) : null;
-    if (workshop) return loginThroughBox(workshop, body.password, req, res);
+    if (workshop) return loginThroughBox(workshop, body.password, req, res, body.remember);
 
-    const { accessToken, refresh, kind } = await login({ ...body, req });
-    res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions());
+    const { accessToken, refresh, kind, remember } = await login({ ...body, req });
+    res.cookie(REFRESH_COOKIE, refresh, refreshCookieOptions(remember));
     markSignedIn(res);
     res.json({ accessToken, kind });
   })
@@ -166,7 +169,7 @@ authRouter.post(
       if (e instanceof AppError && e.status === 401) unmarkSignedIn(res);
       throw e;
     }
-    res.cookie(REFRESH_COOKIE, rotated.refresh, refreshCookieOptions());
+    res.cookie(REFRESH_COOKIE, rotated.refresh, refreshCookieOptions(rotated.remember));
     // Заодно ставит метку тем, кто вошёл ещё до её появления.
     markSignedIn(res);
     res.json({ accessToken: rotated.accessToken });

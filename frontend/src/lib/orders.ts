@@ -23,6 +23,8 @@ export interface OrderWork {
   price: number;
   /** Чья работа — для зарплаты. null — мастер заказа. Только у работ. */
   masterId?: string | null;
+  /** Гарантия на работу, дней — из прайса или вручную; печатается в акте (29.10.2026). */
+  warrantyDays?: number | null;
 }
 
 export interface OrderPart extends OrderWork {

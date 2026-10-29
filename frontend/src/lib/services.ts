@@ -17,7 +17,14 @@ export interface Service {
   isPinned: boolean;
   /** Категория прайса (28.10.2026); null — «Без категории». */
   categoryId?: string | null;
+  /** Гарантия на работу, дней (29.10.2026); null — без гарантии. */
+  warrantyDays?: number | null;
 }
+
+/** Сроки гарантии кнопками — в прайсе и в строке работы. */
+export const WARRANTY_OPTIONS = [7, 14, 30, 60, 90, 180, 365];
+export const warrantyText = (d: number | null | undefined) =>
+  !d ? "без гарантии" : d % 365 === 0 ? `${d / 365} ${d === 365 ? "год" : "года"}` : d % 30 === 0 && d >= 60 ? `${d / 30} мес.` : `${d} дн.`;
 
 /** Категория прайса — как категория склада: цвет карточки, подкатегории. */
 export interface ServiceCategory {

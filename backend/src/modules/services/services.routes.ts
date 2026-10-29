@@ -45,6 +45,8 @@ const serviceSchema = z.object({
   isPinned: z.coerce.boolean().optional(),
   /** Категория прайса; null — «Без категории». */
   categoryId: z.string().uuid().nullable().optional(),
+  /** Гарантия на работу, дней (29.10.2026); null — без гарантии. */
+  warrantyDays: z.coerce.number().int().min(0).max(3650).nullable().optional(),
 });
 
 // ------------------------------------------------------------ категории прайса
@@ -210,6 +212,7 @@ servicesRouter.get(
         note: s.note,
         isPinned: s.isPinned,
         categoryId: s.categoryId,
+        warrantyDays: s.warrantyDays,
       }))
     );
   })
@@ -230,6 +233,7 @@ servicesRouter.post(
             name: body.name,
             price: body.price,
             note: body.note || null,
+            warrantyDays: body.warrantyDays || null,
             isPinned: body.isPinned ?? false,
             categoryId: await assertCategory(tx, body.categoryId),
           },
@@ -271,6 +275,7 @@ servicesRouter.patch(
           data: {
             ...rest,
             ...(body.note !== undefined ? { note: body.note || null } : {}),
+            ...(body.warrantyDays !== undefined ? { warrantyDays: body.warrantyDays || null } : {}),
             ...(categoryId !== undefined ? { categoryId: await assertCategory(tx, categoryId) } : {}),
           },
         });

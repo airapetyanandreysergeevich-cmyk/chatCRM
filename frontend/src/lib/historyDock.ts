@@ -78,3 +78,59 @@ export function useWidth(el: HTMLElement | null): number {
   }, [el]);
   return w;
 }
+
+/**
+ * Порядок истории ремонта (Андрей, 29.10.2026): новые снизу, как в переписке,
+ * или новые сверху. Тоже у сотрудника, с копией в браузере.
+ */
+export type HistoryOrder = "bottom" | "top";
+const ORDER_KEY = "finecrm.history.order";
+let orderCache: HistoryOrder | undefined;
+
+const readOrder = (): HistoryOrder => {
+  try {
+    return localStorage.getItem(ORDER_KEY) === "top" ? "top" : "bottom";
+  } catch {
+    return "bottom";
+  }
+};
+const writeOrder = (o: HistoryOrder) => {
+  try {
+    localStorage.setItem(ORDER_KEY, o);
+  } catch {
+    /* сервер помнит */
+  }
+};
+
+export function useHistoryOrder(): [HistoryOrder, (o: HistoryOrder) => void] {
+  const [order, setOrder] = useState<HistoryOrder>(() => orderCache ?? readOrder());
+
+  useEffect(() => {
+    if (orderCache !== undefined) return;
+    let alive = true;
+    summaryApi
+      .prefs()
+      .then((r) => {
+        const o: HistoryOrder = r.prefs.historyOrder === "top" ? "top" : "bottom";
+        orderCache = o;
+        writeOrder(o);
+        if (alive) setOrder(o);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const change = (o: HistoryOrder) => {
+    orderCache = o;
+    setOrder(o);
+    writeOrder(o);
+    void summaryApi
+      .prefs()
+      .then((r) => summaryApi.savePrefs({ ...r.prefs, historyOrder: o === "top" ? "top" : undefined }))
+      .catch(() => undefined);
+  };
+
+  return [order, change];
+}

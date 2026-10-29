@@ -18,7 +18,7 @@ import {
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { recalcTotals } from "../orders/orders.service";
-import { applyMovement, defaultWarehouse, num } from "./stock.service";
+import { applyMovement, defaultWarehouse, homeWarehouse, rehomeBalances, warehouseByName, num } from "./stock.service";
 import { stockSheet } from "../data/export";
 import { contentDisposition, writeXlsx } from "../data/tableFile";
 import { assertCategory, ensurePath, lockCatalog, pathOf, refreshPaths, splitPath, tidyCatalog, withDescendants } from "./catalog";
@@ -206,9 +206,12 @@ stockRouter.get(
           .sort((a, b) => b.n - a.n || a.value!.localeCompare(b.value!, "ru"))
           .slice(0, 100)
           .map((r) => r.value!);
+      const warehouses = await tx.warehouse.findMany({ orderBy: [{ isDefault: "desc" }, { name: "asc" }], select: { name: true } });
       return {
         suppliers: list(sup.map((s) => ({ value: s.supplier, n: s._count._all }))),
         locations: list(loc.map((s) => ({ value: s.location, n: s._count._all }))),
+        // Склады мастерской — основной первым (29.10.2026).
+        warehouses: warehouses.map((w) => w.name),
       };
     });
     res.json(out);
@@ -238,7 +241,7 @@ stockRouter.get(
           })),
         },
         take: 40,
-        include: { balances: { select: { qty: true } } },
+        include: { balances: { select: { qty: true } }, warehouse: { select: { name: true } } },
       })
     );
     const items = rows
@@ -248,6 +251,8 @@ stockRouter.get(
         sku: i.sku,
         unit: i.unit,
         location: i.location,
+        // Склад позиции — в подсказке рядом с местом (29.10.2026).
+        warehouse: i.warehouse?.name ?? null,
         salePrice: i.salePrice === null ? null : num(i.salePrice),
         qty: i.balances.reduce((n, b) => n + num(b.qty), 0),
       }))
@@ -277,6 +282,8 @@ stockRouter.get(
         category: z.string().max(60).optional(),
         supplier: z.string().trim().max(120).optional(),
         location: z.string().trim().max(120).optional(),
+        /** Склад по названию (29.10.2026). */
+        warehouse: z.string().trim().max(80).optional(),
         /** Всё отобранное одним ответом — склад показывает позиции по категориям, без страниц. */
         all: z.string().optional(),
         ...pageFields,
@@ -318,11 +325,21 @@ stockRouter.get(
       searchFixed = fixed.fixed;
     }
 
+    // Склад в фильтре: основной — это и позиции без склада.
+    const whFilter = q.warehouse
+      ? await withTenant(tenantOf(req), async (tx) => {
+          const w = await tx.warehouse.findFirst({ where: { name: { equals: q.warehouse!, mode: "insensitive" } } });
+          if (!w) return { id: "00000000-0000-0000-0000-000000000000" } as Prisma.StockItemWhereInput;
+          const def = await tx.warehouse.findFirst({ orderBy: [{ isDefault: "desc" }, { name: "asc" }], select: { id: true } });
+          return (def?.id === w.id ? { OR: [{ warehouseId: w.id }, { warehouseId: null }] } : { warehouseId: w.id }) as Prisma.StockItemWhereInput;
+        })
+      : null;
+
     const rows = await withTenant(tenantOf(req), (tx) =>
       tx.stockItem.findMany({
         where: {
           isActive: true,
-          AND: words.map(wordWhere),
+          AND: [...words.map(wordWhere), ...(whFilter ? [whFilter] : [])],
           ...categoryWhere,
           ...(q.supplier ? { supplier: { equals: q.supplier, mode: "insensitive" as const } } : {}),
           ...(q.location ? { location: { equals: q.location, mode: "insensitive" as const } } : {}),
@@ -334,7 +351,7 @@ stockRouter.get(
         // и режем на страницы здесь же — иначе «мало» на второй странице
         // означало бы «мало среди тех пятидесяти, что попались».
         take: MAX_SCAN,
-        include: { balances: { include: { warehouse: { select: { id: true, name: true } } } } },
+        include: { balances: { include: { warehouse: { select: { id: true, name: true } } } }, warehouse: { select: { name: true } } },
       })
     );
 
@@ -354,6 +371,8 @@ stockRouter.get(
         categoryId: i.categoryId,
         categoryPath: i.categoryId ? pathOf(i.categoryId, byId) : null,
         location: i.location,
+        /** Склад позиции; null — основной. */
+        warehouse: i.warehouse?.name ?? null,
         supplier: i.supplier,
         note: i.note,
         salePrice: i.salePrice === null ? null : num(i.salePrice),
@@ -449,6 +468,8 @@ const itemSchema = z.object({
   categoryId: z.string().uuid().nullable().optional(),
   minQty: z.coerce.number().min(0).max(1_000_000).default(0),
   location: z.string().trim().max(120).optional(),
+  /** Склад по названию (29.10.2026): есть — он, нет — заводится; пусто — основной. */
+  warehouse: z.string().trim().max(80).optional(),
   supplier: z.string().trim().max(120).optional(),
   note: z.string().trim().max(2000).optional(),
   purchasePrice: money,
@@ -458,19 +479,36 @@ const itemSchema = z.object({
 /** Место для сравнения: пусто — «без места», без регистра и лишних пробелов. */
 const placeOf = (s: string | null | undefined) => (s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 
+/** Склад для сравнения: не задан — основной (у позиции без склада и у позиции на основном — один склад). */
+async function warehouseKey(tx: Prisma.TransactionClient) {
+  const def = await tx.warehouse.findFirst({ orderBy: [{ isDefault: "desc" }, { name: "asc" }], select: { id: true } });
+  return (id: string | null | undefined) => id ?? def?.id ?? "";
+}
+
 /**
- * Артикул занят — только если тот же товар лежит в том же месте. Один товар в
- * шкафу и в ящике — две позиции со своими остатками (так их и загружают из файла).
+ * Артикул занят — только если тот же товар лежит в том же месте того же
+ * склада. Один товар в шкафу и в ящике, на одном складе и на другом — разные
+ * позиции со своими остатками (так их и загружают из файла).
  */
-async function assertSkuFree(tx: Prisma.TransactionClient, sku: string | null | undefined, location: string | null | undefined, exceptId?: string) {
+async function assertSkuFree(
+  tx: Prisma.TransactionClient,
+  sku: string | null | undefined,
+  location: string | null | undefined,
+  exceptId?: string,
+  warehouseId?: string | null
+) {
   if (!sku) return;
-  const same = await tx.stockItem.findMany({ where: { sku, isActive: true, ...(exceptId ? { id: { not: exceptId } } : {}) }, select: { name: true, location: true } });
-  const hit = same.find((i) => placeOf(i.location) === placeOf(location));
+  const wk = await warehouseKey(tx);
+  const same = await tx.stockItem.findMany({
+    where: { sku, isActive: true, ...(exceptId ? { id: { not: exceptId } } : {}) },
+    select: { name: true, location: true, warehouseId: true },
+  });
+  const hit = same.find((i) => placeOf(i.location) === placeOf(location) && wk(i.warehouseId) === wk(warehouseId));
   if (hit) {
     throw conflict(
       location?.trim()
-        ? `Артикул «${sku}» в месте «${location.trim()}» уже есть — «${hit.name}». Другое место — другая позиция`
-        : `Артикул «${sku}» без места уже занят позицией «${hit.name}». Укажите место — тогда это будет отдельная позиция`
+        ? `Артикул «${sku}» в месте «${location.trim()}» уже есть — «${hit.name}». Другое место или склад — другая позиция`
+        : `Артикул «${sku}» без места уже занят позицией «${hit.name}». Укажите место или другой склад — тогда это будет отдельная позиция`
     );
   }
 }
@@ -501,7 +539,8 @@ stockRouter.post(
     const tenantId = tenantOf(req);
 
     const item = await withTenant(tenantId, async (tx) => {
-      await assertSkuFree(tx, body.sku, body.location);
+      const warehouse = await warehouseByName(tx, tenantId, body.warehouse);
+      await assertSkuFree(tx, body.sku, body.location, undefined, warehouse?.id ?? null);
       const created = await tx.stockItem.create({
         data: {
           tenantId,
@@ -510,6 +549,7 @@ stockRouter.post(
           unit: body.unit,
           minQty: body.minQty,
           location: body.location || null,
+          warehouseId: warehouse?.id ?? null,
           supplier: body.supplier || null,
           note: body.note || null,
           purchasePrice: body.purchasePrice ?? null,
@@ -545,7 +585,14 @@ stockRouter.patch(
       if (!item) throw notFound("Позиция не найдена");
       const sku = body.sku !== undefined ? body.sku || null : item.sku;
       const location = body.location !== undefined ? body.location || null : item.location;
-      if (body.sku !== undefined || body.location !== undefined) await assertSkuFree(tx, sku, location, item.id);
+      const warehouseId = body.warehouse !== undefined ? ((await warehouseByName(tx, tenantId, body.warehouse))?.id ?? null) : item.warehouseId;
+      if (body.sku !== undefined || body.location !== undefined || body.warehouse !== undefined) {
+        await assertSkuFree(tx, sku, location, item.id, warehouseId);
+      }
+      // Другой склад — остаток едет с позицией.
+      if (warehouseId !== item.warehouseId) {
+        await rehomeBalances(tx, tenantId, item.id, (await homeWarehouse(tx, tenantId, warehouseId)).id);
+      }
       await tx.stockItem.update({
         where: { id: item.id },
         data: {
@@ -554,6 +601,7 @@ stockRouter.patch(
           ...(body.unit !== undefined ? { unit: body.unit } : {}),
           ...(body.minQty !== undefined ? { minQty: body.minQty } : {}),
           ...(body.location !== undefined ? { location: body.location || null } : {}),
+          ...(body.warehouse !== undefined ? { warehouseId } : {}),
           ...(body.supplier !== undefined ? { supplier: body.supplier || null } : {}),
           ...(body.note !== undefined ? { note: body.note || null } : {}),
           ...(body.purchasePrice !== undefined ? { purchasePrice: body.purchasePrice } : {}),
@@ -585,6 +633,7 @@ const bulkSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("move"), ids: z.array(z.string().uuid()).min(1).max(500), categoryId: z.string().uuid().nullable() }),
   z.object({ action: z.literal("markup"), ids: z.array(z.string().uuid()).min(1).max(500), pct: z.coerce.number().min(1).max(1000) }),
   z.object({ action: z.literal("location"), ids: z.array(z.string().uuid()).min(1).max(500), location: z.string().trim().max(120) }),
+  z.object({ action: z.literal("warehouse"), ids: z.array(z.string().uuid()).min(1).max(500), warehouse: z.string().trim().max(80) }),
   z.object({ action: z.literal("delete"), ids: z.array(z.string().uuid()).min(1).max(500) }),
 ]);
 
@@ -641,9 +690,14 @@ stockRouter.post(
         const target = placeOf(body.location);
         const skus = [...new Set(items.map((i) => i.sku).filter((x): x is string => !!x))];
         if (skus.length) {
-          const twins = await tx.stockItem.findMany({ where: { sku: { in: skus }, isActive: true, id: { notIn: ids } }, select: { sku: true, name: true, location: true } });
-          const outside = twins.find((t) => placeOf(t.location) === target);
-          const inside = skus.find((sku) => items.filter((i) => i.sku === sku).length > 1);
+          const wk = await warehouseKey(tx);
+          const twins = await tx.stockItem.findMany({ where: { sku: { in: skus }, isActive: true, id: { notIn: ids } }, select: { sku: true, name: true, location: true, warehouseId: true } });
+          // Двойник — тот же артикул в том же месте того же склада (29.10.2026).
+          const outside = twins.find((t) => placeOf(t.location) === target && items.some((i) => i.sku === t.sku && wk(i.warehouseId) === wk(t.warehouseId)));
+          const inside = skus.find((sku) => {
+            const same = items.filter((i) => i.sku === sku);
+            return same.length > 1 && new Set(same.map((i) => wk(i.warehouseId))).size < same.length;
+          });
           if (outside || inside) {
             throw conflict(
               `Артикул «${outside?.sku ?? inside}» ${body.location.trim() ? `в месте «${body.location.trim()}»` : "без места"} уже есть — один товар в одном месте должен быть одной позицией`
@@ -652,6 +706,28 @@ stockRouter.post(
         }
         changed = (await tx.stockItem.updateMany({ where: { id: { in: ids } }, data: { location: body.location || null } })).count;
         detail = { location: body.location || null };
+      } else if (body.action === "warehouse") {
+        // Склад разом (29.10.2026): тот же товар в том же месте того же склада —
+        // одна позиция, поэтому двойников не сводим; остатки едут с позициями.
+        const wh = await warehouseByName(tx, tenantId, body.warehouse);
+        const home = await homeWarehouse(tx, tenantId, wh?.id ?? null);
+        const wk = await warehouseKey(tx);
+        const skus = [...new Set(items.map((i) => i.sku).filter((x): x is string => !!x))];
+        if (skus.length) {
+          const twins = await tx.stockItem.findMany({
+            where: { sku: { in: skus }, isActive: true, id: { notIn: ids } },
+            select: { sku: true, location: true, warehouseId: true },
+          });
+          const clash = items.find((i) =>
+            twins.some((t) => t.sku === i.sku && placeOf(t.location) === placeOf(i.location) && wk(t.warehouseId) === wk(wh?.id ?? null))
+          );
+          if (clash) throw conflict(`Артикул «${clash.sku}» в этом месте склада «${home.name}» уже есть — одна позиция на одно место`);
+        }
+        for (const i of items) {
+          if ((i.warehouseId ?? null) !== (wh?.id ?? null)) await rehomeBalances(tx, tenantId, i.id, home.id);
+        }
+        changed = (await tx.stockItem.updateMany({ where: { id: { in: ids } }, data: { warehouseId: wh?.id ?? null } })).count;
+        detail = { warehouse: home.name };
       } else {
         const left = items
           .map((i) => ({ name: i.name, unit: i.unit, qty: i.balances.reduce((n, b) => n + num(b.qty), 0) }))
@@ -755,7 +831,8 @@ stockRouter.post(
       const item = await tx.stockItem.findFirst({ where: { id: body.stockItemId } });
       if (!item) throw notFound("Позиция не найдена");
 
-      const warehouse = await defaultWarehouse(tx, tenantId, body.warehouseId ?? null);
+      // Склад движения: названный явно, иначе склад позиции (29.10.2026).
+      const warehouse = body.warehouseId ? await defaultWarehouse(tx, tenantId, body.warehouseId) : await homeWarehouse(tx, tenantId, item.warehouseId);
 
       let order: { id: string; number: string; assignedMasterId: string | null } | null = null;
       if (body.orderId) {

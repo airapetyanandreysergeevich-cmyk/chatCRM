@@ -1,3 +1,4 @@
+import { homeWarehouse, rehomeBalances, warehouseByName } from "../stock/warehouses";
 import { formatPhone } from "../../lib/phone";
 import { matchableSerial, realSerial } from "../../lib/serial";
 import type { Prisma } from "@prisma/client";
@@ -300,23 +301,26 @@ async function applyStock(
     ...(val(v["Место хранения"]) !== undefined ? { location: val(v["Место хранения"]) } : {}),
     ...(val(v["Поставщик"]) !== undefined ? { supplier: val(v["Поставщик"]) } : {}),
     ...(val(v["Примечание"]) !== undefined ? { note: val(v["Примечание"]) } : {}),
+    // Склад позиции (29.10.2026): названный в файле — её склад, нет такого — заводим.
+    ...(val(v["Склад"]) !== undefined ? { warehouseId: (await warehouseByName(tx, tenantId, val(v["Склад"])))?.id ?? null } : {}),
   };
 
-  const itemId = row.existingId
-    ? (await tx.stockItem.update({ where: { id: row.existingId }, data })).id
-    : (await tx.stockItem.create({ data: { ...data, tenantId } })).id;
+  const before = row.existingId ? await tx.stockItem.findFirst({ where: { id: row.existingId }, select: { warehouseId: true } }) : null;
+  const saved = row.existingId
+    ? await tx.stockItem.update({ where: { id: row.existingId }, data })
+    : await tx.stockItem.create({ data: { ...data, tenantId } });
+  const itemId = saved.id;
+  // Склад сменился — остаток едет с позицией.
+  if (before && "warehouseId" in data && before.warehouseId !== saved.warehouseId) {
+    await rehomeBalances(tx, tenantId, itemId, (await homeWarehouse(tx, tenantId, saved.warehouseId)).id);
+  }
 
   const qty = numOrUndef(v["Остаток"]);
   const cost = numOrUndef(v["Себестоимость, ₽"]);
   if (qty === undefined && cost === undefined) return;
 
-  // Склад берём названный в файле, иначе первый попавшийся. Если складов
-  // нет вовсе, заводим основной: без него остаток некуда положить.
-  const wanted = val(v["Склад"]);
-  const warehouse =
-    (wanted ? await tx.warehouse.findFirst({ where: { name: wanted } }) : null) ??
-    (await tx.warehouse.findFirst({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] })) ??
-    (await tx.warehouse.create({ data: { tenantId, name: "Основной склад" } }));
+  // Остаток — на складе позиции; складов нет вовсе — заводится основной.
+  const warehouse = await homeWarehouse(tx, tenantId, saved.warehouseId);
 
   const balance = await tx.stockBalance.findFirst({
     where: { warehouseId: warehouse.id, stockItemId: itemId },
@@ -357,6 +361,7 @@ async function applyService(
     isPinned: /^(да|1|true|yes|\+)$/i.test((v["В карточке заказа"] ?? "").trim()) || undefined,
     // Категория путём «Ремонт/Пайка»: нет такой — заводим. Пустая ячейка не трогает.
     categoryId: await serviceCategoryPath(tx, tenantId, val(v["Категория"])),
+    warrantyDays: warrantyOf(v["Гарантия, дн."]),
   };
 
   if (row.existingId) {
@@ -374,8 +379,24 @@ async function applyService(
       note: data.note,
       isPinned: data.isPinned ?? false,
       categoryId: data.categoryId ?? null,
+      warrantyDays: data.warrantyDays ?? null,
     },
   });
+}
+
+/**
+ * Гарантия из ячейки: «90», «90 д», «90 дней», «3 мес», «1 год». Пустая —
+ * не трогаем; «0» или «нет» — без гарантии.
+ */
+export function warrantyOf(raw: string | undefined): number | null | undefined {
+  const t = (raw ?? "").trim().toLowerCase();
+  if (!t) return undefined;
+  const m = /(\d+(?:[.,]\d+)?)/.exec(t);
+  if (!m) return /нет|без/.test(t) ? null : undefined;
+  const n = Number(m[1].replace(",", "."));
+  const days = /мес/.test(t) ? n * 30 : /год|лет/.test(t) ? n * 365 : /нед/.test(t) ? n * 7 : n;
+  const d = Math.round(days);
+  return d > 0 ? Math.min(d, 3650) : null;
 }
 
 /** Категория прайса по пути «Ремонт/Пайка»: находим или заводим по уровням. undefined — пустая ячейка. */

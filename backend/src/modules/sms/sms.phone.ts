@@ -104,10 +104,19 @@ export async function listPhones(tenantId: string): Promise<PhoneView[]> {
       if (info.smsPermission === false) problems.push("нет разрешения на отправку SMS");
       if (info.batteryOptimized === true) problems.push("включена экономия батареи — Android может усыпить приложение");
       if (info.simReady === false) problems.push("SIM-карта не готова");
+      // Работа в фоне (приложение 1.4): Android закрывал приложение — сторож поднимал, но SMS ждали.
+      const bg = (info.background ?? null) as Record<string, unknown> | null;
+      if (bg?.restricted === true) problems.push("Android запретил приложению работать в фоне — на телефоне откройте «Работа в фоне»");
+      else if (typeof bg?.restarts === "number" && bg.restarts > 0)
+        problems.push(
+          `Android закрывал приложение в фоне (${bg.restarts} за неделю) — на телефоне откройте «Работа в фоне» и включите автозапуск`
+        );
       // Согласование по SMS: ответы клиентов принимает приложение 1.2 с разрешением читать SMS.
       const version = typeof info.appVersion === "string" ? info.appVersion : "";
       if (version && /^1\.[01]$/.test(version)) problems.push("старая версия приложения — ответы клиентов на согласование не приходят, обновите до 1.2");
       else if (info.receivePermission === false) problems.push("нет разрешения читать SMS — ответы клиентов на согласование не придут");
+      if (version && /^1\.[23]$/.test(version))
+        problems.push(`в версии ${version} нет сторожа: закроет Android приложение в фоне — само не поднимется; обновите до 1.4`);
       const c = (info.calls ?? null) as Record<string, unknown> | null;
       const calls: PhoneCallsInfo | null = c
         ? {

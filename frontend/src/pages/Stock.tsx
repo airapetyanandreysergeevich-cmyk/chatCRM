@@ -34,7 +34,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDateTime, plural } from "../lib/format";
 import { money } from "../lib/orders";
-import { stockApi, type StockCatalog, type StockItem, type StockList, type StockMovement } from "../lib/workshop";
+import { stockApi, type StockCatalog, type StockHints, type StockItem, type StockList, type StockMovement } from "../lib/workshop";
 
 /**
  * Склад.
@@ -64,12 +64,14 @@ interface StockFilters {
   filter: string;
   supplier: string;
   location: string;
+  /** Склад (29.10.2026). */
+  warehouse: string;
   sort: string;
 }
-const NO_FILTERS: StockFilters = { filter: "all", supplier: "", location: "", sort: "name" };
-const FILTER_KEYS = ["filter", "supplier", "location", "sort"] as const;
-/** Красный кружок на «Фильтрах»: поставщик и место (наличие — переключателем рядом, порядок — не фильтр). */
-const filterCount = (f: StockFilters) => Number(!!f.supplier) + Number(!!f.location);
+const NO_FILTERS: StockFilters = { filter: "all", supplier: "", location: "", warehouse: "", sort: "name" };
+const FILTER_KEYS = ["filter", "supplier", "location", "warehouse", "sort"] as const;
+/** Красный кружок на «Фильтрах»: поставщик, склад и место (наличие — переключателем рядом, порядок — не фильтр). */
+const filterCount = (f: StockFilters) => Number(!!f.supplier) + Number(!!f.location) + Number(!!f.warehouse);
 
 function recall<T>(key: string, fallback: T): T {
   try {
@@ -106,7 +108,7 @@ export default function Stock() {
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<StockList | null>(null);
   const [catalog, setCatalog] = useState<StockCatalog | null>(null);
-  const [hints, setHints] = useState<{ suppliers: string[]; locations: string[] }>({ suppliers: [], locations: [] });
+  const [hints, setHints] = useState<StockHints>({ suppliers: [], locations: [] });
   // Набранное — в адресе: вернулись на склад — тот же поиск.
   const [search, setSearch] = useUrlSearch("q");
   // «Искать как набрано» — отказ от исправления раскладки для этого запроса.
@@ -123,6 +125,11 @@ export default function Stock() {
   const [salesOpen, setSalesOpen] = useState(false);
   const [catDialog, setCatDialog] = useState<{ d: CategoryDialogKind; then?: (id?: string) => void } | null>(null);
   const [locationFor, setLocationFor] = useState<string[] | null>(null);
+  const [warehouseFor, setWarehouseFor] = useState<string[] | null>(null);
+  // Склад показываем, только когда их больше одного: у большинства мастерских склад один.
+  const manyWarehouses = (hints.warehouses?.length ?? 0) > 1;
+  // Позиция без своего склада лежит на основном (он в подсказках первым).
+  const whOf = (i: { warehouse?: string | null }) => i.warehouse ?? (manyWarehouses ? (hints.warehouses?.[0] ?? null) : null);
   const [deleteFor, setDeleteFor] = useState<string[] | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -141,6 +148,7 @@ export default function Stock() {
     filter: params.get("filter") ?? "all",
     supplier: params.get("supplier") ?? "",
     location: params.get("location") ?? "",
+    warehouse: params.get("warehouse") ?? "",
     sort: params.get("sort") ?? "name",
   };
   const memoryKey = `finecrm.stock.filters.${me?.kind === "tenant" ? me.user.id : "platform"}`;
@@ -196,6 +204,7 @@ export default function Stock() {
         ...(f.sort !== "name" ? { sort: f.sort } : {}),
         ...(f.supplier ? { supplier: f.supplier } : {}),
         ...(f.location ? { location: f.location } : {}),
+        ...(f.warehouse ? { warehouse: f.warehouse } : {}),
         ...(search.trim() && !exact && fixLayoutEnabled() ? { layout: "1" } : {}),
       });
       setData(next);
@@ -206,7 +215,7 @@ export default function Stock() {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить склад");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, f.filter, f.sort, f.supplier, f.location, exact]);
+  }, [search, f.filter, f.sort, f.supplier, f.location, f.warehouse, exact]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), search ? 350 : 0);
@@ -262,7 +271,7 @@ export default function Stock() {
     return m;
   }, [items, rootOf]);
 
-  const filtering = !!search.trim() || f.filter !== "all" || !!f.supplier || !!f.location;
+  const filtering = !!search.trim() || f.filter !== "all" || !!f.supplier || !!f.location || !!f.warehouse;
   const isOpen = (key: string) => filtering || open.has(key);
   const toggleOpen = (key: string) =>
     setOpen((cur) => {
@@ -428,6 +437,27 @@ export default function Stock() {
     }
   }
 
+  async function setWarehouse(ids: string[], warehouse: string) {
+    const before = new Map<string, string[]>();
+    for (const id of ids) {
+      const prev = byId.get(id)?.warehouse ?? "";
+      before.set(prev, [...(before.get(prev) ?? []), id]);
+    }
+    await stockApi.bulk({ action: "warehouse", ids, warehouse });
+    setWarehouseFor(null);
+    void load();
+    stockApi.hints().then(setHints).catch(() => undefined);
+    say({
+      text: warehouse ? `Склад «${warehouse}»: ${nameList(ids)}` : `Основной склад: ${nameList(ids)}`,
+      undo: () => {
+        setToast(null);
+        Promise.all([...before.entries()].map(([wh, list]) => stockApi.bulk({ action: "warehouse", ids: list, warehouse: wh })))
+          .then(() => (void load(), say({ text: "Склады вернули как были" })))
+          .catch((err) => fail(err, "Не удалось вернуть"));
+      },
+    });
+  }
+
   async function setLocation(ids: string[], location: string) {
     const before = new Map<string, string[]>();
     for (const id of ids) {
@@ -580,6 +610,7 @@ export default function Stock() {
             { sep: true },
             { label: "Переместить в", icon: <IconFolder className={ico} />, sub: movePicker(ids, one ? item.categoryId ?? null : undefined, sheet) },
             ...(seesCost ? [{ label: "Наценка", icon: <span className="text-[13px] font-bold">%</span>, sub: markupPanel(ids, sheet) }] : []),
+            { label: "Склад…", icon: <WarehouseIcon />, onClick: () => setWarehouseFor(ids) },
             { label: "Место хранения…", icon: <PinIcon />, onClick: () => setLocationFor(ids) },
             ...(one ? [{ label: "Завести в другом месте…", icon: <IconPlus className={ico} />, onClick: () => setEditing({ item: null, categoryId: item.categoryId ?? null, copy: item }) }] : []),
           ] as MenuEntry[])
@@ -717,6 +748,7 @@ export default function Stock() {
   const count = filterCount(f);
   const chips: Array<{ label: string; clear: () => void }> = [
     ...(f.supplier ? [{ label: `Поставщик: ${f.supplier}`, clear: () => apply({ ...f, supplier: "" }) }] : []),
+    ...(f.warehouse ? [{ label: `Склад: ${f.warehouse}`, clear: () => apply({ ...f, warehouse: "" }) }] : []),
     ...(f.location ? [{ label: `Место: ${f.location}`, clear: () => apply({ ...f, location: "" }) }] : []),
   ];
   const activeItem = active ? (byId.get(active) ?? null) : null;
@@ -771,11 +803,12 @@ export default function Stock() {
             )}
           </p>
           <p className="truncate text-[12.5px] text-ink-dim md:hidden">
-            {[i.sku, i.location, i.salePrice ? money(i.salePrice) : null].filter(Boolean).join(" · ") || "—"}
+            {[i.sku, manyWarehouses ? whOf(i) : null, i.location, i.salePrice ? money(i.salePrice) : null].filter(Boolean).join(" · ") || "—"}
           </p>
         </div>
-        <span className="hidden truncate text-[12.5px] text-ink-muted md:block" title={i.location ?? undefined}>
-          {i.location || <span className="text-ink-dim">—</span>}
+        <span className="hidden truncate text-[12.5px] text-ink-muted md:block" title={[manyWarehouses ? whOf(i) : null, i.location].filter(Boolean).join(" · ") || undefined}>
+          {manyWarehouses && whOf(i) && <span className="text-ink-dim" data-row-warehouse>{whOf(i)}{i.location ? " · " : ""}</span>}
+          {i.location || (manyWarehouses && whOf(i) ? null : <span className="text-ink-dim">—</span>)}
         </span>
         <div className="flex items-center justify-end md:justify-center">
           {canMove ? (
@@ -1127,6 +1160,7 @@ export default function Stock() {
                   <>
                     <BarBtn icon={<IconFolder className="h-4 w-4" />} label="Переместить" onClick={(el) => fromButton(el, (x, y, sheet) => setMenu({ at: { x, y: y - 8, sheet, title: `Переместить ${plural(sel.size, "позицию", "позиции", "позиций")}` }, entries: [{ node: movePicker(selIds, undefined, sheet)(() => setMenu(null)) }] }))} />
                     {seesCost && <BarBtn icon={<span className="text-[13px] font-bold">%</span>} label="Наценка" onClick={(el) => fromButton(el, (x, y, sheet) => setMenu({ at: { x, y: y - 8, sheet, title: "Наценка от закупки" }, entries: [{ node: markupPanel(selIds, sheet)(() => setMenu(null)) }] }))} />}
+                    {manyWarehouses && <BarBtn icon={<WarehouseIcon />} label="Склад" onClick={() => setWarehouseFor(selIds)} />}
                     <BarBtn icon={<PinIcon />} label="Место" onClick={() => setLocationFor(selIds)} />
                     <BarBtn icon={<IconDownload className="h-4 w-4" />} label="Выгрузить" onClick={() => void exportItems(selIds, "Склад — выбранное")} />
                     <span className="mx-1 h-5 w-px shrink-0 bg-surface/25" />
@@ -1145,6 +1179,7 @@ export default function Stock() {
           {activeItem ? (
             <StockDetail
               item={activeItem}
+              warehouse={whOf(activeItem)}
               path={pathOf(activeItem.categoryId)}
               color={(activeItem.categoryId && colorOf.get(activeItem.categoryId)) || NONE_COLOR}
               canMove={canMove}
@@ -1167,6 +1202,7 @@ export default function Stock() {
         <Modal title={activeItem.name} onClose={() => setDetailModal(false)}>
           <StockDetail
             item={activeItem}
+            warehouse={whOf(activeItem)}
             path={pathOf(activeItem.categoryId)}
             color={(activeItem.categoryId && colorOf.get(activeItem.categoryId)) || NONE_COLOR}
             canMove={canMove}
@@ -1243,6 +1279,20 @@ export default function Stock() {
         />
       )}
 
+      {warehouseFor && (
+        <LocationDialog
+          ids={warehouseFor}
+          hints={hints.warehouses ?? []}
+          current={warehouseFor.length === 1 ? (byId.get(warehouseFor[0])?.warehouse ?? "") : ""}
+          label={nameList(warehouseFor)}
+          title="Склад"
+          field="Какой склад"
+          hint="Есть такой — он, нет — заведётся. Пусто — основной склад. Остаток переедет вместе с позицией"
+          placeholder="Склад на Ленина"
+          onClose={() => setWarehouseFor(null)}
+          onSave={(wh) => setWarehouse(warehouseFor, wh)}
+        />
+      )}
       {locationFor && <LocationDialog ids={locationFor} hints={hints.locations} current={locationFor.length === 1 ? (byId.get(locationFor[0])?.location ?? "") : ""} label={nameList(locationFor)} onClose={() => setLocationFor(null)} onSave={(loc) => setLocation(locationFor, loc)} />}
 
       {deleteFor && (
@@ -1368,6 +1418,13 @@ const PinIcon = () => (
     <circle cx="12" cy="9" r="2.5" />
   </svg>
 );
+/** Склад — домик с воротами. */
+const WarehouseIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 10l9-6 9 6v10H3z" />
+    <path d="M7 20v-7h10v7M7 16.5h10" />
+  </svg>
+);
 const CopyIcon = () => (
   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -1414,6 +1471,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: str
 
 function StockDetail({
   item,
+  warehouse,
   path,
   color,
   canMove,
@@ -1428,6 +1486,8 @@ function StockDetail({
   onAdjust,
 }: {
   item: StockItem;
+  /** Склад позиции; null — склад один, писать незачем. */
+  warehouse?: string | null;
   path: string;
   color: string;
   canMove: boolean;
@@ -1504,6 +1564,12 @@ function StockDetail({
           </div>
           {item.minQty > 0 && <p className="text-[11.5px] text-ink-dim">минимум {fmtQty(item.minQty)}</p>}
         </div>
+        {warehouse && (
+          <div className="min-w-0 rounded-field border border-line bg-surface-input px-3 py-2.5" data-detail-warehouse>
+            <p className="text-[11.5px] text-ink-dim">Склад</p>
+            <p className="break-words text-[14px] font-semibold">{warehouse}</p>
+          </div>
+        )}
         <div className="min-w-0 rounded-field border border-line bg-surface-input px-3 py-2.5">
           <p className="text-[11.5px] text-ink-dim">Место</p>
           <p className="break-words text-[14px] font-semibold">{item.location || <span className="font-normal text-ink-dim">не указано</span>}</p>
@@ -1621,6 +1687,10 @@ function LocationDialog({
   hints,
   onClose,
   onSave,
+  title = "Место хранения",
+  field = "Где лежит",
+  hint = "Шкаф, полка, ячейка. Пусто — место снимется",
+  placeholder = "Шкаф 2, ячейка 14",
 }: {
   ids: string[];
   current: string;
@@ -1628,6 +1698,11 @@ function LocationDialog({
   hints: string[];
   onClose: () => void;
   onSave: (location: string) => Promise<void>;
+  /** То же окно — для склада (29.10.2026). */
+  title?: string;
+  field?: string;
+  hint?: string;
+  placeholder?: string;
 }) {
   const [value, setValue] = useState(current);
   const [busy, setBusy] = useState(false);
@@ -1648,11 +1723,11 @@ function LocationDialog({
     }
   }
   return (
-    <Modal title="Место хранения" onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4" data-location-dialog>
-        <p className="text-[14px] text-ink-soft">{ids.length > 1 ? `Одно место для ${label}.` : label}</p>
-        <Field label="Где лежит" hint="Шкаф, полка, ячейка. Пусто — место снимется">
-          <SuggestInput value={value} onChange={setValue} items={items} placeholder="Шкаф 2, ячейка 14" />
+    <Modal title={title} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4" data-location-dialog={title === "Склад" ? "warehouse" : "location"}>
+        <p className="text-[14px] text-ink-soft">{ids.length > 1 ? `${title === "Склад" ? "Один склад" : "Одно место"} для ${label}.` : label}</p>
+        <Field label={field} hint={hint}>
+          <SuggestInput value={value} onChange={setValue} items={items} placeholder={placeholder} />
         </Field>
         {error && <Banner tone="error">{error}</Banner>}
         <div className="flex flex-col gap-2 sm:flex-row-reverse">
@@ -1719,7 +1794,7 @@ function FiltersModal({
   onApply,
 }: {
   value: StockFilters;
-  hints: { suppliers: string[]; locations: string[] };
+  hints: StockHints;
   onClose: () => void;
   onApply: (f: StockFilters) => void;
 }) {
@@ -1738,6 +1813,18 @@ function FiltersModal({
             ))}
           </Select>
         </Field>
+        {((hints.warehouses?.length ?? 0) > 1 || d.warehouse) && (
+          <Field label="Склад">
+            <Select aria-label="Склад" value={d.warehouse} onChange={(e) => setD({ ...d, warehouse: e.target.value })}>
+              <option value="">Все склады</option>
+              {withCurrent(hints.warehouses ?? [], d.warehouse).map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label="Место хранения">
           <Select aria-label="Место хранения" value={d.location} onChange={(e) => setD({ ...d, location: e.target.value })}>
             <option value="">Любое</option>
@@ -1795,7 +1882,7 @@ function ItemModal({
   copy?: StockItem;
   defaultCategory: string | null;
   roots: ReturnType<typeof buildTree>;
-  hints: { suppliers: string[]; locations: string[] };
+  hints: StockHints;
   seesCost: boolean;
   onClose: () => void;
   onDone: (text: string) => void;
@@ -1810,6 +1897,7 @@ function ItemModal({
     unit: src?.unit ?? "шт",
     minQty: str(src?.minQty ?? 0),
     location: item?.location ?? "",
+    warehouse: src?.warehouse ?? "",
     supplier: src?.supplier ?? "",
     note: src?.note ?? "",
     purchasePrice: str(src?.purchasePrice),
@@ -1843,6 +1931,7 @@ function ItemModal({
       categoryId: form.categoryId || null,
       minQty: Number(form.minQty.replace(",", ".")) || 0,
       location: form.location,
+      warehouse: form.warehouse,
       supplier: form.supplier,
       note: form.note,
       ...(seesCost ? { purchasePrice: purchase } : {}),
@@ -1887,6 +1976,15 @@ function ItemModal({
           </Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
+          {/* Склад — перед местом (Андрей, 29.10.2026): «у многих несколько складов». */}
+          <Field label="Склад" hint="Пусто — основной. Новый склад заводится сам. Тот же товар на другом складе — отдельная позиция">
+            <SuggestInput
+              value={form.warehouse}
+              onChange={(warehouse) => setForm((f) => ({ ...f, warehouse }))}
+              items={suggest(hints.warehouses ?? [], form.warehouse)}
+              placeholder={hints.warehouses?.[0] ?? "Основной склад"}
+            />
+          </Field>
           <Field label="Место хранения" hint="Шкаф, полка, ячейка. Тот же товар в другом месте — отдельная позиция">
             <SuggestInput
               value={form.location}
@@ -1895,6 +1993,8 @@ function ItemModal({
               placeholder="Шкаф 2, ячейка 14"
             />
           </Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Поставщик" hint="Запоминается — в следующий раз выберете из списка">
             <SuggestInput
               value={form.supplier}

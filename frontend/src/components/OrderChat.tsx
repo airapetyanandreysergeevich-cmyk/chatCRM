@@ -3,7 +3,7 @@ import { ApiError } from "../lib/api";
 import { dayLabel, messagesApi, timeLabel, type OrderMessage } from "../lib/messages";
 import { compressPhoto } from "../lib/photos";
 import { IconAttach, IconClose, IconPerson, IconPlus, IconSend, IconSettings } from "./icons";
-import type { HistoryDock } from "../lib/historyDock";
+import { useHistoryOrder, type HistoryDock } from "../lib/historyDock";
 import { ordersApi, type OrderEventRow } from "../lib/orders";
 import { LabelDot } from "../lib/labelIcons";
 import { STAGES } from "../lib/stages";
@@ -67,6 +67,9 @@ export function OrderChat({
   const picker = useRef<HTMLInputElement>(null);
   const counter = useRef(0);
   const stick = useRef(true);
+  // Новые снизу (как в переписке) или сверху — выбор сотрудника (29.10.2026).
+  const [order, setOrder] = useHistoryOrder();
+  const top = order === "top";
 
   const [events, setEvents] = useState<OrderEventRow[]>([]);
   // Звонок переносят в другой заказ те, кто правит заказы.
@@ -116,8 +119,8 @@ export function OrderChat({
   // если он листает историю вверх, новое сообщение не должно его сдёргивать.
   useEffect(() => {
     const el = list.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    if (el && stick.current) el.scrollTop = top ? 0 : el.scrollHeight;
+  }, [messages, top]);
 
   /**
    * Пришли из поиска по заказам: лента прокручивается к найденной записи и
@@ -225,10 +228,77 @@ export function OrderChat({
         ...messages.map((m) => ({ at: m.createdAt, msg: m })),
         // Звонки клиента — это разговор, они видны и в «только сообщения».
         ...events.filter((ev) => !onlyMessages || ev.kind === "CALL").map((ev) => ({ at: ev.at, ev })),
-      ].sort((a, b) => a.at.localeCompare(b.at))
+      ].sort((a, b) => (top ? b.at.localeCompare(a.at) : a.at.localeCompare(b.at)))
     : [];
 
   const docked = dock?.docked ?? null;
+
+  // Поле ввода — там, где новые: внизу или сверху.
+  const composer = (
+      <div className={(top ? "mb-1 " : "") + "mt-3 rounded-field border border-line bg-surface-input p-2"}>
+        {drafts.length > 0 && (
+          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-1">
+            {drafts.map((d) => (
+              <div key={d.id} className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-[8px] border border-line">
+                <img src={d.url} alt="" className="h-full w-full object-cover" />
+                <button
+                  type="button"
+                  aria-label="Убрать снимок"
+                  onClick={() => dropDraft(d.id)}
+                  className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/65 text-white [&>svg]:h-3 [&>svg]:w-3"
+                >
+                  <IconClose />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex items-end gap-1.5">
+          <input
+            ref={picker}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              void attach(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Приложить фото"
+            title="Приложить фото"
+            disabled={!!busy}
+            onClick={() => picker.current?.click()}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-field text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-5 [&>svg]:w-5"
+          >
+            <IconAttach />
+          </button>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKey}
+            rows={Math.min(6, Math.max(1, text.split("\n").length))}
+            maxLength={4000}
+            placeholder="Написать в историю…"
+            aria-label="Сообщение в историю ремонта"
+            className="min-h-[40px] flex-1 resize-none bg-transparent px-1 py-2 text-[14.5px] text-ink placeholder:text-ink-dim focus:outline-none"
+          />
+          <button
+            type="button"
+            aria-label="Отправить"
+            title="Отправить (Ctrl+Enter)"
+            disabled={!!busy || (!text.trim() && !drafts.length)}
+            onClick={() => void send()}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-field bg-brand text-white transition-opacity duration-150 disabled:opacity-40 [&>svg]:h-5 [&>svg]:w-5"
+          >
+            <IconSend />
+          </button>
+        </div>
+        {busy && <p className="mt-1 px-1 text-[12px] text-ink-dim">{busy}</p>}
+      </div>
+  );
 
   return (
     <Card className={docked ? "flex h-full flex-col" : undefined}>
@@ -245,15 +315,28 @@ export function OrderChat({
             только сообщения{count > 0 ? ` (${count})` : ""}
           </button>
         </span>
+        <button
+          type="button"
+          onClick={() => {
+            stick.current = true;
+            setOrder(top ? "bottom" : "top");
+          }}
+          title="Порядок истории"
+          className="whitespace-nowrap hover:text-ink"
+          data-history-order={order}
+        >
+          {top ? "↑ новые сверху" : "↓ новые снизу"}
+        </button>
         {dock && <DockMenu dock={dock} />}
         </span>
       </div>
 
+      {top && composer}
       <div
         ref={list}
         onScroll={(e) => {
           const el = e.currentTarget;
-          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+          stick.current = top ? el.scrollTop < 60 : el.scrollHeight - el.scrollTop - el.clientHeight < 60;
         }}
         className={"mt-3 space-y-2 overflow-y-auto pr-1 " + (docked ? "min-h-0 flex-1" : "max-h-[520px]")}
         data-history-list
@@ -371,69 +454,7 @@ export function OrderChat({
         </div>
       )}
 
-      <div className="mt-3 rounded-field border border-line bg-surface-input p-2">
-        {drafts.length > 0 && (
-          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-1">
-            {drafts.map((d) => (
-              <div key={d.id} className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-[8px] border border-line">
-                <img src={d.url} alt="" className="h-full w-full object-cover" />
-                <button
-                  type="button"
-                  aria-label="Убрать снимок"
-                  onClick={() => dropDraft(d.id)}
-                  className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/65 text-white [&>svg]:h-3 [&>svg]:w-3"
-                >
-                  <IconClose />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="flex items-end gap-1.5">
-          <input
-            ref={picker}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={(e) => {
-              void attach(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            aria-label="Приложить фото"
-            title="Приложить фото"
-            disabled={!!busy}
-            onClick={() => picker.current?.click()}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-field text-ink-muted transition-colors duration-150 hover:bg-surface-raised hover:text-ink [&>svg]:h-5 [&>svg]:w-5"
-          >
-            <IconAttach />
-          </button>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            rows={Math.min(6, Math.max(1, text.split("\n").length))}
-            maxLength={4000}
-            placeholder="Написать в историю…"
-            aria-label="Сообщение в историю ремонта"
-            className="min-h-[40px] flex-1 resize-none bg-transparent px-1 py-2 text-[14.5px] text-ink placeholder:text-ink-dim focus:outline-none"
-          />
-          <button
-            type="button"
-            aria-label="Отправить"
-            title="Отправить (Ctrl+Enter)"
-            disabled={!!busy || (!text.trim() && !drafts.length)}
-            onClick={() => void send()}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-field bg-brand text-white transition-opacity duration-150 disabled:opacity-40 [&>svg]:h-5 [&>svg]:w-5"
-          >
-            <IconSend />
-          </button>
-        </div>
-        {busy && <p className="mt-1 px-1 text-[12px] text-ink-dim">{busy}</p>}
-      </div>
+      {!top && composer}
 
       {viewing && (
         <PhotoViewer

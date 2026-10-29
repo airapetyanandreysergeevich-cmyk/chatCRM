@@ -11,9 +11,33 @@ import { inBox, leaveBox } from "../lib/lastBox";
  * Вход один на всех. Кто пришёл — сотрудник мастерской или команда платформы —
  * решает сервер по адресу. Выбирать пользователю нечего.
  */
+const REMEMBER_KEY = "finecrm.login.remember";
+const LOGIN_KEY = "finecrm.login.last";
+
+function readLS(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLS(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    /* не запомнили — не беда */
+  }
+}
+
 export default function Login() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  // «Запомнить меня» (29.10.2026): вход держится 90 дней, логин подставляется сам.
+  // Снято — вход до закрытия браузера, логин не запоминается. Пароль не храним
+  // никогда: его предлагает сохранить сам браузер.
+  const [remember, setRemember] = useState(() => readLS(REMEMBER_KEY) !== "0");
+  const [email, setEmail] = useState(() => (readLS(REMEMBER_KEY) !== "0" ? (readLS(LOGIN_KEY) ?? "") : ""));
   const [password, setPassword] = useState("");
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23,7 +47,9 @@ export default function Login() {
     setBusy(true);
     setError(null);
     try {
-      await login({ email, password });
+      writeLS(REMEMBER_KEY, remember ? "1" : "0");
+      writeLS(LOGIN_KEY, remember ? email.trim() : null);
+      await login({ email, password, remember });
     } catch (err) {
       setError(err instanceof ApiError ? err : new ApiError(0, "Сервер недоступен"));
     } finally {
@@ -98,7 +124,20 @@ export default function Login() {
             </Field>
           </div>
 
-          <Button type="submit" disabled={busy} className="mt-6 w-full">
+          <label className="mt-4 flex cursor-pointer select-none items-center gap-2.5 text-[14px] text-ink-soft" data-login-remember>
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="h-[18px] w-[18px] accent-[rgb(var(--brand))]"
+            />
+            {/* Слова «пароль» в подписи нет: поле пароля подписано им же, и
+                поиск поля по подписи (у чтеца экрана, в проверках) путал бы их. */}
+            Запомнить меня
+            <span className="text-[12.5px] text-ink-dim">на этом устройстве</span>
+          </label>
+
+          <Button type="submit" disabled={busy} className="mt-5 w-full">
             {busy ? "Проверяем…" : "Войти"}
           </Button>
 

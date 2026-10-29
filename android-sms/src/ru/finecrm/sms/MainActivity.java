@@ -13,7 +13,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
@@ -41,6 +40,7 @@ public class MainActivity extends Activity {
     private static final int REQ_RECEIVE = 3;
     private static final int REQ_CALLS = 4;
     private static final int REQ_AUDIO = 5;
+    private static final int REQ_PHONE = 6;
 
     private static final int INK = Color.parseColor("#161A22");
     private static final int MUTED = Color.parseColor("#5B6475");
@@ -58,6 +58,8 @@ public class MainActivity extends Activity {
     private String shown = "";
     /** Идёт «Проверить» записи разговоров. */
     private boolean checking;
+    /** Открыт экран «Работа в фоне» (1.4). */
+    private boolean bgScreen;
 
     /**
      * Раз в две секунды — перерисовать, если что-то изменилось. Только если
@@ -77,13 +79,13 @@ public class MainActivity extends Activity {
                 + "|" + (Build.VERSION.SDK_INT >= 33 && granted(Manifest.permission.POST_NOTIFICATIONS))
                 + "|" + batteryFree()
                 + "|" + Calls.enabled(this) + "|" + Calls.logGranted(this) + "|" + Calls.audioGranted(this)
-                + "|" + Recorder.learnedFolder(this) + "|" + Calls.sentToday(this) + "|" + checking;
+                + "|" + Recorder.learnedFolder(this) + "|" + Calls.sentToday(this) + "|" + checking
+                + "|" + bgScreen + "|" + Background.restricted(this) + "|" + Store.restartsWeek(this)
+                + "|" + granted(Manifest.permission.READ_PHONE_STATE);
     }
 
     private boolean batteryFree() {
-        if (Build.VERSION.SDK_INT < 23) return true;
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        return Background.batteryFree(this);
     }
 
     @Override
@@ -126,6 +128,8 @@ public class MainActivity extends Activity {
     /** Ссылка из QR-кода: finecrmsms://pair?u=<адрес>&c=<код>[&a=<запасной>…] — подключаемся сразу. */
     private void handleLink(Intent intent) {
         Uri data = intent == null ? null : intent.getData();
+        // Из уведомления сторожа «FineCRM Телефон остановлен» — сразу на «Работу в фоне».
+        if (intent != null && "background".equals(intent.getStringExtra("screen"))) bgScreen = true;
         render();
         if (data == null || !"finecrmsms".equals(data.getScheme())) return;
         String u = data.getQueryParameter("u");
@@ -155,7 +159,10 @@ public class MainActivity extends Activity {
         space(18);
 
         if (!Store.paired(this)) {
+            bgScreen = false;
             renderPairing();
+        } else if (bgScreen) {
+            renderBackground();
         } else {
             renderStatus();
         }
@@ -231,20 +238,24 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        if (Build.VERSION.SDK_INT >= 23) {
-            check(batteryFree(), "Работа без экономии батареи", "Отключить экономию", new View.OnClickListener() {
+        // Экономия батареи, автозапуск, «закрывал ли Android» — на своём экране (1.4).
+        check(Background.fine(this), "Работа в фоне", "Настроить", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openBackground();
+            }
+        });
+        int restarts = Store.restartsWeek(this);
+        if (restarts > 0) {
+            text("Android закрывал приложение в фоне: " + restarts + " " + times(restarts) + " за неделю. Сторож его поднимал, но SMS и звонки в это время ждали.", 13, BAD, false);
+        } else if (Background.fine(this)) {
+            button("Работа в фоне", false, new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    try {
-                        startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                                Uri.parse("package:" + getPackageName())));
-                    } catch (Exception e) {
-                        startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-                    }
+                    openBackground();
                 }
             });
         }
-        text("На Xiaomi, Huawei, Honor и Samsung также включите для FineCRM Телефон «Автозапуск» и уберите ограничения фоновой работы в настройках приложения.", 13, MUTED, false);
         space(18);
         renderCalls();
         space(18);
@@ -273,9 +284,18 @@ public class MainActivity extends Activity {
         check(Calls.logGranted(this), "Журнал звонков", "Разрешить", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.READ_CALL_LOG}, REQ_CALLS);
+                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE}, REQ_CALLS);
             }
         });
+        check(granted(Manifest.permission.READ_PHONE_STATE), "Звонок сразу после разговора", "Разрешить", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (Build.VERSION.SDK_INT >= 23) requestPermissions(new String[] {Manifest.permission.READ_PHONE_STATE}, REQ_PHONE);
+            }
+        });
+        if (!granted(Manifest.permission.READ_PHONE_STATE)) {
+            text("Тогда звонок уходит в FineCRM через минуту после разговора, даже если Android закрыл приложение.", 13, MUTED, false);
+        }
         if (!Calls.logGranted(this)) {
             text("Если Android пишет «Ограниченная настройка»: «О приложении» → ⋮ → «Разрешить ограниченные настройки», затем снова «Разрешить».", 13, MUTED, false);
         }
@@ -301,6 +321,135 @@ public class MainActivity extends Activity {
                 recheck();
             }
         });
+    }
+
+    // ------------------------------------------------------------ работа в фоне
+
+    private void openBackground() {
+        bgScreen = true;
+        render();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (bgScreen) {
+            bgScreen = false;
+            render();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    private static String times(int n) {
+        int a = n % 100;
+        int b = n % 10;
+        return a >= 11 && a <= 14 ? "раз" : b >= 2 && b <= 4 ? "раза" : "раз";
+    }
+
+    private static String ago(long at) {
+        long min = Math.max(0, (System.currentTimeMillis() - at) / 60000);
+        if (min < 60) return min + " мин назад";
+        long h = min / 60;
+        if (h < 24) return h + " ч назад";
+        return (h / 24) + " дн назад";
+    }
+
+    /**
+     * «Работа в фоне» (1.4): что мешает приложению работать свёрнутым. Жалоба
+     * была «работает, только когда открыто» — здесь всё, что для этого нужно,
+     * с кнопками прямо в нужные настройки этой марки телефона.
+     */
+    private void renderBackground() {
+        button("‹ Назад", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                bgScreen = false;
+                render();
+            }
+        });
+        space(12);
+        text("Работа в фоне", 22, INK, true);
+        text("Чтобы SMS уходили и звонки попадали в FineCRM, когда приложение свёрнуто или экран погашен. Android и особенно "
+                + "прошивки Xiaomi, Huawei, Honor, Samsung, OPPO и vivo закрывают приложения, чтобы беречь батарею.", 14, MUTED, false);
+        space(10);
+        int restarts = Store.restartsWeek(this);
+        if (restarts > 0) {
+            long gap = Math.round(Store.lastGap(this) / 60000.0);
+            text("Android закрывал приложение " + restarts + " " + times(restarts) + " за неделю, последний раз " + ago(Store.lastRestart(this))
+                    + (gap > 0 ? " — оно молчало около " + gap + " мин" : "") + ".", 15, BAD, true);
+        } else {
+            text("✓  За неделю Android ни разу не закрывал приложение.", 15, OK, false);
+        }
+        text("Сторож проверяет приложение каждые 15 минут и после каждого звонка и поднимает его, если Android закрыл. "
+                + "Но пока он не проверил, SMS ждут — поэтому лучше, чтобы Android не закрывал совсем.", 13, MUTED, false);
+        space(14);
+
+        text("1. Экономия батареи", 17, INK, true);
+        if (Build.VERSION.SDK_INT >= 23) {
+            check(batteryFree(), "Без экономии батареи", "Отключить", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                Uri.parse("package:" + getPackageName())));
+                    } catch (Exception e) {
+                        startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                    }
+                }
+            });
+            text("Без этого Android 12 и новее не разрешает сторожу снова запустить приложение — только напомнить уведомлением.", 13, MUTED, false);
+        }
+        if (Build.VERSION.SDK_INT >= 28) {
+            check(!Background.restricted(this), "Фоновая работа не запрещена", "Открыть", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Background.openDetails(MainActivity.this);
+                }
+            });
+            if (Background.restricted(this)) {
+                text("«О приложении → Батарея» → «Без ограничений» (или снимите «Ограничить фоновую работу»).", 13, MUTED, false);
+            }
+        }
+        space(14);
+
+        text("2. Настройки телефона " + Recorder.brand(), 17, INK, true);
+        text(Background.howTo(), 14, INK, false);
+        if (Background.hasAutostart()) {
+            button("Открыть автозапуск", true, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Background.openAutostart(MainActivity.this);
+                }
+            });
+        }
+        if (Background.hasBattery()) {
+            button("Открыть настройки батареи", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Background.openBattery(MainActivity.this);
+                }
+            });
+        }
+        button("О приложении", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Background.openDetails(MainActivity.this);
+            }
+        });
+        space(14);
+
+        text("3. Значок в шторке", 17, INK, true);
+        text("Пока в шторке есть значок «FineCRM Телефон · На связи», приложение работает. Не смахивайте его и не отключайте уведомления приложения.", 13, MUTED, false);
+        if (Build.VERSION.SDK_INT >= 33) {
+            check(granted(Manifest.permission.POST_NOTIFICATIONS), "Уведомления разрешены", "Разрешить", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
+                }
+            });
+        }
+        space(14);
+        text("Проверка: сверните приложение, погасите экран на 10–15 минут и отправьте SMS из FineCRM. Ушла — всё настроено.", 13, MUTED, false);
     }
 
     /** «Проверить»: найти папку записей заново и сразу рассказать о ней FineCRM. */
@@ -407,6 +556,7 @@ public class MainActivity extends Activity {
         final String base = Store.base(this);
         final String token = Store.token(this);
         GatewayService.stop(this);
+        Watchdog.cancel(this);
         Store.unpair(this, "Отключено");
         say("Телефон отключён от мастерской", MUTED);
         // Сказать серверу — по возможности: не вышло, так в настройках его отключат вручную.

@@ -10,7 +10,7 @@ import { PERMISSIONS } from "../../lib/permissions";
 import { searchWords } from "../../lib/search";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
-import { applyMovement, defaultWarehouse, num } from "../stock/stock.service";
+import { applyMovement, homeWarehouse, num } from "../stock/stock.service";
 
 /**
  * Продажа со склада без ремонта (16.10.2026, первая просьба мастерских:
@@ -213,7 +213,7 @@ salesRouter.post(
           }
           const stock = await tx.stockItem.findMany({
             where: { id: { in: [...lines.keys()] } },
-            select: { id: true, name: true, sku: true, isActive: true },
+            select: { id: true, name: true, sku: true, isActive: true, warehouseId: true },
           });
           const byId = new Map(stock.map((s) => [s.id, s]));
           for (const id of lines.keys()) {
@@ -221,7 +221,6 @@ salesRouter.post(
             if (!s || !s.isActive) throw badRequest("Одного из товаров больше нет на складе — обновите чек");
           }
 
-          const warehouse = await defaultWarehouse(tx, tenantId);
           const number = await nextSaleNumber(tx);
           const sale = await tx.sale.create({
             data: {
@@ -240,6 +239,8 @@ salesRouter.post(
 
           for (const [id, l] of lines) {
             const s = byId.get(id)!;
+            // Продаём со склада самой позиции (29.10.2026).
+            const warehouse = await homeWarehouse(tx, tenantId, s.warehouseId);
             const bal = await tx.stockBalance.findFirst({ where: { warehouseId: warehouse.id, stockItemId: id } });
             const have = num(bal?.qty);
             if (l.qty > have) {
@@ -328,12 +329,12 @@ salesRouter.post(
       if (!sale) throw notFound("Продажа не найдена");
       if (sale.returnedAt) throw conflict("Эта продажа уже возвращена");
 
-      const warehouse = await defaultWarehouse(tx, tenantId);
       for (const i of sale.items) {
         // Позицию со склада могли удалить — тогда вернуть некуда, деньги всё равно отдаём.
         if (!i.stockItemId) continue;
-        const exists = await tx.stockItem.findFirst({ where: { id: i.stockItemId }, select: { id: true } });
+        const exists = await tx.stockItem.findFirst({ where: { id: i.stockItemId }, select: { id: true, warehouseId: true } });
         if (!exists) continue;
+        const warehouse = await homeWarehouse(tx, tenantId, exists.warehouseId);
         const mv = await applyMovement(tx, {
           tenantId,
           warehouseId: warehouse.id,

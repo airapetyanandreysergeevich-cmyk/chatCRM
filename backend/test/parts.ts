@@ -213,6 +213,17 @@ async function main() {
   check(ip[0]?.price === 1300 && ip[0]?.stock === "order" && ip[0]?.stockText === "под заказ", "CHIP: с ценой и «Купить» — под заказ", ip[0]);
   check(ip[2]?.price === null && ip[2]?.stock === "out", "CHIP: «Нет в наличии» без цены", ip[2]);
 
+  const snp = await read("snpmarket", "snpmarket.html", "iphone 11");
+  check(snp.length === 2 && snp[0].article === "SNP-12345" && snp[0].url === "https://snpmarket.com/catalog/displei/displei-dlya-iphone-11-incell/", "SNP Market: артикул и ссылка", snp[0]);
+  check(snp[0]?.price === 3310 && snp[0]?.stock === "in" && snp[0]?.stockText === "Ростов-на-Дону", "SNP Market: в наличии и город", snp[0]);
+  check(snp[1]?.price === 1290 && snp[1]?.stock === "out", "SNP Market: нет в наличии, цена из разметки", snp[1]);
+  const rs = await read("resetshop", "resetshop.html", "gl552");
+  check(rs.length === 2 && rs[0].url === "https://reset-shop.ru/products/materinskaya-plata-asus-gl552vw" && rs[0].article === "00-00019007", "Reset: ссылка и артикул", rs[0]);
+  check(rs[0]?.price === 29990 && rs[0]?.stock === "in" && rs[0]?.stockText === "1 шт.", "Reset: новая цена, а не зачёркнутая; остаток", rs[0]);
+  check(rs[1]?.price === 1500 && rs[1]?.stock === "out", "Reset: нет в наличии", rs[1]);
+  const cs = await searchShop("comsystem", "IT5571", { fetcher: async () => { throw new Error("не должен ходить"); } });
+  check(cs.linkOnly === true && cs.url === "https://comsystem-tlt.ru/", "Комсистем: только ссылка на сайт (403)", cs);
+
   const lb = await searchShop("liberti", "дисплей iphone", { fetcher: async () => { throw new Error("не должен ходить"); } });
   check(lb.linkOnly === true && lb.url === "https://liberti.ru/search/?q=%D0%B4%D0%B8%D1%81%D0%BF%D0%BB%D0%B5%D0%B9%20iphone", "Либерти: только ссылка (защита от роботов)", lb);
 
@@ -258,7 +269,7 @@ async function main() {
     }
     check(ok, `${s.name}: пустая страница — пустой ответ`);
   }
-  check(SHOPS.filter((s) => s.id !== "vshop").every((s) => s.searchUrl("a b&c").includes("a%20b%26c")), "запрос в адресе закодирован у всех (кроме таблицы Vshop — она одна на всё)");
+  check(SHOPS.filter((s) => !["vshop", "comsystem"].includes(s.id)).every((s) => s.searchUrl("a b&c").includes("a%20b%26c")), "запрос в адресе закодирован у всех (кроме таблицы Vshop и Комсистем — у них одна ссылка)");
   check(new Set(SHOPS.map((s) => s.id)).size === SHOPS.length, "у магазинов разные коды");
 
   // ---------------------------------------------------------------- searchShop: кэш и ошибки

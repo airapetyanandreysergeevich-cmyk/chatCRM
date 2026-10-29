@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { badRequest, notFound } from "../../lib/errors";
-import { applyMovement, defaultWarehouse, num } from "./stock.service";
+import { applyMovement, homeWarehouse, num } from "./stock.service";
 
 /**
  * Каталог склада: дерево категорий и связь склада с запчастями заказа.
@@ -198,8 +198,7 @@ export async function syncOrderStock(
   const ids = [...new Set([...was.keys(), ...now.keys()])];
   if (!ids.length) return [];
 
-  const items = await tx.stockItem.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, unit: true } });
-  const warehouse = await defaultWarehouse(tx, p.tenantId, null);
+  const items = await tx.stockItem.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, unit: true, warehouseId: true } });
   const moved: Array<{ name: string; qty: number; dir: "out" | "back" }> = [];
 
   for (const id of ids) {
@@ -207,6 +206,8 @@ export async function syncOrderStock(
     if (!item) continue;
     const delta = Math.round(((now.get(id) ?? 0) - (was.get(id) ?? 0)) * 1000) / 1000;
     if (!delta) continue;
+    // Списываем и возвращаем на складе самой позиции (29.10.2026).
+    const warehouse = await homeWarehouse(tx, p.tenantId, item.warehouseId);
     if (delta > 0) {
       const bal = await tx.stockBalance.findFirst({ where: { warehouseId: warehouse.id, stockItemId: id } });
       const have = num(bal?.qty);

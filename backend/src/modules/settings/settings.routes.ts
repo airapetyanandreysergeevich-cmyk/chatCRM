@@ -119,6 +119,35 @@ const logoField = z
 const textSize = z.number().min(8).max(14).multipleOf(0.5).nullable().optional();
 const textLeading = z.number().min(1.1).max(2).nullable().optional();
 
+/**
+ * Поля верха листа и отрезной талон (30.10.2026). Хранятся отличия от
+ * стандартных (см. lib/printForms.ts); ключ своего поля — «x…».
+ */
+const fieldKey = z.string().regex(/^[a-zA-Z][a-zA-Z0-9]{0,24}$/, "Неизвестное поле");
+const sheetFields = z
+  .array(z.object({ key: fieldKey, on: z.boolean(), label: text(60), text: text(200) }).strip())
+  .max(40, "Слишком много полей")
+  .refine((a) => a.filter((f) => /^x/.test(f.key)).length <= 10, "Своих полей — не больше 10 в разделе")
+  .optional();
+const sheetSection = z.object({ on: z.boolean().optional(), title: text(60), fields: sheetFields }).strip().optional();
+const sheetLayout = z
+  .object({
+    client: sheetSection,
+    device: sheetSection,
+    completeness: sheetSection,
+    appearance: sheetSection,
+    complaint: sheetSection,
+    money: sheetSection,
+  })
+  .strip()
+  .nullable()
+  .optional();
+const talonSchema = z
+  .object({ on: z.boolean().optional(), title: text(60), note: text(300), fields: sheetFields })
+  .strip()
+  .nullable()
+  .optional();
+
 const printSchema = z
   .object({
     logo: logoField,
@@ -134,11 +163,21 @@ const printSchema = z
         signStaff: text(100),
         size: textSize,
         leading: textLeading,
+        layout: sheetLayout,
+        talon: talonSchema,
       })
       .strip()
       .optional(),
     act: z
-      .object({ title: text(80), warranty: text(20000), signClient: text(100), signStaff: text(100), size: textSize, leading: textLeading })
+      .object({
+        title: text(80),
+        warranty: text(20000),
+        signClient: text(100),
+        signStaff: text(100),
+        size: textSize,
+        leading: textLeading,
+        layout: sheetLayout,
+      })
       .strip()
       .optional(),
     footer: text(200),

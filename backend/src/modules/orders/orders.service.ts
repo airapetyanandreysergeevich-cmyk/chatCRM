@@ -155,6 +155,7 @@ export function projectOrder(order: OrderWithRelations, opts: ProjectOptions) {
       qty: num(w.qty),
       price: num(w.price),
       masterId: w.masterId,
+      warrantyDays: w.warrantyDays,
     })),
     parts: order.parts.map((p) => ({
       id: p.id,

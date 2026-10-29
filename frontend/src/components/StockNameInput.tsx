@@ -118,7 +118,7 @@ export function StockNameInput({
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{s.name}</span>
                 <span className="block truncate text-[12px] text-ink-dim">
-                  {[s.sku, s.qty > 0 ? `в наличии ${s.qty} ${s.unit}` : "нет в наличии", s.location ? `место: ${s.location}` : null]
+                  {[s.sku, s.qty > 0 ? `в наличии ${s.qty} ${s.unit}` : "нет в наличии", s.warehouse ?? null, s.location ? `место: ${s.location}` : null]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>

@@ -371,7 +371,9 @@ function matchKey(dataset: DatasetKey, values: Record<string, string>): string |
   const what = sku || (values["Наименование"] ?? "").trim().toLowerCase();
   if (!what) return null;
   const loc = placeKey(values["Место хранения"]);
-  return loc ? `${what} · ${loc}` : what;
+  // Склад — часть места (29.10.2026): тот же товар на другом складе — другая позиция.
+  const wh = placeKey(values["Склад"]);
+  return (loc ? `${what} · ${loc}` : what) + (wh ? ` @ ${wh}` : "");
 }
 
 /** Помечаем строки, которые обновят существующие записи, а не создадут новые. */
@@ -456,7 +458,13 @@ async function markExisting(
   }
 
   // Удалённые со склада (скрытые) не узнаём: строка файла заведёт позицию заново, а не оживит невидимую.
-  const items = await tx.stockItem.findMany({ where: { isActive: true }, select: { id: true, sku: true, name: true, location: true } });
+  const items = await tx.stockItem.findMany({
+    where: { isActive: true },
+    select: { id: true, sku: true, name: true, location: true, warehouse: { select: { name: true } } },
+  });
+  // Склад позиции для сличения: без склада — основной (29.10.2026).
+  const def = await tx.warehouse.findFirst({ orderBy: [{ isDefault: "desc" }, { name: "asc" }], select: { name: true } });
+  const whOf = (i: (typeof items)[number]) => placeKey(i.warehouse?.name ?? def?.name ?? "");
   const group = (key: (i: (typeof items)[number]) => string | null) => {
     const m = new Map<string, typeof items>();
     for (const i of items) {
@@ -475,9 +483,11 @@ async function markExisting(
     const all = (sku ? bySku.get(sku) : byName.get((r.values["Наименование"] ?? "").trim().toLowerCase())) ?? [];
     const free = all.filter((i) => !taken.has(i.id));
     const loc = placeKey(r.values["Место хранения"]);
-    // Сначала — тот же товар в том же месте. Иначе единственный такой товар:
-    // у него ещё нет места (файл его проставит) или место в файле не указано.
-    const same = free.find((i) => placeKey(i.location) === loc);
+    const wh = placeKey(r.values["Склад"]);
+    // Сначала — тот же товар в том же месте (и на том же складе, если склад в файле есть).
+    // Иначе единственный такой товар: у него ещё нет места (файл его проставит)
+    // или место в файле не указано.
+    const same = free.find((i) => placeKey(i.location) === loc && (!wh || whOf(i) === wh));
     const only = all.length === 1 && free.length === 1 && (!loc || !placeKey(free[0].location)) ? free[0] : undefined;
     const hit = same ?? only;
     if (hit) {

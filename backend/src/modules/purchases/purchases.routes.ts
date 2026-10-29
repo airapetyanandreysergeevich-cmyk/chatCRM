@@ -16,7 +16,7 @@ import {
   requireTenant,
 } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
-import { applyMovement, defaultWarehouse, num } from "../stock/stock.service";
+import { applyMovement, defaultWarehouse, homeWarehouse, num } from "../stock/stock.service";
 
 /**
  * Закупки.
@@ -380,9 +380,13 @@ purchasesRouter.post(
           await tx.purchaseRequestItem.update({ where: { id: item.id }, data: { stockItemId } });
         }
 
+        // Склад прихода: выбранный в окне, иначе склад самой позиции (29.10.2026).
+        const target = body.warehouseId
+          ? warehouse
+          : await homeWarehouse(tx, tenantId, (await tx.stockItem.findFirst({ where: { id: stockItemId }, select: { warehouseId: true } }))?.warehouseId);
         await applyMovement(tx, {
           tenantId,
-          warehouseId: warehouse.id,
+          warehouseId: target.id,
           stockItemId,
           type: "IN",
           qty: line.qty,

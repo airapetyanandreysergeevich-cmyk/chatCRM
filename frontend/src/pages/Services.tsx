@@ -9,7 +9,7 @@ import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { plural } from "../lib/format";
 import { money } from "../lib/orders";
-import { PINNED_LIMIT, servicesApi, type Service, type ServiceCategory } from "../lib/services";
+import { PINNED_LIMIT, WARRANTY_OPTIONS, servicesApi, warrantyText, type Service, type ServiceCategory } from "../lib/services";
 
 /**
  * Прайс мастерской — с категориями, как склад (Андрей, 28.10.2026).
@@ -339,7 +339,13 @@ export default function Services() {
               </span>
             )}
           </p>
-          {s.note && <p className="truncate text-[12.5px] text-ink-muted">{s.note}</p>}
+          {(s.note || s.warrantyDays) && (
+            <p className="truncate text-[12.5px] text-ink-muted">
+              {s.warrantyDays ? <span data-service-warranty-badge>гарантия {warrantyText(s.warrantyDays)}</span> : null}
+              {s.warrantyDays && s.note ? " · " : ""}
+              {s.note}
+            </p>
+          )}
         </div>
         <span className="whitespace-nowrap text-right text-[14px] font-semibold tabular-nums">{s.price ? money(s.price) : <span className="text-ink-dim">договорная</span>}</span>
         <button
@@ -650,7 +656,7 @@ export default function Services() {
   );
 }
 
-const blank = { name: "", price: "", note: "", isPinned: false, categoryId: "" };
+const blank = { name: "", price: "", note: "", isPinned: false, categoryId: "", warrantyDays: "" };
 type Form = typeof blank;
 
 function ServiceModal({
@@ -677,6 +683,7 @@ function ServiceModal({
           note: from.note ?? "",
           isPinned: copyOf ? false : from.isPinned,
           categoryId: categoryId ?? "",
+          warrantyDays: from.warrantyDays ? String(from.warrantyDays) : "",
         }
       : { ...blank, categoryId: categoryId ?? "" }
   );
@@ -698,6 +705,7 @@ function ServiceModal({
         note: form.note,
         isPinned: form.isPinned,
         categoryId: form.categoryId || null,
+        warrantyDays: Number(form.warrantyDays) || null,
       };
       if (service) await servicesApi.update(service.id, body);
       else await servicesApi.create(body);
@@ -748,6 +756,37 @@ function ServiceModal({
             </Select>
           </Field>
         </div>
+
+        <Field label="Гарантия" error={error?.field("warrantyDays")} hint="Переходит в строку работы заказа и печатается в акте">
+          <div className="flex flex-wrap items-center gap-1.5" data-service-warranty>
+            {[0, ...WARRANTY_OPTIONS].map((d) => {
+              const on = (Number(form.warrantyDays) || 0) === d;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  aria-pressed={on}
+                  data-days={d}
+                  onClick={() => setForm((f) => ({ ...f, warrantyDays: d ? String(d) : "" }))}
+                  className={
+                    "min-h-[36px] rounded-field border px-2.5 text-[13px] font-semibold transition-colors " +
+                    (on ? "border-brand bg-brand-tint text-brand-ink" : "border-line text-ink-muted hover:text-ink")
+                  }
+                >
+                  {d ? warrantyText(d) : "нет"}
+                </button>
+              );
+            })}
+            <Input
+              inputMode="numeric"
+              aria-label="Гарантия, дней"
+              className="w-[88px]"
+              placeholder="дней"
+              value={form.warrantyDays}
+              onChange={(e) => setForm((f) => ({ ...f, warrantyDays: e.target.value.replace(/\D/g, "") }))}
+            />
+          </div>
+        </Field>
 
         <Field label="Уточнение" error={error?.field("note")} hint="Что входит в работу, а что нет. Видно только сотрудникам.">
           <Input value={form.note} onChange={set("note")} placeholder="Без стоимости запчастей" />

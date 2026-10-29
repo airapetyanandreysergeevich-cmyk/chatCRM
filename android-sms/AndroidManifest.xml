@@ -2,7 +2,7 @@
 <!--
   FineCRM Телефон (бывший FineCRM SMS) — телефон-шлюз: отправляет SMS клиентам
   мастерской со своей SIM-карты по заданиям FineCRM, а с 1.3 сообщает о звонках
-  клиентов и присылает записи разговоров. Подробности — README.md рядом.
+  клиентов и присылает записи разговоров, с 1.4 — сторож работы в фоне. Подробности — README.md рядом.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="ru.finecrm.sms">
@@ -14,6 +14,8 @@
          В FineCRM уходят только звонки с номеров клиентов мастерской. -->
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 1.4: конец разговора — звонок уходит в FineCRM, даже если Android закрыл приложение. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -66,6 +68,20 @@
             android:permission="android.permission.BROADCAST_SMS">
             <intent-filter>
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Сторож (1.4): каждые 15 минут и после звонка поднимает шлюз, если Android его закрыл. -->
+        <service
+            android:name=".Watchdog"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+
+        <receiver
+            android:name=".CallEndReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
         </receiver>
 

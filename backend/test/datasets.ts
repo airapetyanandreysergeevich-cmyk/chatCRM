@@ -268,7 +268,7 @@ async function main(): Promise<void> {
 
   // Пустая база: интересно, что скажет разбор, а не с чем он сольётся.
   const nothing = { findMany: async () => [] };
-  const tx = { customer: nothing, order: nothing, stockItem: nothing, service: nothing } as never;
+  const tx = { customer: nothing, order: nothing, stockItem: nothing, service: nothing, warehouse: { findFirst: async () => null } } as never;
   const table = (rows: string[][]): TableRow[] => rows.map((cells, i) => ({ n: i + 1, cells }));
 
   const onlyNumber = await parseRows(tx, "customers", table([

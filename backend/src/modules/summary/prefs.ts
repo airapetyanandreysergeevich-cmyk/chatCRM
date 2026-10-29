@@ -66,6 +66,8 @@ export interface DashboardPrefs {
   table?: TablePrefs;
   /** История ремонта в карточке заказа прикреплена: слева или справа. Нет — на своём месте. */
   historyDock?: "left" | "right";
+  /** Порядок истории ремонта (29.10.2026): «top» — новые сверху. Нет — новые снизу, как в переписке. */
+  historyOrder?: "top";
 }
 
 /**
@@ -214,6 +216,7 @@ export const prefsSchema = z
     // Виды таблицы разбирает normalizeTable — здесь только предел размера.
     table: z.unknown().optional(),
     historyDock: z.string().max(10).nullable().optional(),
+    historyOrder: z.string().max(10).nullable().optional(),
   })
   .strip();
 
@@ -268,6 +271,7 @@ export function normalizePrefs(raw: unknown): DashboardPrefs {
   if (table) out.table = table;
   // История ремонта в карточке заказа — прикреплена слева или справа (27.10.2026).
   if (p.historyDock === "left" || p.historyDock === "right") out.historyDock = p.historyDock;
+  if (p.historyOrder === "top") out.historyOrder = "top";
   return out;
 }
 

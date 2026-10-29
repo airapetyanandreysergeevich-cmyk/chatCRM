@@ -28,6 +28,7 @@ import {
 } from "../components/ui";
 import { ChipInput, Chips, hasPhrase, togglePhrase } from "../components/ChipInput";
 import { SuggestInput } from "../components/SuggestInput";
+import { StockNameInput } from "../components/StockNameInput";
 import { ApiError } from "../lib/api";
 import { ensureOnIntake } from "../lib/orderFolder";
 import { useAuth } from "../lib/auth";
@@ -35,7 +36,7 @@ import type { QuickPick, QuickPickField } from "../lib/quickPicks";
 import { formatDate, plural } from "../lib/format";
 import { customerColor, nameStyle } from "../lib/customerColor";
 import { EMPTY_HINTS, hintsApi, matchHints, withBuiltIn, withoutHint, type Hints } from "../lib/hints";
-import { isAuthorizedBrand, masterLabel, ordersApi, type CustomerHit, type OrderKind, type Reference } from "../lib/orders";
+import { isAuthorizedBrand, masterLabel, money, ordersApi, type CustomerHit, type OrderKind, type Reference } from "../lib/orders";
 
 const num = (v: string) => (v.trim() === "" ? undefined : Number(v.replace(",", ".")));
 
@@ -149,6 +150,9 @@ export default function OrderNew() {
   });
   // Перечисления строкой, а не списком отмеченных ключей: в поле можно
   // дописать своё, чего в кнопках нет.
+  // Товары и запчасти при приёме (29.10.2026): «Со склада» списываются, когда заказ принят.
+  const [goods, setGoods] = useState<Array<{ key: number; name: string; qty: string; price: string; stockItemId: string | null }>>([]);
+  const goodsKey = useRef(0);
   const [completeness, setCompleteness] = useState("");
   const [appearance, setAppearance] = useState("");
   const [hints, setHints] = useState<Hints>(EMPTY_HINTS);
@@ -394,6 +398,14 @@ export default function OrderNew() {
         approvedLimit: num(form.approvedLimit),
         prepayment: num(form.prepayment) ?? 0,
         assignedMasterId: form.assignedMasterId || undefined,
+        parts: goods
+          .filter((g) => g.name.trim().length >= 2)
+          .map((g) => ({
+            name: g.name.trim(),
+            qty: Number(g.qty.replace(",", ".")) || 1,
+            price: Number(g.price.replace(",", ".")) || 0,
+            stockItemId: g.stockItemId,
+          })),
         // По гарантии — со ссылкой на прошлый ремонт: в карточке будет видно, что тогда делали.
         ...(warranty && form.kind === "WARRANTY" ? { parentOrderId: warranty.id } : {}),
       });
@@ -418,6 +430,11 @@ export default function OrderNew() {
   };
 
   const fieldError = (path: string) => error?.field(path);
+  // Товары при приёме — тем, кто видит склад или правит заказы (подсказки со склада им открыты).
+  const canGoods = can("stock.view") || can("orders.edit");
+  const setGood = (key: number, patch: Partial<(typeof goods)[number]>) =>
+    setGoods((list) => list.map((g) => (g.key === key ? { ...g, ...patch } : g)));
+  const goodsTotal = goods.reduce((n, g) => n + (Number(g.qty.replace(",", ".")) || 0) * (Number(g.price.replace(",", ".")) || 0), 0);
 
   return (
     <>
@@ -978,6 +995,48 @@ export default function OrderNew() {
         </More>
 
       </Card>
+
+      {canGoods && (
+        <div data-intake-goods>
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <SectionLabel>Товары и запчасти</SectionLabel>
+            {goods.length > 0 && <span className="text-[13px] font-semibold text-ink-soft">{money(goodsTotal)}</span>}
+          </div>
+          <p className="mt-1 text-[12.5px] text-ink-dim">
+            Что клиент берёт сразу: зарядка, чехол, запчасть со склада. Строки «Со склада» спишутся, когда заказ будет принят.
+          </p>
+          <div className="mt-3 space-y-2">
+            {goods.map((g) => (
+              <div key={g.key} className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_78px_110px_auto] sm:items-start" data-intake-good>
+                <div className="col-span-2 min-w-0 sm:col-span-1">
+                <StockNameInput
+                  value={g.name}
+                  linked={!!g.stockItemId}
+                  onChange={(name) => setGood(g.key, { name, stockItemId: null })}
+                  onPick={(it) => setGood(g.key, { name: it.name, stockItemId: it.id, ...(it.salePrice ? { price: String(it.salePrice) } : {}) })}
+                />
+                </div>
+                <Input inputMode="decimal" aria-label="Количество" placeholder="Кол-во" value={g.qty} onChange={(e) => setGood(g.key, { qty: e.target.value })} />
+                <Input inputMode="decimal" aria-label="Цена" placeholder="Цена, ₽" value={g.price} onChange={(e) => setGood(g.key, { price: e.target.value })} />
+                <Button type="button" variant="ghost" className="col-span-2 min-h-[42px] px-3 sm:col-span-1" onClick={() => setGoods((list) => list.filter((x) => x.key !== g.key))}>
+                  Убрать
+                </Button>
+              </div>
+            ))}
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            className="mt-3"
+            data-intake-good-add
+            onClick={() => setGoods((list) => [...list, { key: ++goodsKey.current, name: "", qty: "1", price: "", stockItemId: null }])}
+          >
+            + Добавить товар
+          </Button>
+        </Card>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 sm:flex-row-reverse">
         <Button type="submit" disabled={busy} className="sm:min-w-[220px]">

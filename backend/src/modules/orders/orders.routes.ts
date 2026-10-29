@@ -415,6 +415,21 @@ const acceptSchema = z.object({
   approvedLimit: z.number().min(0).optional(),
   prepayment: z.number().min(0).default(0),
   assignedMasterId: z.string().uuid().optional(),
+  /**
+   * Товары и запчасти при приёме (Андрей, 29.10.2026): строки «Со склада»
+   * списываются сразу, как в карточке заказа при сохранении.
+   */
+  parts: z
+    .array(
+      z.object({
+        name: z.string().trim().min(2, "Назовите товар"),
+        qty: z.number().min(0.001).default(1),
+        price: z.number().min(0),
+        stockItemId: z.string().uuid().nullable().optional(),
+      })
+    )
+    .max(50)
+    .default([]),
 });
 
 /**
@@ -627,6 +642,31 @@ ordersRouter.post(
       await tx.orderStatusHistory.create({
         data: { tenantId, orderId: order.id, toStatusId: status.id, userId, comment: "Принято в работу" },
       });
+
+      // Товары со склада при приёме: списываем и кладём строками в запчасти заказа.
+      if (body.parts.length) {
+        const asked = [...new Set(body.parts.map((p) => p.stockItemId).filter((x): x is string => !!x))];
+        const known = asked.length
+          ? new Set((await tx.stockItem.findMany({ where: { id: { in: asked }, isActive: true }, select: { id: true } })).map((i) => i.id))
+          : new Set<string>();
+        const rows = body.parts.map((p) => ({
+          name: p.name,
+          qty: p.qty,
+          price: p.price,
+          source: "STOCK" as const,
+          stockItemId: p.stockItemId && known.has(p.stockItemId) ? p.stockItemId : null,
+        }));
+        await syncOrderStock(tx, { tenantId, order: { id: order.id, number }, before: [], after: rows, userId });
+        for (const p of rows) {
+          const bal = p.stockItemId
+            ? await tx.stockBalance.findFirst({ where: { stockItemId: p.stockItemId }, orderBy: { qty: "desc" }, select: { avgCost: true } })
+            : null;
+          await tx.orderPart.create({
+            data: { tenantId, orderId: order.id, name: p.name, qty: p.qty, price: p.price, source: p.source, stockItemId: p.stockItemId, cost: bal?.avgCost ?? null },
+          });
+        }
+        await recalcTotals(tx, order.id);
+      }
       if (order.assignedMasterId) await masterEvent(tx, tenantId, order.id, userId, null, order.assignedMasterId);
       await writeAudit(tx, {
         tenantId,
@@ -1102,6 +1142,8 @@ const worksSchema = z.object({
         // строкам. null — «мастер заказа». Не прислано (старая вкладка) —
         // как раньше: мастер пишет на себя, остальные — на мастера заказа.
         masterId: z.string().uuid().nullable().optional(),
+        /** Гарантия на работу, дней — из прайса или вручную (29.10.2026). */
+        warrantyDays: z.number().int().min(0).max(3650).nullable().optional(),
       })
     )
     .max(100),
@@ -1141,7 +1183,7 @@ ordersRouter.put(
             ? w.masterId
             : me;
         await tx.orderWork.create({
-          data: { tenantId, orderId: order.id, name: w.name, qty: w.qty, price: w.price, masterId },
+          data: { tenantId, orderId: order.id, name: w.name, qty: w.qty, price: w.price, masterId, warrantyDays: w.warrantyDays || null },
         });
       }
       await recalcTotals(tx, order.id);

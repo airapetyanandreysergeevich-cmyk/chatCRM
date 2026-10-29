@@ -559,6 +559,67 @@ export const SHOPS: Shop[] = [
       }),
   },
   {
+    id: "snpmarket",
+    name: "SNP Market",
+    site: "snpmarket.com",
+    about: "Запчасти и аксессуары для телефонов, склад в Ростове-на-Дону",
+    searchUrl: (q) => `https://snpmarket.com/search?s=${enc(q)}`,
+    probe: "iphone 11",
+    read: (html) =>
+      cards(html, "https://snpmarket.com/", ".snippet", (c) => {
+        const a = query(c, "a.snippet__name");
+        const avail = attrOf(query(c, "meta[itemprop=availability]"), "content");
+        const status = textOf(query(c, ".snippet-availability__status"));
+        const city = textOf(query(c, ".snippet-availability__details span"));
+        const out = /OutOfStock|SoldOut|Discontinued/i.test(avail) || /нет в наличии/i.test(status);
+        const order = /PreOrder|BackOrder/i.test(avail) || /под заказ|ожида/i.test(status);
+        const inStock = /InStock|LimitedAvailability/i.test(avail) || /в наличии/i.test(status);
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          article: attrOf(query(c, "meta[itemprop=sku]"), "content") || undefined,
+          price:
+            parsePrice(textOf(query(c, ".snippet__price-now"))) ??
+            parsePrice(attrOf(query(c, "meta[itemprop=price]"), "content")),
+          stock: out ? "out" : order ? "order" : inStock ? "in" : "unknown",
+          stockText: !out && inStock && city ? city : order ? "под заказ" : undefined,
+        };
+      }),
+  },
+  {
+    id: "resetshop",
+    name: "Reset",
+    site: "reset-shop.ru",
+    about: "Б/у запчасти для ноутбуков (платы, матрицы, корпуса), Иркутск",
+    searchUrl: (q) => `https://reset-shop.ru/products?keyword=${enc(q)}`,
+    probe: "gl552",
+    read: (html) =>
+      cards(html, "https://reset-shop.ru/", ".catalog_blocks-item", (c) => {
+        const a = query(c, ".catalog_blocks-item-name a");
+        const qty = textOf(query(c, ".catalog_blocks-item-botter-quantity"));
+        const n = /в наличии:?\s*(\d+)/i.exec(qty)?.[1];
+        return {
+          name: textOf(a),
+          href: attrOf(a, "href"),
+          article: textOf(query(c, ".catalog_blocks-item-article")).replace(/^Артикул:?\s*/i, "") || undefined,
+          price: parsePrice(textOf(query(c, ".new_price"))),
+          stock: /нет в наличии|под заказ/i.test(qty) ? "out" : /в наличии/i.test(qty) ? "in" : "unknown",
+          stockText: n ? `${n} шт.` : undefined,
+        };
+      }),
+  },
+  {
+    // Сайт отвечает «403 Запрещено» и серверу, и обычному браузеру — даём ссылку на сайт.
+    id: "comsystem",
+    name: "Комсистем",
+    site: "comsystem-tlt.ru",
+    about: "Компьютерные запчасти, Тольятти. Только ссылка на сайт",
+    searchUrl: () => "https://comsystem-tlt.ru/",
+    linkOnly: true,
+    logo: false,
+    probe: "",
+  },
+  {
     // Сайт закрыт защитой от роботов («нажмите на похожий цвет») — только ссылкой.
     id: "liberti",
     name: "Либерти",

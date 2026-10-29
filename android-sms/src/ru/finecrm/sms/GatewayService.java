@@ -45,6 +45,12 @@ public class GatewayService extends Service {
         else c.startService(i);
     }
 
+    /** Служба запущена и крутит цикл — для сторожа. */
+    static boolean alive() {
+        GatewayService s = instance;
+        return s != null && s.running;
+    }
+
     static void stop(Context c) {
         c.stopService(new Intent(c, GatewayService.class));
     }
@@ -78,8 +84,12 @@ public class GatewayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        // Сторож (1.4): если Android закроет службу, она поднимется снова.
+        Watchdog.schedule(this);
+        Watchdog.hideNotice(this);
         if (loop == null) {
             running = true;
+            Store.markAlive(this);
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "finecrm:sms");
             wake.setReferenceCounted(false);
@@ -93,6 +103,16 @@ public class GatewayService extends Service {
             loop.start();
         }
         return START_STICKY;
+    }
+
+    /**
+     * Приложение смахнули из недавних. Обычный Android службу не трогает, а
+     * многие прошивки закрывают её вместе с окном — сторож проверит через минуту.
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        if (Store.paired(this)) Watchdog.soon(getApplicationContext(), 60 * 1000);
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
@@ -116,6 +136,7 @@ public class GatewayService extends Service {
         while (running && Store.paired(this)) {
             String base = Store.base(this);
             String token = Store.token(this);
+            Store.markAlive(this);
             try {
                 flushResults(this);
                 if (System.currentTimeMillis() - lastState > STATE_EVERY_MS) {
@@ -137,6 +158,7 @@ public class GatewayService extends Service {
                 backoff = 5000;
             } catch (Http.Unauthorized e) {
                 Store.unpair(this, e.getMessage());
+                Watchdog.cancel(this);
                 break;
             } catch (Exception e) {
                 if (!running) break;
@@ -232,6 +254,8 @@ public class GatewayService extends Service {
             o.put("model", Build.MANUFACTURER + " " + Build.MODEL);
             // Звонки (1.3): разрешения и где нашлись записи разговоров — для «Интеграций».
             o.put("calls", Calls.state(c));
+            // Работа в фоне (1.4): сколько раз Android закрывал приложение и мешает ли он ему.
+            o.put("background", Background.state(c));
         } catch (Exception ignored) {
             // что успели собрать — то и отправим
         }

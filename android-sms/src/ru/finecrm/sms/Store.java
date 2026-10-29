@@ -67,8 +67,62 @@ final class Store {
                 .remove("parts")
                 .remove("watch")
                 .remove("incoming")
+                .remove("alive")
                 .putString("status", why)
                 .apply();
+    }
+
+    // ------------------------------------------------------------ работа в фоне (1.4)
+
+    /** Служба жива: отметка раз в проход цикла. По ней сторож видит, сколько она молчала. */
+    static synchronized void markAlive(Context c) {
+        prefs(c).edit().putLong("alive", System.currentTimeMillis()).apply();
+    }
+
+    /** Сколько мс назад служба была жива; не была никогда — 0. */
+    static synchronized long sinceAlive(Context c) {
+        long t = prefs(c).getLong("alive", 0);
+        return t == 0 ? 0 : Math.max(0, System.currentTimeMillis() - t);
+    }
+
+    /** Сторож нашёл службу закрытой: запомнить — время и сколько она молчала. */
+    static synchronized void countRestart(Context c, long gapMs) {
+        JSONArray old = restartsRaw(c);
+        JSONArray keep = new JSONArray();
+        long week = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000;
+        for (int i = 0; i < old.length(); i++) {
+            long t = old.optLong(i, 0);
+            if (t > week) keep.put(t);
+        }
+        keep.put(System.currentTimeMillis());
+        prefs(c).edit().putString("restarts", keep.toString()).putLong("lastGap", gapMs).apply();
+    }
+
+    private static JSONArray restartsRaw(Context c) {
+        try {
+            return new JSONArray(prefs(c).getString("restarts", "[]"));
+        } catch (JSONException e) {
+            return new JSONArray();
+        }
+    }
+
+    /** Сколько раз за неделю Android закрывал службу. */
+    static synchronized int restartsWeek(Context c) {
+        JSONArray a = restartsRaw(c);
+        long week = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000;
+        int n = 0;
+        for (int i = 0; i < a.length(); i++) if (a.optLong(i, 0) > week) n++;
+        return n;
+    }
+
+    /** Когда закрывал последний раз (0 — не закрывал) и сколько служба тогда молчала. */
+    static synchronized long lastRestart(Context c) {
+        JSONArray a = restartsRaw(c);
+        return a.length() == 0 ? 0 : a.optLong(a.length() - 1, 0);
+    }
+
+    static synchronized long lastGap(Context c) {
+        return prefs(c).getLong("lastGap", 0);
     }
 
     // ------------------------------------------------------------ состояние

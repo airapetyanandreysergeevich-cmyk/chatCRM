@@ -88,6 +88,8 @@ export interface DashboardPrefs {
   table?: TablePrefs;
   /** История ремонта в карточке заказа прикреплена: слева или справа. */
   historyDock?: "left" | "right";
+  /** «top» — история ремонта новыми сверху. */
+  historyOrder?: "top";
 }
 
 export type DashboardView = "board" | "table";
@@ -251,6 +253,8 @@ export interface StockItem {
   categoryId?: string | null;
   categoryPath?: string | null;
   location?: string | null;
+  /** Склад позиции (29.10.2026); null — основной. */
+  warehouse?: string | null;
   supplier?: string | null;
   /** Примечание к позиции. */
   note?: string | null;
@@ -289,8 +293,17 @@ export interface StockLookupItem {
   sku: string | null;
   unit: string;
   location: string | null;
+  /** Склад позиции; null — основной. */
+  warehouse?: string | null;
   salePrice: number | null;
   qty: number;
+}
+
+/** Подсказки полей позиции: поставщики, места, склады (основной первым). */
+export interface StockHints {
+  suppliers: string[];
+  locations: string[];
+  warehouses?: string[];
 }
 
 export interface StockItemInput {
@@ -300,6 +313,8 @@ export interface StockItemInput {
   categoryId?: string | null;
   minQty?: number;
   location?: string;
+  /** Склад по названию; пусто — основной. */
+  warehouse?: string;
   supplier?: string;
   note?: string;
   purchasePrice?: number | null;
@@ -448,6 +463,7 @@ export const stockApi = {
       category?: string;
       supplier?: string;
       location?: string;
+      warehouse?: string;
       /** «1» — всё отобранное одним ответом, без страниц. */
       all?: string;
     } = {}
@@ -463,6 +479,7 @@ export const stockApi = {
       | { action: "move"; ids: string[]; categoryId: string | null }
       | { action: "markup"; ids: string[]; pct: number }
       | { action: "location"; ids: string[]; location: string }
+      | { action: "warehouse"; ids: string[]; warehouse: string }
       | { action: "delete"; ids: string[] }
   ) => api.post<{ ok: true; changed: number; skipped: string[] }>("/stock/bulk", body),
   /** Выбранные позиции файлом Excel — тем же листом, что «Базы → Выгрузка». */
@@ -480,7 +497,7 @@ export const stockApi = {
   },
   deleteCategory: (id: string, moveTo?: string | null) =>
     api.del<{ ok: true; items: number; children: number }>(`/stock/categories/${id}${moveTo ? `?moveTo=${moveTo}` : ""}`),
-  hints: () => api.get<{ suppliers: string[]; locations: string[] }>("/stock/hints"),
+  hints: () => api.get<StockHints>("/stock/hints"),
   lookup: (q: string) => api.get<{ items: StockLookupItem[] }>(`/stock/lookup${qs({ q })}`),
   warehouses: () => api.get<Array<{ id: string; name: string; isDefault: boolean }>>("/stock/warehouses"),
   createItem: (body: StockItemInput) => api.post<{ id: string; name: string }>("/stock", body),

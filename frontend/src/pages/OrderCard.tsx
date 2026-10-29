@@ -52,7 +52,7 @@ import {
   type OrderWork,
   type Reference,
 } from "../lib/orders";
-import { matchServices, PINNED_LIMIT, type Service } from "../lib/services";
+import { matchServices, PINNED_LIMIT, WARRANTY_OPTIONS, warrantyText, type Service } from "../lib/services";
 import { IssueDialog } from "../components/IssueDialog";
 import { WebSearchButton } from "../components/WebSearch";
 import { ReopenDialog } from "../components/ReopenDialog";
@@ -214,7 +214,10 @@ function LineEditor<T extends OrderWork>({
   actions,
   nameInput,
   serviceCategories,
+  warranty = false,
 }: {
+  /** Гарантия у строки (работы): из прайса при выборе, правится списком. */
+  warranty?: boolean;
   /** Своё поле названия (у запчастей — с подсказками со склада). */
   nameInput?: (row: T, update: (patch: Partial<T>) => void) => React.ReactNode;
   title: string;
@@ -239,12 +242,12 @@ function LineEditor<T extends OrderWork>({
    * первая услуга встаёт в неё, остальные — новыми строками следом.
    */
   function pickInto(row: number | null, picked: Service[]) {
-    const line = (s: Service): T => ({ ...empty, name: s.name, qty: 1, price: s.price });
+    const line = (s: Service): T => ({ ...empty, name: s.name, qty: 1, price: s.price, ...(warranty ? { warrantyDays: s.warrantyDays ?? null } : {}) });
     const next = [...rows];
     let at = row === null ? next.length : row + 1;
     let rest = picked;
     if (row !== null && next[row] && !next[row].name.trim() && !(Number(next[row].price) > 0)) {
-      next[row] = { ...next[row], name: picked[0].name, price: picked[0].price };
+      next[row] = { ...next[row], name: picked[0].name, price: picked[0].price, ...(warranty ? { warrantyDays: picked[0].warrantyDays ?? null } : {}) };
       rest = picked.slice(1);
     }
     for (const s of rest) next.splice(at++, 0, line(s));
@@ -252,7 +255,7 @@ function LineEditor<T extends OrderWork>({
   }
 
   const addService = (s: Service) =>
-    setRows([...rows, { ...empty, name: s.name, qty: 1, price: s.price }]);
+    setRows([...rows, { ...empty, name: s.name, qty: 1, price: s.price, ...(warranty ? { warrantyDays: s.warrantyDays ?? null } : {}) }]);
 
   const pinned = (services ?? []).filter((s) => s.isPinned).slice(0, PINNED_LIMIT);
 
@@ -276,7 +279,7 @@ function LineEditor<T extends OrderWork>({
                 value={row.name}
                 services={services}
                 onChange={(name) => update(i, { name } as Partial<T>)}
-                onPick={(s) => update(i, { name: s.name, price: s.price } as Partial<T>)}
+                onPick={(s) => update(i, { name: s.name, price: s.price, ...(warranty ? { warrantyDays: s.warrantyDays ?? null } : {}) } as Partial<T>)}
                 onOpenPrice={(anchor) => setPicker((p) => (p?.row === i ? null : { row: i, anchor }))}
               />
             ) : (
@@ -300,6 +303,25 @@ function LineEditor<T extends OrderWork>({
               onChange={(e) => update(i, { price: Number(e.target.value.replace(",", ".")) || 0 } as Partial<T>)}
             />
             <div className="flex items-center gap-2">
+              {warranty && (
+                <Select
+                  className="min-h-[42px] w-[118px]"
+                  title="Гарантия на эту работу — печатается в акте"
+                  aria-label="Гарантия"
+                  data-work-warranty
+                  value={String(row.warrantyDays ?? "")}
+                  onChange={(e) => update(i, { warrantyDays: Number(e.target.value) || null } as Partial<T>)}
+                >
+                  <option value="">без гарантии</option>
+                  {[...new Set([...WARRANTY_OPTIONS, ...(row.warrantyDays ? [row.warrantyDays] : [])])]
+                    .sort((a, b) => a - b)
+                    .map((d) => (
+                      <option key={d} value={d}>
+                        гар. {warrantyText(d)}
+                      </option>
+                    ))}
+                </Select>
+              )}
               {extraColumn?.(row, (patch) => update(i, patch))}
               <Button
                 type="button"
@@ -451,7 +473,7 @@ export default function OrderCard() {
       const o = await ordersApi.get(id);
       setOrder(o);
       const next = {
-        works: o.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price, masterId: w.masterId ?? null })),
+        works: o.works.map((w) => ({ name: w.name, qty: w.qty, price: w.price, masterId: w.masterId ?? null, warrantyDays: w.warrantyDays ?? null })),
         parts: o.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.price, source: p.source, stockItemId: p.stockItemId ?? null })),
         finish: {
           diagnosis: o.diagnosis ?? "",
@@ -573,6 +595,7 @@ export default function OrderCard() {
 
   const b = base.current;
   const dirtyWorks = !!b && !same(filled(works), b.works);
+  const worksWarranty = Math.max(0, ...works.map((w) => w.warrantyDays ?? 0)) || null;
   const dirtyParts = !!b && !same(filled(parts), b.parts);
   const dirtyFinish = !!b && !same(finish, b.finish);
   const dirty = dirtyWorks || dirtyParts || dirtyFinish;
@@ -1211,7 +1234,8 @@ export default function OrderCard() {
             title="Выполненные работы"
             rows={works}
             setRows={setWorks}
-            empty={{ name: "", qty: 1, price: 0, masterId: null }}
+            empty={{ name: "", qty: 1, price: 0, masterId: null, warrantyDays: null }}
+            warranty
             services={ref?.services ?? []}
             serviceCategories={ref?.serviceCategories ?? []}
             // Чья работа — для зарплаты: два мастера на заказе делят деньги по
@@ -1337,6 +1361,8 @@ export default function OrderCard() {
               <Field label="Гарантия, дней">
                 <Input
                   inputMode="numeric"
+                  // Пусто — в акте гарантия по работам: самая длинная из строк (29.10.2026).
+                  placeholder={worksWarranty ? `по работам: ${worksWarranty}` : undefined}
                   value={finish.warrantyDays}
                   onChange={(e) => setFinish({ ...finish, warrantyDays: e.target.value })}
                 />

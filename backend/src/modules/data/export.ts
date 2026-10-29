@@ -223,6 +223,7 @@ export async function stockSheet(tx: Prisma.TransactionClient, ids?: string[]): 
       location: true,
       supplier: true,
       note: true,
+      warehouse: { select: { name: true } },
       balances: {
         select: { qty: true, avgCost: true, warehouse: { select: { name: true } } },
       },
@@ -246,7 +247,7 @@ export async function stockSheet(tx: Prisma.TransactionClient, ids?: string[]): 
         qty,
         main ? num(main.avgCost) : 0,
         num(i.minQty),
-        main?.warehouse?.name ?? "",
+        i.warehouse?.name ?? main?.warehouse?.name ?? "",
         i.salePrice === null ? "" : num(i.salePrice),
         i.location ?? "",
         i.supplier ?? "",
@@ -261,7 +262,7 @@ async function servicesSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   const items = await tx.service.findMany({
     orderBy: { name: "asc" },
     take: MAX_ROWS,
-    select: { name: true, price: true, note: true, isPinned: true, categoryId: true },
+    select: { name: true, price: true, note: true, isPinned: true, categoryId: true, warrantyDays: true },
   });
   // Категория — путём «Ремонт/Пайка», как категории склада в файле.
   const cats = await tx.serviceCategory.findMany({ select: { id: true, parentId: true, name: true } });
@@ -275,7 +276,7 @@ async function servicesSheet(tx: Prisma.TransactionClient): Promise<SheetData> {
   return {
     name: def.sheet,
     columns: def.columns.map((c) => ({ title: c.title, width: c.width })),
-    rows: items.map((s) => [s.name, num(s.price), s.note, s.isPinned ? "да" : "", pathOf(s.categoryId) || null]),
+    rows: items.map((s) => [s.name, num(s.price), s.note, s.isPinned ? "да" : "", pathOf(s.categoryId) || null, s.warrantyDays ?? null]),
   };
 }
 
