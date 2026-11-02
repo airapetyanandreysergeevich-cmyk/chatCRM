@@ -2,9 +2,10 @@ import { api } from "./api";
 
 /** Продажа со склада без ремонта (backend/src/modules/sales). */
 
-export type SalePayment = "CASH" | "CARD" | "TRANSFER";
+/** CASH, CARD, TRANSFER (старые продажи) или id своего способа оплаты (03.11.2026). */
+export type SalePayment = string;
 
-export const PAYMENT_LABEL: Record<SalePayment, string> = {
+export const PAYMENT_LABEL: Record<string, string> = {
   CASH: "Наличные",
   CARD: "Карта",
   TRANSFER: "Перевод",
@@ -26,6 +27,10 @@ export interface Sale {
   number: string;
   createdAt: string;
   payment: SalePayment;
+  /** Подпись способа: свой способ — его названием. */
+  paymentLabel?: string;
+  /** Как в чеке: наличный или безналичный расчёт. */
+  paymentAct?: "CASH" | "CARD";
   subtotal: number;
   discount: number;
   total: number;
@@ -54,6 +59,7 @@ export interface NewSale {
   items: Array<{ stockItemId: string; qty: number; price: number }>;
   discount: number;
   payment: SalePayment;
+  recipientId?: string | null;
   customerId?: string | null;
   warrantyDays?: number | null;
   note?: string;

@@ -115,6 +115,9 @@ export const api = {
     request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T,>(path: string, body: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   put: <T,>(path: string, body: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
+  /** Файл телом запроса, со своим типом (бланк .xlsx, 03.11.2026). */
+  raw: <T,>(path: string, method: "POST" | "PUT", body: Blob, contentType: string) =>
+    request<T>(path, { method, body, headers: { "Content-Type": contentType } }),
   /** Загрузка файлов: тело — FormData, Content-Type ставит сам браузер вместе с границей. */
   upload: <T,>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   /**

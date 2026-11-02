@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { blanksApi, type Blank, type RenderedSheet } from "../lib/blanks";
+import { ExcelPages } from "../components/ExcelSheet";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -29,6 +31,25 @@ export default function SalePrint() {
   const [sale, setSale] = useState<Sale | null>(null);
   const [forms, setForms] = useState<PrintForms | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Свои бланки из Excel для продажи (03.11.2026): ?doc=x:<id>.
+  const asked = params.get("doc");
+  const custom = asked?.startsWith("x:") ? asked.slice(2) : null;
+  const [blanks, setBlanks] = useState<Blank[]>([]);
+  const [sheets, setSheets] = useState<RenderedSheet[] | null>(null);
+  useEffect(() => {
+    blanksApi
+      .list("sale")
+      .then((r) => setBlanks(r.items))
+      .catch(() => setBlanks([]));
+  }, []);
+  useEffect(() => {
+    setSheets(null);
+    if (!custom) return;
+    blanksApi
+      .render(custom, { saleId: id })
+      .then((r) => setSheets(r.sheets))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Бланк не заполнился"));
+  }, [custom, id]);
 
   useEffect(() => {
     salesApi
@@ -66,10 +87,43 @@ export default function SalePrint() {
         >
           ‹ Назад
         </button>
-        <button type="button" onClick={() => window.print()} className="rounded-[10px] bg-white px-5 py-2 text-[13.5px] font-bold text-black hover:bg-white/90">
-          Печать
-        </button>
+        {blanks.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {[{ id: null as string | null, name: "Чек" }, ...blanks].map((b) => (
+              <button
+                key={b.id ?? "receipt"}
+                type="button"
+                onClick={() => navigate(`/sales/${id}/print${b.id ? `?doc=x:${b.id}` : ""}`)}
+                data-print-blank={b.name}
+                className={
+                  "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
+                  (custom === b.id ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+                }
+              >
+                {b.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          {custom && (
+            <button
+              type="button"
+              onClick={() => void blanksApi.fill(custom, { saleId: id }).catch((err) => setError(err instanceof ApiError ? err.message : "Не скачалось"))}
+              className="rounded-[10px] border border-white/25 px-4 py-2 text-[13.5px] font-semibold hover:bg-white/10"
+            >
+              Скачать .xlsx
+            </button>
+          )}
+          <button type="button" onClick={() => window.print()} className="rounded-[10px] bg-white px-5 py-2 text-[13.5px] font-bold text-black hover:bg-white/90">
+            Печать
+          </button>
+        </div>
       </div>
+
+      {custom ? (
+        sheets ? <ExcelPages sheets={sheets} /> : <div className="p-8 text-[14px] text-white">Заполняем бланк…</div>
+      ) : (
 
       <div
         className="mx-auto my-6 w-[210mm] max-w-full overflow-hidden bg-white p-[12mm] text-black shadow-lg print:my-0 print:w-auto print:max-w-none print:p-[6mm] print:shadow-none"
@@ -140,7 +194,10 @@ export default function SalePrint() {
             </div>
             <div className="flex justify-between py-0.5 text-[11.5px]">
               <dt className="text-black/60">Оплата</dt>
-              <dd>{PAYMENT_LABEL[sale.payment]}</dd>
+              <dd>
+                {sale.paymentLabel ?? PAYMENT_LABEL[sale.payment]}
+                {sale.paymentAct ? ` (${sale.paymentAct === "CASH" ? "наличный" : "безналичный"} расчёт)` : ""}
+              </dd>
             </div>
           </dl>
         </div>
@@ -175,6 +232,7 @@ export default function SalePrint() {
         </div>
         {forms.footer && <p className="mt-6 text-center text-[10.5px] text-black/55">{forms.footer}</p>}
       </div>
+      )}
     </div>
   );
 }

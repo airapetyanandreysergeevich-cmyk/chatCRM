@@ -54,6 +54,12 @@ export interface SalaryRow {
   /** Оклад, премия, штраф. */
   bonus: number;
   paid: number;
+  /** Из «получено» — деньги клиентов сразу сотруднику (свои способы оплаты, 03.11.2026). */
+  clientPaid: number;
+  /** Из них ещё не подтверждены получателем. */
+  pending: number;
+  /** «Не получал» — в «получено» не входит, пока не разберутся. */
+  disputed: number;
   end: number;
   orders: number;
 }
@@ -224,7 +230,7 @@ export async function computeMonth(
   const closedHere = await tx.salaryMonth.findFirst({ where: { month } });
   const [entries, payouts, closedMonths] = await Promise.all([
     tx.salaryEntry.findMany({ select: { userId: true, month: true, kind: true, amount: true } }),
-    tx.salaryPayout.findMany({ where: { deletedAt: null }, select: { userId: true, month: true, amount: true } }),
+    tx.salaryPayout.findMany({ where: { deletedAt: null }, select: { userId: true, month: true, amount: true, source: true, status: true } }),
     tx.salaryMonth.findMany({ select: { month: true, snapshot: true }, orderBy: { month: "asc" } }),
   ]);
 
@@ -292,7 +298,20 @@ export async function computeMonth(
     if (e.kind === "OPENING") openings.set(e.userId, [...(openings.get(e.userId) ?? []), { month: e.month, amount: num(e.amount) }]);
     else add(bonusBy, key(e.userId, e.month), num(e.amount));
   }
-  for (const p of payouts) add(paidBy, key(p.userId, p.month), num(p.amount));
+  const clientBy = new Map<string, number>();
+  const pendingBy = new Map<string, number>();
+  const disputedBy = new Map<string, number>();
+  for (const p of payouts) {
+    const k = key(p.userId, p.month);
+    // «Не получал» — не получено, пока владелец не разберётся.
+    if (p.status === "DISPUTED") {
+      add(disputedBy, k, num(p.amount));
+      continue;
+    }
+    add(paidBy, k, num(p.amount));
+    if (p.source === "CLIENT") add(clientBy, k, num(p.amount));
+    if (p.status === "PENDING") add(pendingBy, k, num(p.amount));
+  }
 
   // Остаток на начало: от последней опоры — закрытого месяца или введённого
   // руками остатка — плюс движение за месяцы между опорой и этим месяцем.
@@ -348,6 +367,9 @@ export async function computeMonth(
       accrued,
       bonus,
       paid,
+      clientPaid: round2(clientBy.get(k) ?? 0),
+      pending: round2(pendingBy.get(k) ?? 0),
+      disputed: round2(disputedBy.get(k) ?? 0),
       end: round2(start + accrued + bonus - paid),
       orders: orders.length,
     });

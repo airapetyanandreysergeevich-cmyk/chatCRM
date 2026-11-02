@@ -12,6 +12,7 @@ import {
   type SalePayment,
 } from "../lib/salesApi";
 import { stockApi, type StockItem } from "../lib/workshop";
+import { usePayMethods } from "../lib/payMethods";
 import { Modal } from "./Modal";
 import { Banner, Button, SearchInput, Select } from "./ui";
 import { IconCard, IconCart, IconCash, IconClose, IconPerson, IconPrint, IconTransfer } from "./icons";
@@ -35,10 +36,11 @@ const toNum = (s: string) => {
 };
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
+// «Перевод» убран 03.11.2026: деньги молча уходили в отдельную кассу «Переводы».
+// Вместо него — свои способы мастерской («Настройки → Способы оплаты»).
 const PAY: Array<{ v: SalePayment; icon: ReactNode }> = [
   { v: "CASH", icon: <IconCash /> },
   { v: "CARD", icon: <IconCard /> },
-  { v: "TRANSFER", icon: <IconTransfer /> },
 ];
 
 export function SaleDialog({
@@ -62,6 +64,9 @@ export function SaleDialog({
   const [hl, setHl] = useState(0);
   const [discount, setDiscount] = useState("");
   const [payment, setPayment] = useState<SalePayment>("CASH");
+  const [recipientId, setRecipientId] = useState<string | null>(null);
+  const own = usePayMethods();
+  const ownChosen = own.find((m) => m.id === payment) ?? null;
   const [warranty, setWarranty] = useState<number>(() => rememberedWarranty());
   const [customer, setCustomer] = useState<CustomerHit | null>(null);
   const [picking, setPicking] = useState(false);
@@ -140,6 +145,7 @@ export function SaleDialog({
         items: lines.map((l) => ({ stockItemId: l.item.id, qty: l.qty, price: r2(toNum(l.price)) })),
         discount: discountValue,
         payment,
+        recipientId: ownChosen ? recipientId : null,
         customerId: customer?.id ?? null,
         warrantyDays: warranty || null,
       });
@@ -376,14 +382,14 @@ export function SaleDialog({
 
           <div>
             <div className="mb-1.5 text-[11px] font-bold uppercase tracking-[.12em] text-ink-dim">Оплата</div>
-            <div role="radiogroup" aria-label="Оплата" className="grid grid-cols-3 gap-1 rounded-field border border-line bg-surface-input p-[3px]">
-              {PAY.map((p) => (
+            <div role="radiogroup" aria-label="Оплата" className="grid grid-cols-2 gap-1 rounded-field border border-line bg-surface-input p-[3px] sm:grid-cols-3">
+              {[...PAY, ...own.map((m) => ({ v: m.id, icon: <IconTransfer /> }))].map((p) => (
                 <button
                   key={p.v}
                   type="button"
                   role="radio"
                   aria-checked={payment === p.v}
-                  onClick={() => setPayment(p.v)}
+                  onClick={() => (setPayment(p.v), setRecipientId(null))}
                   data-sale-pay={p.v}
                   className={cx(
                     "flex h-9 items-center justify-center gap-1.5 rounded-[9px] text-[13px] font-semibold [&>svg]:h-4 [&>svg]:w-4",
@@ -391,10 +397,20 @@ export function SaleDialog({
                   )}
                 >
                   {p.icon}
-                  {PAYMENT_LABEL[p.v]}
+                  <span className="truncate">{PAYMENT_LABEL[p.v] ?? own.find((m) => m.id === p.v)?.name ?? "Свой способ"}</span>
                 </button>
               ))}
             </div>
+            {ownChosen && ownChosen.recipients.length > 0 && (
+              <Select className="mt-1.5" value={recipientId ?? ""} onChange={(e) => setRecipientId(e.target.value || null)} aria-label="Кому деньги" data-sale-recipient>
+                <option value="">Деньги — в кассу</option>
+                {ownChosen.recipients.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    💵 Деньги у сотрудника: {r.name}
+                  </option>
+                ))}
+              </Select>
+            )}
           </div>
 
           <label className="block">

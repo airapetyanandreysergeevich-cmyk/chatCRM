@@ -19,10 +19,19 @@ export interface ApprovalConfig {
   replyNo: boolean;
 }
 
+/** Свой шаблон мастерской (03.11.2026) — в меню SMS заказа. */
+export interface CustomTemplate {
+  id: string;
+  name: string;
+  text: string;
+  on: boolean;
+}
+
 export interface SmsSettings {
   enabled: boolean;
   onReady: OnReady;
   templates: Record<TemplateKey, string>;
+  custom: CustomTemplate[];
   approval: ApprovalConfig;
   defaults: Record<TemplateKey, string>;
   placeholders: string[];
@@ -87,6 +96,8 @@ export interface SmsPreview {
   phone: string | null;
   customer: string | null;
   templates: { ready: string; approval: string };
+  /** Свои шаблоны — уже с подстановками. */
+  custom?: Array<{ id: string; name: string; text: string }>;
   approval: { enabled: boolean; cost: number; hasWorks: boolean };
 }
 
@@ -142,7 +153,7 @@ export const forgetSmsStatus = () => {
 
 export const smsApi = {
   settings: () => api.get<SmsSettings>("/sms/settings"),
-  save: (body: { enabled: boolean; onReady: OnReady; templates: Partial<Record<TemplateKey, string>>; approval: ApprovalConfig }) =>
+  save: (body: { enabled: boolean; onReady: OnReady; templates: Partial<Record<TemplateKey, string>>; custom?: CustomTemplate[]; approval: ApprovalConfig }) =>
     api.put<SmsSettings>("/sms/settings", body),
   test: (phone: string) => api.post<{ id: string; status: SmsStatus; error: string | null }>("/sms/test", { phone }),
   status: () => api.get<SmsStatusInfo>("/sms/status"),
@@ -151,7 +162,7 @@ export const smsApi = {
   unpair: (id: string) => api.del<{ ok: true }>(`/sms/phones/${id}`),
   order: (orderId: string) => api.get<OrderSmsData>(`/sms/order/${orderId}`),
   preview: (orderId: string, kind: SmsKind) => api.get<SmsPreview>(`/sms/order/${orderId}/preview?kind=${kind}`),
-  send: (orderId: string, text: string, kind: "ready" | "free") =>
+  send: (orderId: string, text: string, kind: "ready" | "free" | "custom") =>
     api.post<{ message: SmsMessage }>(`/sms/order/${orderId}`, { text, kind }),
   ask: (orderId: string, text: string) => api.post<{ ok: true }>(`/sms/order/${orderId}/approval`, { text }),
   decide: (orderId: string, answer: "yes" | "no") => api.post<{ ok: true }>(`/sms/order/${orderId}/approval/decide`, { answer }),

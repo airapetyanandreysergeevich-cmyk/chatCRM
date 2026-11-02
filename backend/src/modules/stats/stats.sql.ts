@@ -385,6 +385,55 @@ export async function payKinds(c: Ctx, r: Range, gran: Gran | "all", withdraw: s
   return rows.map((x) => ({ b: x.b, kind: x.kind, v: n(x.v) }));
 }
 
+/**
+ * Приход по способам оплаты (03.11.2026): свои способы мастерской своими
+ * названиями, старые движения — «Наличные» / «Безнал» / «Перевод». Без выемки.
+ */
+export async function payMethods(c: Ctx, r: Range, withdraw: string) {
+  const rows = await q<{ label: string | null; method: string | null; act: string | null; v: string | null }>(c, Prisma.sql`
+    SELECT pm.name AS label, t.method AS method, coalesce(pm."actKind", CASE WHEN coalesce(t.method, cr.kind) = 'CASH' THEN 'CASH' ELSE 'CARD' END) AS act,
+           sum(t.amount) AS v
+    FROM "Transaction" t
+    JOIN "CashRegister" cr ON cr.id = t."cashRegisterId"
+    LEFT JOIN "PayMethod" pm ON pm.id = t."payMethodId"
+    LEFT JOIN "TransactionCategory" k ON k.id = t."categoryId"
+    WHERE t."tenantId" = ${c.tenantId} AND t."deletedAt" IS NULL AND t.direction = 'IN'
+      AND k.name IS DISTINCT FROM ${withdraw} AND ${within(c, 't."createdAt"', r)}
+    GROUP BY 1, 2, 3 ORDER BY 4 DESC`);
+  const names: Record<string, string> = { CASH: "Наличные", CARD: "Безнал", TRANSFER: "Перевод" };
+  const out = new Map<string, { label: string; act: "CASH" | "CARD"; v: number }>();
+  for (const x of rows) {
+    const act = x.act === "CASH" ? "CASH" : "CARD";
+    const label = x.label ?? names[x.method ?? ""] ?? (act === "CASH" ? "Наличные" : "Безнал");
+    const cur = out.get(label) ?? { label, act, v: 0 };
+    cur.v += n(x.v);
+    out.set(label, cur);
+  }
+  return [...out.values()].sort((a, b) => b.v - a.v);
+}
+
+/** Деньги клиентов сразу сотрудникам: по каждому — всего, ✅ подтверждено, ⏳ ждёт, ⚠ «не получал». */
+export async function moneyToStaff(c: Ctx, r: Range) {
+  const rows = await q<{ id: string; name: string | null; status: string; v: string | null; k: bigint }>(c, Prisma.sql`
+    SELECT p."userId" AS id, u."fullName" AS name, p.status, sum(p.amount) AS v, count(*) AS k
+    FROM "SalaryPayout" p LEFT JOIN "User" u ON u.id = p."userId"
+    WHERE p."tenantId" = ${c.tenantId} AND p."deletedAt" IS NULL AND p.source = 'CLIENT'
+      AND ${within(c, 'p."paidAt"', r)}
+    GROUP BY 1, 2, 3`);
+  const out = new Map<string, { userId: string; name: string; total: number; confirmed: number; pending: number; disputed: number; count: number }>();
+  for (const x of rows) {
+    const cur = out.get(x.id) ?? { userId: x.id, name: x.name ?? "Сотрудник", total: 0, confirmed: 0, pending: 0, disputed: 0, count: 0 };
+    const v = n(x.v);
+    cur.total += v;
+    cur.count += n(x.k);
+    if (x.status === "CONFIRMED") cur.confirmed += v;
+    else if (x.status === "DISPUTED") cur.disputed += v;
+    else cur.pending += v;
+    out.set(x.id, cur);
+  }
+  return [...out.values()].sort((a, b) => b.total - a.total);
+}
+
 /** На что уходят деньги: расход по статьям, без выемки. */
 export async function expenseByCategory(c: Ctx, r: Range, withdraw: string, limit: number) {
   const rows = await q<{ label: string | null; v: string | null }>(c, Prisma.sql`

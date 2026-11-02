@@ -149,6 +149,10 @@ export interface MoneyStats {
   tiles: { cur: MoneyTiles; prev: MoneyTiles | null; withdrawn: number };
   series: { income: number[]; expense: number[] };
   pay: { kinds: Array<{ kind: "CASH" | "ACQUIRING" | "BANK"; total: number; values: number[] }> };
+  /** Приход по способам оплаты своими названиями (03.11.2026). */
+  methods?: Array<{ label: string; act: "CASH" | "CARD"; v: number }>;
+  /** Деньги клиентов сразу сотрудникам: ✅ подтверждено, ⏳ ждёт, ⚠ «не получал». */
+  toStaff?: Array<{ userId: string; name: string; total: number; confirmed: number; pending: number; disputed: number; count: number }>;
   expenses: Array<{ label: string; v: number }>;
   checkByKind: Array<{ label: string; n: number; avg: number }>;
   worksParts: { works: number; parts: number; margin: { sale: number; cost: number } | null };

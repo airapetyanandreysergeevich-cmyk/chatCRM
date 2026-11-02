@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { money } from "../lib/orders";
-import type { Service } from "../lib/services";
 import { rootColor } from "./StockTree";
 import { IconChevronDown, IconClose, IconFolder, IconSearch } from "./icons";
 import { Button } from "./ui";
@@ -17,6 +16,36 @@ import { Button } from "./ui";
  * отметить, Enter — выбрать (ничего не отмечено — выбрать подсвеченную).
  * На компьютере панель у кнопки, на телефоне — снизу экрана.
  */
+
+/**
+ * Что выбирают: услуги прайса или (03.11.2026, «Со склада») позиции склада.
+ * Услуга подходит как есть; позицию склада приводят к этому виду.
+ */
+export interface PickerItem {
+  id: string;
+  name: string;
+  price: number;
+  note?: string | null | undefined;
+  isPinned?: boolean;
+  categoryId?: string | null;
+}
+
+/** Подписи панели: у склада свои слова. */
+export interface PickerText {
+  title: string;
+  search: string;
+  all: string;
+  none: string;
+  empty: string;
+}
+
+const SERVICE_TEXT: PickerText = {
+  title: "Услуги из прайса",
+  search: "Найти услугу",
+  all: "Все услуги",
+  none: "Такой услуги в прайсе нет",
+  empty: "Прайс пуст — заполните «Настройки → Услуги»",
+};
 
 export interface PickerCategory {
   id: string;
@@ -34,32 +63,43 @@ interface Group {
   depth: number;
   color: string;
   /** Услуги прямо в категории. */
-  services: Service[];
+  services: PickerItem[];
   /** Вместе с подкатегориями — для числа у заголовка. */
   total: number;
   parentId: string | null;
 }
 
-export function ServicePicker({
+export function ServicePicker<T extends PickerItem>({
   services,
   categories,
   anchor,
   onClose,
   onPick,
+  text = SERVICE_TEXT,
+  subOf,
+  disabledOf,
+  openKey = OPEN_KEY,
 }: {
-  services: Service[];
+  services: T[];
   categories: PickerCategory[];
   /** Кнопка, у которой открылась панель (на компьютере панель встаёт у неё). */
   anchor: HTMLElement | null;
   onClose: () => void;
-  onPick: (picked: Service[]) => void;
+  onPick: (picked: T[]) => void;
+  text?: PickerText;
+  /** Строка под названием: артикул, остаток, место. */
+  subOf?: (s: T) => string | null;
+  /** Почему нельзя выбрать (например, «нет на складе») — строка видна, но не отмечается. */
+  disabledOf?: (s: T) => string | null;
+  /** Где помнить раскрытые категории — у склада свои. */
+  openKey?: string;
 }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<string[]>([]);
   const [hi, setHi] = useState(0);
   const [open, setOpen] = useState<Set<string>>(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]") as string[]);
+      return new Set(JSON.parse(localStorage.getItem(openKey) ?? "[]") as string[]);
     } catch {
       return new Set();
     }
@@ -76,7 +116,7 @@ export function ServicePicker({
     for (const c of categories) byParent.set(c.parentId, [...(byParent.get(c.parentId) ?? []), c]);
     for (const l of byParent.values()) l.sort((a, b) => a.name.localeCompare(b.name, "ru"));
     const known = new Set(categories.map((c) => c.id));
-    const direct = new Map<string, Service[]>();
+    const direct = new Map<string, PickerItem[]>();
     for (const s of services) {
       const k = s.categoryId && known.has(s.categoryId) ? s.categoryId : NONE;
       direct.set(k, [...(direct.get(k) ?? []), s]);
@@ -96,12 +136,12 @@ export function ServicePicker({
     };
     walk(null, 0, null);
     const none = direct.get(NONE) ?? [];
-    if (none.length) out.push({ id: NONE, name: categories.length ? "Без категории" : "Все услуги", depth: 0, color: "#8A93A6", services: none, total: none.length, parentId: null });
+    if (none.length) out.push({ id: NONE, name: categories.length ? "Без категории" : text.all, depth: 0, color: "#8A93A6", services: none, total: none.length, parentId: null });
     return out.filter((g) => g.total > 0);
   }, [services, categories]);
 
   const needle = q.trim().toLowerCase();
-  const hit = (s: Service) => !needle || s.name.toLowerCase().includes(needle) || (s.note ?? "").toLowerCase().includes(needle);
+  const hit = (s: PickerItem) => !needle || s.name.toLowerCase().includes(needle) || (s.note ?? "").toLowerCase().includes(needle);
   const byId = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   /** Видна ли группа: все её предки раскрыты (при поиске — всё раскрыто). */
   const visibleGroup = (g: Group) => {
@@ -117,7 +157,7 @@ export function ServicePicker({
   // подкатегории, потом услуги.
   const kidsOf = (id: string | null) => shownGroups.filter((x) => x.parentId === id && (id !== null || x.depth === 0));
   /** Услуги по порядку на экране — для стрелок. */
-  const flatOf = (g: Group): Service[] => (isOpen(g) ? [...kidsOf(g.id).flatMap(flatOf), ...g.services.filter(hit)] : []);
+  const flatOf = (g: Group): PickerItem[] => (isOpen(g) ? [...kidsOf(g.id).flatMap(flatOf), ...g.services.filter(hit)] : []);
   const flat = kidsOf(null).flatMap(flatOf);
   const pinned = services.filter((s) => s.isPinned).slice(0, 8);
 
@@ -127,20 +167,24 @@ export function ServicePicker({
       if (n.has(id)) n.delete(id);
       else n.add(id);
       try {
-        localStorage.setItem(OPEN_KEY, JSON.stringify([...n]));
+        localStorage.setItem(openKey, JSON.stringify([...n]));
       } catch {
         /* не запомнили — не беда */
       }
       return n;
     });
-  const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const picked = sel.map((id) => services.find((s) => s.id === id)).filter((s): s is Service => !!s);
+  const blocked = (id: string) => {
+    const it = services.find((s) => s.id === id);
+    return !!(it && disabledOf?.(it));
+  };
+  const toggle = (id: string) => !blocked(id) && setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const picked = sel.map((id) => services.find((s) => s.id === id)).filter((s): s is T => !!s);
   const sum = picked.reduce((n, s) => n + s.price, 0);
 
   const confirm = () => {
     if (picked.length) return onPick(picked);
-    const h = flat[hi];
-    if (h) onPick([h]);
+    const h = flat[hi] as T | undefined;
+    if (h && !disabledOf?.(h)) onPick([h]);
   };
 
   useEffect(() => setHi(0), [needle]);
@@ -267,8 +311,13 @@ export function ServicePicker({
                     </svg>
                   )}
                 </span>
-                <span className="min-w-0 flex-1 truncate" title={s.note ?? undefined}>
-                  {s.name}
+                <span className="min-w-0 flex-1" title={s.note ?? undefined}>
+                  <span className="block truncate">{s.name}</span>
+                  {(subOf || disabledOf) && (
+                    <span className={"block truncate text-[11.5px] " + (disabledOf?.(s as T) ? "text-state-off" : "text-ink-dim")}>
+                      {disabledOf?.(s as T) ?? subOf?.(s as T)}
+                    </span>
+                  )}
                 </span>
                 <span className="shrink-0 font-semibold tabular-nums text-ink-muted">{s.price ? money(s.price) : "—"}</span>
               </button>
@@ -281,8 +330,9 @@ export function ServicePicker({
     <div
       ref={box}
       role="dialog"
-      aria-label="Услуги из прайса"
+      aria-label={text.title}
       data-service-picker
+      data-picker-kind={text === SERVICE_TEXT ? "services" : "stock"}
       onKeyDown={onKey}
       className={
         sheet
@@ -299,8 +349,8 @@ export function ServicePicker({
             ref={input}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Найти услугу"
-            aria-label="Найти услугу"
+            placeholder={text.search}
+            aria-label={text.search}
             className="h-10 min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ink-dim"
             data-picker-search
           />
@@ -342,7 +392,7 @@ export function ServicePicker({
         )}
 
         {kidsOf(null).map(renderGroup)}
-        {!shownGroups.length && <p className="px-3 py-4 text-center text-[13px] text-ink-dim">{needle ? "Такой услуги в прайсе нет" : "Прайс пуст — заполните «Настройки → Услуги»"}</p>}
+        {!shownGroups.length && <p className="px-3 py-4 text-center text-[13px] text-ink-dim">{needle ? text.none : text.empty}</p>}
       </div>
 
       <div className="flex items-center gap-2 border-t border-line p-2.5 pb-[max(10px,env(safe-area-inset-bottom))]">

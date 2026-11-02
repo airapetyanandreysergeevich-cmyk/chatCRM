@@ -13,6 +13,12 @@ export interface SalaryRow {
   accrued: number;
   bonus: number;
   paid: number;
+  /** Деньги клиентов сразу сотруднику (03.11.2026) — из «получено». */
+  clientPaid?: number;
+  /** Из них не подтверждены. */
+  pending?: number;
+  /** «Не получал» — в «получено» не входит. */
+  disputed?: number;
   end: number;
   orders: number;
 }
@@ -51,7 +57,16 @@ export interface SalaryMonth {
 
 export interface SalaryRecords {
   entries: Array<{ id: string; kind: "OPENING" | "BONUS"; amount: number; comment: string | null; createdAt: string; by: string | null }>;
-  payouts: Array<{ id: string; amount: number; paidAt: string; comment: string | null; by: string | null }>;
+  payouts: Array<{
+    id: string;
+    amount: number;
+    paidAt: string;
+    comment: string | null;
+    by: string | null;
+    source?: string | null;
+    status?: "CONFIRMED" | "PENDING" | "DISPUTED";
+    order?: { id: string; number: string | null } | null;
+  }>;
 }
 
 export const salaryApi = {

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { PayPicker } from "./PayPicker";
+import { usePayMethods, type PayChoice } from "../lib/payMethods";
 import { Modal } from "./Modal";
 import { Banner, Button, Field, Input, SectionLabel, Select } from "./ui";
-import { debtApi, type CustomerDebt, type PaidBy } from "../lib/debt";
+import { debtApi, type CustomerDebt } from "../lib/debt";
 import { api } from "../lib/api";
 import { money } from "../lib/orders";
 import { formatDate } from "../lib/format";
@@ -110,7 +112,8 @@ function PayModal({
 }) {
   const [orderId, setOrderId] = useState(debt.orders[0]?.orderId ?? "");
   const single = debt.orders.length === 1;
-  const [method, setMethod] = useState<PaidBy>("CASH");
+  const own = usePayMethods();
+  const [choice, setChoice] = useState<PayChoice>({ method: "CASH", recipientId: null });
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -126,7 +129,8 @@ function PayModal({
     try {
       await debtApi.pay({
         orderId: chosen.orderId,
-        method,
+        method: choice.method,
+        recipientId: choice.recipientId,
         ...(full ? {} : { amount: part }),
       });
       await onDone();
@@ -166,22 +170,7 @@ function PayModal({
         </div>
 
         <Field label="Чем платит">
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant={method === "CASH" ? "primary" : "secondary"}
-              onClick={() => setMethod("CASH")}
-            >
-              Наличные
-            </Button>
-            <Button
-              type="button"
-              variant={method === "CARD" ? "primary" : "secondary"}
-              onClick={() => setMethod("CARD")}
-            >
-              Безнал
-            </Button>
-          </div>
+          <PayPicker value={choice} onChange={setChoice} own={own} columns={2} />
         </Field>
 
         <Field

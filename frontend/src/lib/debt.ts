@@ -45,6 +45,6 @@ export interface OrderBalance {
 export const debtApi = {
   balance: (orderId: string) => api.get<OrderBalance>(`/finance/order/${orderId}`),
   /** Без суммы гасится весь долг заказа. */
-  pay: (body: { orderId: string; amount?: number; method: PaidBy }) =>
+  pay: (body: { orderId: string; amount?: number; method: string; recipientId?: string | null }) =>
     api.post<{ paid: number; left: number }>("/finance/debt/pay", body),
 };

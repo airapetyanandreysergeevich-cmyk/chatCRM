@@ -969,6 +969,45 @@ function MoneyTab({ range, name }: { range: Range; name: string }) {
           />
         </ChartCard>
 
+        {!!d.methods?.length && (
+          <ChartCard
+            className="col-span-12 lg:col-span-6"
+            title="Способы оплаты"
+            hint="приход по способам, в скобках — как в акте"
+            table={() => ({ cols: ["Способ", "Как в акте", "Сумма"], rows: d.methods!.map((x) => [x.label, x.act === "CASH" ? "наличный" : "безналичный", rub(x.v)]) })}
+          >
+            <div data-stats-methods>
+              <HBars rows={d.methods.map((x) => ({ label: `${x.label} (${x.act === "CASH" ? "нал." : "безнал."})`, n: x.v }))} fmt={rubShort} unit="Сумма" />
+            </div>
+          </ChartCard>
+        )}
+
+        {!!d.toStaff?.length && (
+          <ChartCard
+            className="col-span-12 lg:col-span-6"
+            title="Деньги клиентов у сотрудников"
+            hint="оплаты, принятые сразу на сотрудника: ✅ подтвердил, ⏳ ждёт, ⚠ не получал"
+            table={() => ({
+              cols: ["Сотрудник", "Оплат", "Всего", "✅ Подтверждено", "⏳ Ждёт", "⚠ Не получал"],
+              rows: d.toStaff!.map((x) => [x.name, num(x.count), rub(x.total), rub(x.confirmed), rub(x.pending), rub(x.disputed)]),
+            })}
+          >
+            <ul className="space-y-1.5" data-stats-to-staff>
+              {d.toStaff.map((x) => (
+                <li key={x.userId} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-field bg-surface-raised px-3 py-2 text-[13px]">
+                  <span className="font-semibold">{x.name}</span>
+                  <span className="tabular-nums">
+                    <b>{rub(x.total)}</b>
+                    <span className="ml-2 text-state-done">✅ {rub(x.confirmed)}</span>
+                    {x.pending > 0 && <span className="ml-2 text-ink-muted">⏳ {rub(x.pending)}</span>}
+                    {x.disputed > 0 && <span className="ml-2 text-state-off">⚠ {rub(x.disputed)}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </ChartCard>
+        )}
+
         <ChartCard
           className="col-span-12 xl:col-span-5"
           title="На что уходят деньги"

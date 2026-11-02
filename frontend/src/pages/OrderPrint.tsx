@@ -6,6 +6,8 @@ import { ordersApi, type Order } from "../lib/orders";
 import { printFormsApi, type PrintForms } from "../lib/printForms";
 import { PrintSheet, type Doc } from "../components/PrintSheet";
 import { isStationPage, STATION_FAILED, STATION_READY } from "../lib/printing";
+import { blanksApi, type Blank, type RenderedSheet } from "../lib/blanks";
+import { ExcelPages } from "../components/ExcelSheet";
 
 /**
  * Печатные бланки: квитанция о приёме и акт выполненных работ.
@@ -35,9 +37,29 @@ export default function OrderPrint() {
 
   const asked = params.get("doc");
   const doc: Doc = asked === "act" || asked === "extra" ? asked : "intake";
+  // Свой бланк из Excel (03.11.2026): ?doc=x:<id>.
+  const custom = asked?.startsWith("x:") ? asked.slice(2) : null;
   const [order, setOrder] = useState<Order | null>(null);
   const [forms, setForms] = useState<PrintForms | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [blanks, setBlanks] = useState<Blank[]>([]);
+  const [sheets, setSheets] = useState<RenderedSheet[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    blanksApi
+      .list("order")
+      .then((r) => setBlanks(r.items))
+      .catch(() => setBlanks([]));
+  }, []);
+  useEffect(() => {
+    setSheets(null);
+    if (!custom) return;
+    blanksApi
+      .render(custom, { orderId: id })
+      .then((r) => setSheets(r.sheets))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Бланк не заполнился"));
+  }, [custom, id]);
 
   useEffect(() => {
     ordersApi
@@ -61,7 +83,7 @@ export default function OrderPrint() {
   // Бланк открыт программой FineCRM для печати без окна: когда он
   // дорисован, говорим ей об этом заголовком страницы (desktop/src/printing.js).
   const station = isStationPage();
-  const ready = !!order && !!forms;
+  const ready = !!order && !!forms && (!custom || !!sheets);
   useEffect(() => {
     if (!station) return;
     if (error) {
@@ -100,7 +122,7 @@ export default function OrderPrint() {
             onClick={() => navigate(`/orders/${id}/print?doc=intake`)}
             className={
               "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-              (doc === "intake" ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              (doc === "intake" && !custom ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
             }
           >
             Квитанция
@@ -110,34 +132,75 @@ export default function OrderPrint() {
             onClick={() => navigate(`/orders/${id}/print?doc=act`)}
             className={
               "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-              (doc === "act" ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              (doc === "act" && !custom ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
             }
           >
             Акт работ
           </button>
+          {blanks.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => navigate(`/orders/${id}/print?doc=x:${b.id}`)}
+              data-print-blank={b.name}
+              className={
+                "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
+                (custom === b.id ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              }
+            >
+              {b.name}
+            </button>
+          ))}
           {order.extra && (
             <button
               type="button"
               onClick={() => navigate(`/orders/${id}/print?doc=extra`)}
               className={
                 "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-                (doc === "extra" ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+                (doc === "extra" && !custom ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
               }
             >
               Акт доплаты
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="rounded-[10px] bg-white px-5 py-2 text-[13.5px] font-bold text-black hover:bg-white/90"
-        >
-          Печать
-        </button>
+        <div className="flex gap-2">
+          {custom && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                blanksApi
+                  .fill(custom, { orderId: id })
+                  .catch((err) => setError(err instanceof ApiError ? err.message : "Не скачалось"))
+                  .finally(() => setBusy(false));
+              }}
+              className="rounded-[10px] border border-white/25 px-4 py-2 text-[13.5px] font-semibold hover:bg-white/10"
+              data-print-blank-xlsx
+            >
+              {busy ? "Готовим…" : "Скачать .xlsx"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-[10px] bg-white px-5 py-2 text-[13.5px] font-bold text-black hover:bg-white/90"
+          >
+            Печать
+          </button>
+        </div>
       </div>
 
-      <PrintSheet order={order} doc={doc} forms={forms} workshop={workshop} />
+      {custom ? (
+        sheets ? (
+          <ExcelPages sheets={sheets} />
+        ) : (
+          <div className="p-8 text-[14px] text-white">Заполняем бланк…</div>
+        )
+      ) : (
+        <PrintSheet order={order} doc={doc} forms={forms} workshop={workshop} />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { DIRECTION_LABEL, callsApi, durationText, type CallItem } from "../lib/calls";
+import { fileUrl } from "../lib/basePath";
 import { formatDateShort } from "../lib/format";
 import { IconCallIn, IconCallMissed, IconCallOut, IconDownload, IconMore, IconPause, IconPlay } from "./icons";
 import { Modal } from "./Modal";
@@ -93,25 +94,64 @@ export function CallLine({
 
 const SPEEDS = [1, 1.5, 2];
 
-function Player({ src: fresh, duration }: { src: string; duration: number }) {
+function Player({ src: given, duration }: { src: string; duration: number }) {
+  // Ссылка от сервера — «/api/files/…»: в Основу из интернета заходят через
+  // /b/<код>/, и без приставки телефон шёл за записью в облако, где её нет
+  // (Андрей, 02.11.2026: «на телефоне не проигрывается запись»).
+  const fresh = fileUrl(given);
   // История перечитывается каждые несколько секунд, и ссылка на запись каждый
-  // раз подписывается заново. Держим первую: новая ссылка оборвала бы разговор
-  // на середине. Подпись живёт час.
-  const [src] = useState(fresh);
+  // раз подписывается заново. Держим взятую: новая оборвала бы разговор на
+  // середине. Подпись живёт час — старше 50 минут или отказала, берём свежую
+  // (вкладки на телефоне висят открытыми сутками).
+  const [src, setSrc] = useState(fresh);
+  const takenAt = useRef(Date.now());
+  const latest = useRef(fresh);
+  latest.current = fresh;
+  const retried = useRef(false);
+  const wantPlay = useRef(false);
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
   const [total, setTotal] = useState(duration);
   const [speed, setSpeed] = useState(1);
   const [failed, setFailed] = useState(false);
+  // AMR и 3GP звонилок Honor/Huawei и части Xiaomi не играет ни один браузер — только скачать.
+  const ext = /\.([a-z0-9]{2,4})(?:\?|#|$)/i.exec(fresh)?.[1]?.toLowerCase() ?? "";
+  const unplayable = ext === "amr" || ext === "3gp";
+
+  /** Взять свежую ссылку и продолжить с того же места. */
+  const refresh = () => {
+    const a = audio.current;
+    if (!a || latest.current === src) return false;
+    const at = a.currentTime;
+    takenAt.current = Date.now();
+    setSrc(latest.current);
+    // После смены src браузер перечитывает запись — ставим место, когда прочтёт.
+    const resume = () => {
+      if (at > 0) a.currentTime = at;
+      a.playbackRate = speed;
+      if (wantPlay.current) void a.play().then(() => setPlaying(true), () => setFailed(true));
+      a.removeEventListener("loadedmetadata", resume);
+    };
+    a.addEventListener("loadedmetadata", resume);
+    return true;
+  };
 
   useEffect(() => {
     const a = audio.current;
     if (!a) return;
     const onTime = () => setPos(a.currentTime);
     const onMeta = () => Number.isFinite(a.duration) && a.duration > 0 && setTotal(a.duration);
-    const onEnd = () => setPlaying(false);
-    const onErr = () => (setFailed(true), setPlaying(false));
+    const onEnd = () => ((wantPlay.current = false), setPlaying(false));
+    const onErr = () => {
+      // Протухла подпись — один раз пробуем свежую ссылку, потом сдаёмся.
+      if (!retried.current) {
+        retried.current = true;
+        if (refresh()) return;
+      }
+      setFailed(true);
+      setPlaying(false);
+    };
     a.addEventListener("timeupdate", onTime);
     a.addEventListener("loadedmetadata", onMeta);
     a.addEventListener("ended", onEnd);
@@ -122,20 +162,27 @@ function Player({ src: fresh, duration }: { src: string; duration: number }) {
       a.removeEventListener("ended", onEnd);
       a.removeEventListener("error", onErr);
     };
-  }, []);
+  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = () => {
     const a = audio.current;
     if (!a) return;
     if (playing) {
+      wantPlay.current = false;
       a.pause();
       setPlaying(false);
     } else {
+      wantPlay.current = true;
+      setFailed(false);
       // Играет одна запись: остальные плееры на странице замолкают.
       document.querySelectorAll<HTMLAudioElement>("audio[data-call-audio]").forEach((x) => x !== a && x.pause());
+      if (Date.now() - takenAt.current > 50 * 60_000 && refresh()) return;
       void a.play().then(
         () => setPlaying(true),
-        () => setFailed(true)
+        () => {
+          if (!retried.current && (retried.current = true) && refresh()) return;
+          setFailed(true);
+        }
       );
     }
   };
@@ -147,6 +194,17 @@ function Player({ src: fresh, duration }: { src: string; duration: number }) {
     a.addEventListener("pause", onPause);
     return () => a.removeEventListener("pause", onPause);
   }, []);
+
+  if (unplayable) {
+    return (
+      <div className="mt-1.5 flex max-w-[460px] flex-wrap items-center gap-2 rounded-pill border border-line bg-surface-raised py-1.5 pl-3 pr-2 text-[12px] text-ink-muted" data-call-player data-call-unplayable>
+        <span className="min-w-0 flex-1">Запись в формате {ext.toUpperCase()} — браузер её не играет. Скачайте и откройте плеером.</span>
+        <a href={src} download className="flex items-center gap-1 font-semibold text-brand-ink hover:underline [&>svg]:h-3.5 [&>svg]:w-3.5">
+          <IconDownload /> Скачать
+        </a>
+      </div>
+    );
+  }
 
   const share = total > 0 ? Math.min(1, pos / total) : 0;
   return (

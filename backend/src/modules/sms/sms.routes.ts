@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import { withTenant } from "../../lib/db";
@@ -30,6 +31,7 @@ import {
   templateOf,
   type SmsSettings,
   type TemplateKey,
+  CUSTOM_MAX,
 } from "./sms";
 import { approvalStatuses, cancelApproval, decideApproval, lastApproval, startApproval } from "./sms.approval";
 
@@ -71,6 +73,7 @@ function settingsView(s: SmsSettings) {
     onReady: s.onReady,
     templates: Object.fromEntries(TEMPLATE_KEYS.map((k) => [k, templateOf(s, k)])) as Record<TemplateKey, string>,
     approval: s.approval,
+    custom: s.custom,
     defaults: DEFAULT_TEMPLATES,
     placeholders: PLACEHOLDERS,
   };
@@ -98,6 +101,18 @@ const settingsSchema = z.object({
       approvalNo: z.string().max(TEXT_MAX).optional(),
     })
     .default({}),
+  /** Свои шаблоны. Не прислали — остаются прежние (старая вкладка). */
+  custom: z
+    .array(
+      z.object({
+        id: z.string().trim().regex(/^[a-z0-9-]{1,40}$/i, "Неверный шаблон"),
+        name: z.string().trim().min(1, "Назовите шаблон").max(40, "Название — до 40 знаков"),
+        text: z.string().trim().min(1, "Пустой шаблон").max(TEXT_MAX),
+        on: z.boolean().default(true),
+      })
+    )
+    .max(CUSTOM_MAX, `Не больше ${CUSTOM_MAX} своих шаблонов`)
+    .optional(),
   approval: z
     .object({
       enabled: z.boolean().default(false),
@@ -134,6 +149,7 @@ smsRouter.put(
       const config = {
         onReady: body.onReady,
         templates: Object.fromEntries(TEMPLATE_KEYS.map((k) => [k, keep(k)])),
+        custom: (body.custom ?? prev.custom).map((t) => ({ id: t.id, name: t.name, text: t.text, on: t.on })) as unknown as Prisma.InputJsonValue,
         approval,
       };
       // Токен SemySMS больше не нужен — не держим его в базе.
@@ -316,6 +332,8 @@ smsRouter.get(
         ready: render(templateOf(settings, "ready"), facts.values),
         approval: render(templateOf(settings, "approval"), facts.values),
       },
+      // Свои шаблоны мастерской — уже с подстановками, по порядку из настроек.
+      custom: settings.custom.filter((t) => t.on).map((t) => ({ id: t.id, name: t.name, text: render(t.text, facts.values) })),
       approval: {
         enabled: approvalOn(settings),
         cost: facts.cost,
@@ -329,7 +347,7 @@ smsRouter.post(
   "/order/:id",
   ah(async (req, res) => {
     const body = z
-      .object({ text: z.string().trim().min(1, "Напишите текст").max(TEXT_MAX), kind: z.enum(["ready", "free"]).default("free") })
+      .object({ text: z.string().trim().min(1, "Напишите текст").max(TEXT_MAX), kind: z.enum(["ready", "free", "custom"]).default("free") })
       .parse(req.body);
     if (!canSendSms(req)) throw forbidden("Отправлять SMS клиентам вам нельзя");
     const { tenantId, facts, settings } = await orderContext(req);

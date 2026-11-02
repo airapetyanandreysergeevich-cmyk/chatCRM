@@ -304,6 +304,14 @@ export function PrintSheet({
     doc === "extra" ? EXTRA_TITLE : doc === "intake" && order.kind === "WARRANTY" ? forms.warrantyTitle : texts.title;
   const extra = order.extra ?? null;
   const layout = doc === "intake" ? forms.layout.intake : forms.layout.act;
+  // Вид расчёта в акте (03.11.2026): своему способу владелец задал «наличный» или «безналичный».
+  const paidLine = (() => {
+    const byAct = new Map<string, number>();
+    for (const p of order.payments ?? []) byAct.set(p.act, (byAct.get(p.act) ?? 0) + p.amount);
+    const parts = [...byAct.entries()].map(([act, sum]) => `${act === "CASH" ? "наличный" : "безналичный"} расчёт${byAct.size > 1 ? ` ${money(sum)}` : ""}`);
+    if (order.paymentMethod === "DEBT") parts.push(parts.length ? "остаток — в долг" : "в долг");
+    return parts.length ? `Оплата: ${parts.join(", ")}` : null;
+  })();
 
   // Лист A4. Ширина в миллиметрах, чтобы на экране было видно, как ляжет.
   // В предпросмотре настроек лист не ужимается под окно: его уменьшают
@@ -533,6 +541,13 @@ export function PrintSheet({
                       {money(Math.max(0, (order.total ?? 0) - (order.prepayment ?? 0)))}
                     </td>
                   </tr>
+                  {paidLine && (
+                    <tr>
+                      <td colSpan={2} className="pt-1 text-right text-[11.5px] text-black/70" data-print-paid>
+                        {paidLine}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             ) : (

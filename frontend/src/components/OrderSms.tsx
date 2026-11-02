@@ -122,6 +122,8 @@ export function SmsModal({
 }) {
   const [preview, setPreview] = useState<SmsPreview | null>(null);
   const [mode, setMode] = useState<SmsKind>(kind);
+  // Свой шаблон мастерской (03.11.2026): id выбранного, отправляется как kind «custom».
+  const [tpl, setTpl] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +143,7 @@ export function SmsModal({
     setError(null);
     try {
       if (mode === "approval") await smsApi.ask(orderId, text.trim());
-      else await smsApi.send(orderId, text.trim(), mode);
+      else await smsApi.send(orderId, text.trim(), tpl ? "custom" : mode);
       onSent();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "SMS не отправлена");
@@ -176,25 +178,36 @@ export function SmsModal({
                 <span className="text-ink-dim">Кому: </span>
                 <span className="font-semibold">{[preview.customer, preview.phone].filter(Boolean).join(" · ") || "—"}</span>
               </p>
-              {kind !== "approval" && <div className="flex flex-wrap gap-1.5">
-                {(["ready", "free"] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={mode === m}
-                    onClick={() => {
-                      setMode(m);
-                      setText(m === "ready" ? preview.templates.ready : "");
-                    }}
-                    className={
-                      "rounded-pill border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
-                      (mode === m ? "border-brand bg-brand text-white" : "border-line bg-surface-raised text-ink-muted hover:text-ink")
-                    }
-                  >
-                    {m === "ready" ? "Готов к выдаче" : "Свой текст"}
-                  </button>
-                ))}
-              </div>}
+              {kind !== "approval" && (
+                <div className="flex flex-wrap gap-1.5" data-sms-modes>
+                  {[
+                    { key: "ready", label: "Готов к выдаче", text: preview.templates.ready, custom: null as string | null },
+                    ...(preview.custom ?? []).map((t) => ({ key: "c:" + t.id, label: t.name, text: t.text, custom: t.id })),
+                    { key: "free", label: "Свой текст", text: "", custom: null as string | null },
+                  ].map((m) => {
+                    const on = m.custom ? tpl === m.custom : !tpl && mode === m.key;
+                    return (
+                      <button
+                        key={m.key}
+                        type="button"
+                        aria-pressed={on}
+                        data-sms-mode={m.custom ?? m.key}
+                        onClick={() => {
+                          setMode(m.key === "ready" ? "ready" : "free");
+                          setTpl(m.custom);
+                          setText(m.text);
+                        }}
+                        className={
+                          "rounded-pill border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 " +
+                          (on ? "border-brand bg-brand text-white" : "border-line bg-surface-raised text-ink-muted hover:text-ink")
+                        }
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <div>
                 <Textarea
                   aria-label="Текст SMS"

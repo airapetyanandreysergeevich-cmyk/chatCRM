@@ -57,6 +57,7 @@ import { IssueDialog } from "../components/IssueDialog";
 import { WebSearchButton } from "../components/WebSearch";
 import { ReopenDialog } from "../components/ReopenDialog";
 import { StockNameInput } from "../components/StockNameInput";
+import { StockPickerButton } from "../components/StockPicker";
 import { PAYMENT_LABEL } from "../lib/debt";
 
 /** Пусто: не заполнено вовсе или заглушка «—» от formatDate/money. */
@@ -1214,6 +1215,9 @@ export default function OrderCard() {
                                   {PAYMENT_LABEL.DEBT}
                                   {order.debtDueAt ? ` до ${formatDate(order.debtDueAt)}` : ""}
                                 </span>
+                              ) : order.payments?.length ? (
+                                // Свои способы и оплата частями (03.11.2026): «Перевод 2 000 ₽ · Наличные 3 000 ₽».
+                                order.payments.map((p) => (order.payments!.length > 1 ? `${p.label} ${money(p.amount)}` : p.label)).join(" · ")
                               ) : (
                                 PAYMENT_LABEL[order.paymentMethod]
                               ),
@@ -1286,6 +1290,20 @@ export default function OrderCard() {
               />
             )}
             actions={
+              <>
+              {can("stock.view") && (
+                <StockPickerButton
+                  onPick={(items) =>
+                    setParts((cur) => {
+                      // Как «Из прайса»: первая — в пустую последнюю строку, остальные — новыми.
+                      const rows: OrderPart[] = items.map((i) => ({ name: i.name, qty: 1, price: i.salePrice ?? 0, source: "STOCK", stockItemId: i.id }));
+                      const last = cur[cur.length - 1];
+                      const blank = last && !last.name.trim() && !Number(last.price);
+                      return blank ? [...cur.slice(0, -1), ...rows] : [...cur, ...rows];
+                    })
+                  }
+                />
+              )}
               <Button
                 type="button"
                 variant="secondary"
@@ -1298,6 +1316,7 @@ export default function OrderCard() {
               >
                 Найти у поставщиков
               </Button>
+              </>
             }
 
             extraColumn={(row, update) => (

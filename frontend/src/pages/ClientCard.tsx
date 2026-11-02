@@ -354,7 +354,7 @@ function ClientPurchases({ customerId }: { customerId: string }) {
                   {sale.returnedAt && <Badge tone="danger">возврат</Badge>}
                 </>
               }
-              subtitle={`${PAYMENT_LABEL[sale.payment]}${sale.warrantyDays ? ` · гарантия до ${formatDateShort(sale.warrantyUntil)}` : ""}`}
+              subtitle={`${(sale.paymentLabel ?? PAYMENT_LABEL[sale.payment])}${sale.warrantyDays ? ` · гарантия до ${formatDateShort(sale.warrantyUntil)}` : ""}`}
               meta={
                 <>
                   <span className="whitespace-nowrap lg:w-[96px] lg:text-right">{formatDateShort(sale.createdAt)}</span>

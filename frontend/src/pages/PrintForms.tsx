@@ -1,4 +1,5 @@
 import { Panel } from "../components/Panel";
+import { ExcelBlanks } from "../components/ExcelBlanks";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PrintSheet, type Doc } from "../components/PrintSheet";
@@ -696,7 +697,7 @@ export default function PrintFormsPage() {
       {error && <Banner tone="error">{error}</Banner>}
       {notice && <Banner>{notice}</Banner>}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ------------------------------------------------------ поля */}
         <div className="space-y-5">
           <Panel id="print:Шапка" title="Шапка">
@@ -838,6 +839,9 @@ export default function PrintFormsPage() {
               </div>
             </div>
           </Panel>
+
+          {/* Свои бланки из Excel сохраняются сразу, без общей кнопки «Сохранить». */}
+          <ExcelBlanks disabled={!mayEdit} />
 
           {mayEdit && (
             // Прилипает к низу экрана, только когда есть что сохранить: пустая

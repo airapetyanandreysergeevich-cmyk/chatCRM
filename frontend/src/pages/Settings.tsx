@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconAgent, IconBell, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms, IconWarranty } from "../components/icons";
+import { IconAgent, IconBell, IconCash, IconDatabase, IconDevices, IconFeedback, IconPalette, IconPrint, IconServices, IconGlobe, IconSms, IconWarranty } from "../components/icons";
 import { Card, PageHeader } from "../components/ui";
 import { useAuth } from "../lib/auth";
 import { ordersApi } from "../lib/orders";
@@ -43,6 +43,13 @@ const SECTIONS: Section[] = [
     text: "Квитанция и акт на печать: логотип, реквизиты, условия приёма, гарантия, подписи.",
     icon: <IconPrint />,
     need: "settings.manage",
+  },
+  {
+    to: "/settings/payments",
+    title: "Способы оплаты",
+    text: "Свои способы — перевод, криптовалюта: как в акте, в какую кассу и кто из сотрудников может принять деньги на себя.",
+    icon: <IconCash />,
+    need: "finance.manage",
   },
   {
     // Видна всем: свой принтер выбирает себе любой сотрудник, общий

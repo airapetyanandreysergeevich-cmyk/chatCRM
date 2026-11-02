@@ -45,6 +45,9 @@ import { smsPhoneRouter } from "./modules/sms/sms.phone";
 import { callsPhoneRouter } from "./modules/calls/calls.phone";
 import { callsRouter } from "./modules/calls/calls.routes";
 import { startCallsCleanup } from "./modules/calls/calls";
+import { payMethodsRouter } from "./modules/finance/payMethods.routes";
+import { blanksRouter } from "./modules/blanks/blanks.routes";
+import { startPayoutReminders } from "./modules/finance/money";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
 import { startOverdueWatch } from "./services/overdue";
@@ -136,6 +139,8 @@ app.use("/api/stock", stockRouter);
 app.use("/api/sales", salesRouter);
 app.use("/api/purchases", purchasesRouter);
 app.use("/api/finance", financeRouter);
+app.use("/api/pay-methods", payMethodsRouter);
+app.use("/api/blanks", blanksRouter);
 app.use("/api/reference", referenceRouter);
 // Только в локальной версии: в облаке файлы отдаёт S3, и открытого
 // маршрута к ним быть не должно.
@@ -201,6 +206,8 @@ if (pushConfigured) startOverdueWatch();
 else console.warn("Оповещения выключены: не заданы VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY");
 // Срок хранения записей звонков — раз в час, независимо от оповещений.
 startCallsCleanup();
+// Деньги клиента у сотрудника: неподтверждённые дольше суток — напоминание.
+startPayoutReminders();
 
 const server = app.listen(env.port, env.bindHost, () => {
   console.log(`RepairShop API слушает ${env.bindHost}:${env.port}`);

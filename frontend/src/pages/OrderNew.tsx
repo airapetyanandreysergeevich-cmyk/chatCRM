@@ -28,6 +28,7 @@ import {
 } from "../components/ui";
 import { ChipInput, Chips, hasPhrase, togglePhrase } from "../components/ChipInput";
 import { SuggestInput } from "../components/SuggestInput";
+import { StockPickerButton } from "../components/StockPicker";
 import { StockNameInput } from "../components/StockNameInput";
 import { ApiError } from "../lib/api";
 import { ensureOnIntake } from "../lib/orderFolder";
@@ -1034,6 +1035,18 @@ export default function OrderNew() {
           >
             + Добавить товар
           </Button>
+          {can("stock.view") && (
+            <span className="ml-2 inline-block">
+              <StockPickerButton
+                onPick={(items) =>
+                  setGoods((list) => [
+                    ...list.filter((g) => g.name.trim()),
+                    ...items.map((i) => ({ key: ++goodsKey.current, name: i.name, qty: "1", price: i.salePrice ? String(i.salePrice) : "", stockItemId: i.id })),
+                  ])
+                }
+              />
+            </span>
+          )}
         </Card>
         </div>
       )}

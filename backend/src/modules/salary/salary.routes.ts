@@ -7,6 +7,7 @@ import { PERMISSIONS } from "../../lib/permissions";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermission, requireTenant } from "../../middleware/auth";
 import { enforceTenantStatus } from "../../middleware/tenantStatus";
 import { computeMonth } from "./calc";
+import { markPayoutRead, notifyAnswer } from "../finance/money";
 import { MONTH_RE, monthOf, monthsBetween, monthTitle, shiftMonth } from "./months";
 
 /**
@@ -121,7 +122,9 @@ salaryRouter.get(
           include: { createdBy: { select: { fullName: true } } },
         }),
       ]);
-      return { entries, payouts };
+      const orderIds = [...new Set(payouts.map((p) => p.orderId).filter((x): x is string => !!x))];
+      const orders = orderIds.length ? await tx.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, number: true } }) : [];
+      return { entries, payouts, orders: new Map(orders.map((o) => [o.id, o.number])) };
     });
     res.json({
       entries: data.entries.map((e) => ({
@@ -138,6 +141,11 @@ salaryRouter.get(
         paidAt: p.paidAt,
         comment: p.comment,
         by: p.createdBy?.fullName ?? null,
+        /** Деньги клиента сразу сотруднику (03.11.2026): ✅ CONFIRMED · ⏳ PENDING · ⚠ DISPUTED. */
+        source: p.source,
+        status: p.status,
+        order: p.orderId ? { id: p.orderId, number: data.orders.get(p.orderId) ?? null } : null,
+        saleId: p.saleId,
       })),
     });
   })
@@ -313,6 +321,10 @@ salaryRouter.patch(
     await withTenant(tenantId, async (tx) => {
       const p = await tx.salaryPayout.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!p) throw notFound("Выплата не найдена");
+      // Сумма денег клиента сходится с кассой — править её здесь нельзя.
+      if (p.source === "CLIENT" && (body.amount !== undefined || body.paidAt !== undefined)) {
+        throw badRequest("Это деньги клиента: сумма и дата — как в кассе. Ошиблись — уберите выплату и проведите оплату заново");
+      }
       await assertOpen(tx, p.month);
       const paidAt = body.paidAt ? new Date(body.paidAt) : p.paidAt;
       const month = monthOf(paidAt, tz);
@@ -350,6 +362,8 @@ salaryRouter.delete(
       if (!p) throw notFound("Выплата не найдена");
       await assertOpen(tx, p.month);
       await tx.salaryPayout.update({ where: { id: p.id }, data: { deletedAt: new Date() } });
+      // Деньги клиента: вместе с выплатой убираем и расход «Выплата сотруднику» — деньги остаются в кассе.
+      if (p.outTxId) await tx.transaction.updateMany({ where: { id: p.outTxId, deletedAt: null }, data: { deletedAt: new Date() } });
       await writeAudit(tx, {
         tenantId,
         userId: actorUserId(req),
@@ -435,3 +449,142 @@ salaryRouter.delete(
     res.json({ ok: true });
   })
 );
+
+// ------------------------------------------------------------------ деньги клиента у сотрудника (03.11.2026)
+
+/**
+ * 💵 в шапке: деньги клиентов, принятые на меня и ещё не подтверждённые.
+ * Любому сотруднику про себя — даже без права видеть свою зарплату.
+ */
+salaryRouter.get(
+  "/incoming",
+  ah(async (req, res) => {
+    const me = actorUserId(req);
+    if (!me) return res.json({ items: [] });
+    const tenantId = tenantOf(req);
+    const items = await withTenant(tenantId, async (tx) => {
+      const rows = await tx.salaryPayout.findMany({
+        where: { userId: me, deletedAt: null, status: "PENDING" },
+        orderBy: { paidAt: "asc" },
+        take: 50,
+      });
+      const orderIds = [...new Set(rows.map((r) => r.orderId).filter((x): x is string => !!x))];
+      const userIds = [...new Set(rows.map((r) => r.takenById).filter((x): x is string => !!x))];
+      const methodIds = [...new Set(rows.map((r) => r.payMethodId).filter((x): x is string => !!x))];
+      const [orders, users, methods] = await Promise.all([
+        tx.order.findMany({
+          where: { id: { in: orderIds } },
+          select: { id: true, number: true, device: { select: { kind: true, brand: true, model: true } }, customer: { select: { name: true } } },
+        }),
+        tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true } }),
+        tx.payMethod.findMany({ where: { id: { in: methodIds } }, select: { id: true, name: true } }),
+      ]);
+      const om = new Map(orders.map((o) => [o.id, o]));
+      const um = new Map(users.map((u) => [u.id, u.fullName]));
+      const mm = new Map(methods.map((m) => [m.id, m.name]));
+      return rows.map((r) => {
+        const o = r.orderId ? om.get(r.orderId) : null;
+        return {
+          id: r.id,
+          amount: Number(r.amount),
+          at: r.paidAt,
+          method: (r.payMethodId && mm.get(r.payMethodId)) ?? null,
+          order: o
+            ? {
+                id: o.id,
+                number: o.number,
+                device: [o.device?.kind, o.device?.brand, o.device?.model].filter(Boolean).join(" ") || null,
+                customer: o.customer?.name ?? null,
+              }
+            : null,
+          sale: !!r.saleId,
+          takenBy: (r.takenById && um.get(r.takenById)) ?? null,
+        };
+      });
+    });
+    res.json({ items });
+  })
+);
+
+async function answer(req: Request, confirmed: boolean) {
+  const me = actorUserId(req);
+  const tenantId = tenantOf(req);
+  const p = await withTenant(tenantId, async (tx) => {
+    const row = await tx.salaryPayout.findFirst({ where: { id: req.params.id, deletedAt: null } });
+    if (!row) throw notFound("Платёж не найден");
+    if (row.userId !== me) throw forbidden("Подтверждает тот, на кого приняли деньги");
+    if (row.status !== "PENDING") throw conflict(row.status === "CONFIRMED" ? "Уже подтверждено" : "Уже отмечено «Не получал»");
+    await tx.salaryPayout.update({
+      where: { id: row.id },
+      data: confirmed ? { status: "CONFIRMED", confirmedAt: new Date() } : { status: "DISPUTED", disputedAt: new Date() },
+    });
+    await writeAudit(tx, {
+      tenantId,
+      userId: me,
+      entity: "SalaryPayout",
+      entityId: row.id,
+      action: "UPDATE",
+      diff: { status: confirmed ? "CONFIRMED" : "DISPUTED", amount: Number(row.amount) },
+      ip: clientIp(req),
+    });
+    const order = row.orderId ? await tx.order.findFirst({ where: { id: row.orderId }, select: { number: true } }) : null;
+    return { ...row, orderNumber: order?.number ?? null };
+  });
+  await markPayoutRead(tenantId, p.id);
+  void notifyAnswer(tenantId, { id: p.id, userId: p.userId, takenById: p.takenById, amount: Number(p.amount), orderId: p.orderId, orderNumber: p.orderNumber }, confirmed);
+}
+
+salaryRouter.post(
+  "/payouts/:id/confirm",
+  ah(async (req, res) => {
+    await answer(req, true);
+    res.json({ ok: true });
+  })
+);
+
+salaryRouter.post(
+  "/payouts/:id/dispute",
+  ah(async (req, res) => {
+    await answer(req, false);
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * «Не получал» разобрали: деньги всё-таки у сотрудника («received») — или
+ * их нет у него («cancel»): выплата снимается, расход «Выплата сотруднику»
+ * убирается, и деньги остаются в кассе обычной оплатой.
+ */
+salaryRouter.post(
+  "/payouts/:id/resolve",
+  requirePermission(PERMISSIONS.SALARY_MANAGE),
+  ah(async (req, res) => {
+    const { action } = z.object({ action: z.enum(["received", "cancel"]) }).parse(req.body);
+    const tenantId = tenantOf(req);
+    const me = actorUserId(req);
+    await withTenant(tenantId, async (tx) => {
+      const p = await tx.salaryPayout.findFirst({ where: { id: req.params.id, deletedAt: null } });
+      if (!p) throw notFound("Платёж не найден");
+      if (p.source !== "CLIENT") throw badRequest("Это выплата, записанная руками");
+      await assertOpen(tx, p.month);
+      if (action === "received") {
+        await tx.salaryPayout.update({ where: { id: p.id }, data: { status: "CONFIRMED", resolvedAt: new Date(), resolvedById: me } });
+      } else {
+        await tx.salaryPayout.update({ where: { id: p.id }, data: { deletedAt: new Date(), resolvedAt: new Date(), resolvedById: me } });
+        if (p.outTxId) await tx.transaction.updateMany({ where: { id: p.outTxId, deletedAt: null }, data: { deletedAt: new Date() } });
+      }
+      await writeAudit(tx, {
+        tenantId,
+        userId: me,
+        entity: "SalaryPayout",
+        entityId: p.id,
+        action: "UPDATE",
+        diff: { resolved: action, amount: Number(p.amount), userId: p.userId },
+        ip: clientIp(req),
+      });
+    });
+    await markPayoutRead(tenantId, req.params.id);
+    res.json({ ok: true });
+  })
+);
+

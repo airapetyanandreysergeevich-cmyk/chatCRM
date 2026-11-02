@@ -179,6 +179,8 @@ export interface Order {
   total?: number | null;
   /** Чем расплатились на выдаче. Пусто, пока заказ не выдан. */
   paymentMethod?: PaymentMethod | null;
+  /** Чем платили (03.11.2026) — для акта: способ, вид расчёта, сумма. */
+  payments?: Array<{ label: string; act: "CASH" | "CARD"; amount: number }>;
   /** Когда клиент обещал заплатить — только у выданных в долг. */
   debtDueAt?: string | null;
 }
@@ -395,7 +397,12 @@ export const ordersApi = {
     api.post<{ ok: true }>(`/orders/${id}/reopen`, { reason, ...(statusId ? { statusId } : {}) }),
   issue: (
     id: string,
-    opts: { discount?: number; reason?: string; withoutRepair?: boolean; payment?: { method: PaymentMethod; promisedAt?: string } } = {}
+    opts: {
+      discount?: number;
+      reason?: string;
+      withoutRepair?: boolean;
+      payment?: { method: string; recipientId?: string | null; promisedAt?: string; parts?: Array<{ method: string; amount: number; recipientId?: string | null }> };
+    } = {}
   ) =>
     api.post<{ ok: true; extra?: { amount: number } }>(`/orders/${id}/issue`, {
       discount: opts.discount ?? 0,

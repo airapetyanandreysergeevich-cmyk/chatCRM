@@ -5,7 +5,8 @@ import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, notFound } from "../../lib/errors";
 import { paged, pageFields, skipTake } from "../../lib/paging";
-import { categoryNamed, registerFor } from "../../lib/payment";
+import { BUILTIN_LABEL, categoryNamed, PayError, receiveMoney, registerFor, resolveWay, type PayoutNote } from "../../lib/payment";
+import { notifyPayouts } from "../finance/money";
 import { PERMISSIONS } from "../../lib/permissions";
 import { searchWords } from "../../lib/search";
 import { actorUserId, authenticate, currentTenantId, permissionsOf, requirePermission, requireTenant } from "../../middleware/auth";
@@ -32,8 +33,8 @@ salesRouter.use(authenticate, requireTenant, enforceTenantStatus);
 const tenantOf = (req: Request) => currentTenantId(req)!;
 const has = (req: Request, code: string) => permissionsOf(req).includes(code);
 
-export const SALE_PAYMENTS = ["CASH", "CARD", "TRANSFER"] as const;
-export type SalePayment = (typeof SALE_PAYMENTS)[number];
+/** Старые продажи: CASH, CARD, TRANSFER. С 03.11.2026 — ещё id своего способа оплаты. */
+export type SalePayment = string;
 
 const IN_CATEGORY = "Продажа товаров";
 const OUT_CATEGORY = "Возврат продажи";
@@ -69,6 +70,11 @@ const saleInclude = {
   customer: { select: { id: true, name: true, phone: true } },
   soldBy: { select: { id: true, fullName: true } },
   returnedBy: { select: { id: true, fullName: true } },
+  // Чем заплатили — для подписи своего способа и «наличный/безналичный» в чеке.
+  transactions: {
+    where: { direction: "IN", deletedAt: null },
+    select: { amount: true, method: true, payMethod: { select: { name: true, actKind: true } } },
+  },
 } satisfies Prisma.SaleInclude;
 
 type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
@@ -80,6 +86,9 @@ function project(s: SaleRow, seesCost: boolean) {
     number: s.number,
     createdAt: s.createdAt,
     payment: s.payment as SalePayment,
+    paymentLabel: s.transactions[0]?.payMethod?.name ?? BUILTIN_LABEL[s.payment] ?? "Свой способ",
+    /** Как в чеке: наличный или безналичный расчёт. */
+    paymentAct: (s.transactions[0]?.payMethod?.actKind ?? (s.payment === "CASH" ? "CASH" : "CARD")) === "CASH" ? "CASH" : "CARD",
     subtotal: num(s.subtotal),
     discount: num(s.discount),
     total: num(s.total),
@@ -176,7 +185,10 @@ const saleSchema = z.object({
     .min(1, "Добавьте в чек хотя бы один товар")
     .max(200, "Слишком много строк в одном чеке"),
   discount: z.number().min(0).max(100_000_000).default(0),
-  payment: z.enum(SALE_PAYMENTS),
+  /** CASH, CARD или id своего способа оплаты (перевод убран 03.11.2026 — он был «своим способом»). */
+  payment: z.string().trim().max(40),
+  /** Свой способ: сотрудник, который принял деньги на себя. */
+  recipientId: z.string().uuid().nullable().optional(),
   customerId: z.string().uuid().nullable().optional(),
   warrantyDays: z.number().int().min(0).max(3650).nullable().optional(),
   note: z.string().trim().max(500).optional(),
@@ -203,7 +215,9 @@ salesRouter.post(
     const total = round2(subtotal - discount);
 
     let saleId = "";
+    let payouts: PayoutNote[] = [];
     for (let attempt = 0; ; attempt++) {
+      payouts = [];
       try {
         saleId = await withTenant(tenantId, async (tx) => {
           await lockSales(tx, tenantId);
@@ -269,20 +283,26 @@ salesRouter.post(
 
           // Ноль в кассу не пишем: продали со скидкой в 100 % — денег не было.
           if (total > 0) {
-            const register = await registerFor(tx, tenantId, body.payment);
-            const category = await categoryNamed(tx, tenantId, IN_CATEGORY, "IN");
-            await tx.transaction.create({
-              data: {
-                tenantId,
-                cashRegisterId: register.id,
-                categoryId: category.id,
-                direction: "IN",
+            try {
+              const r = await receiveMoney(tx, tenantId, {
                 amount: total,
+                how: body.payment,
+                recipientId: body.recipientId ?? null,
                 saleId: sale.id,
                 customerId: body.customerId ?? null,
                 userId,
                 comment: `Продажа ${number}`,
-              },
+                category: IN_CATEGORY,
+              });
+              if (r.payout) payouts.push(r.payout);
+            } catch (err) {
+              if (err instanceof PayError) throw badRequest(err.message);
+              throw err;
+            }
+          } else {
+            // Способ всё равно проверяем: выключенный или чужой — отказ, как и с деньгами.
+            await resolveWay(tx, tenantId, body.payment).catch((err) => {
+              throw err instanceof PayError ? badRequest(err.message) : err;
             });
           }
 
@@ -304,6 +324,7 @@ salesRouter.post(
       }
     }
 
+    void notifyPayouts(tenantId, payouts);
     const sale = await withTenant(tenantId, (tx) => tx.sale.findFirst({ where: { id: saleId }, include: saleInclude }));
     res.status(201).json(project(sale!, seesCost(req)));
   })
@@ -352,7 +373,7 @@ salesRouter.post(
       if (total > 0) {
         // Деньги — из той же кассы, куда пришли.
         const paidTo = await tx.transaction.findFirst({ where: { saleId: sale.id, direction: "IN" }, select: { cashRegisterId: true } });
-        const registerId = paidTo?.cashRegisterId ?? (await registerFor(tx, tenantId, sale.payment as SalePayment)).id;
+        const registerId = paidTo?.cashRegisterId ?? (await resolveWay(tx, tenantId, sale.payment).catch(() => null))?.registerId ?? (await registerFor(tx, tenantId, "CASH")).id;
         const category = await categoryNamed(tx, tenantId, OUT_CATEGORY, "OUT");
         await tx.transaction.create({
           data: {

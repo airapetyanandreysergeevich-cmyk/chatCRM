@@ -112,6 +112,8 @@ model Tenant {
   services            Service[]
   serviceCategories ServiceCategory[]
   callRecords       CallRecord[]
+  payMethods        PayMethod[]
+  printTemplates    PrintTemplate[]
   deviceHints         DeviceHint[]
   quickPicks          QuickPick[]
   orders              Order[]
@@ -794,6 +796,8 @@ model Order {
 
   /// Чем расплатились на выдаче. Пусто, пока заказ не выдан.
   paymentMethod PaymentMethod?
+  /// Свой способ оплаты на выдаче (03.11.2026); paymentMethod — вид расчёта для акта.
+  payMethodId   String?
   /// Когда клиент обещал заплатить. Только для выдачи в долг.
   debtDueAt     DateTime?
   /// Возвраты в работу после выдачи: [{ at, byId, reason, issuedAt, total, works, parts }].
@@ -1272,6 +1276,7 @@ model CashRegister {
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
   branch       Branch?       @relation(fields: [branchId], references: [id])
   transactions Transaction[]
+  payMethods   PayMethod[]
 
   @@index([tenantId])
 }
@@ -1318,10 +1323,15 @@ model Transaction {
   customerId     String?
   userId         String?
   comment        String?
+  /// Чем заплатили (03.11.2026): CASH | CARD | TRANSFER (старые продажи) | PAYOUT (выплата сотруднику) | FEE (комиссия).
+  method         String?
+  /// Свой способ оплаты мастерской.
+  payMethodId    String?
   createdAt      DateTime    @default(now())
   deletedAt      DateTime?
 
   tenant       Tenant               @relation(fields: [tenantId], references: [id])
+  payMethod    PayMethod?           @relation(fields: [payMethodId], references: [id], onDelete: SetNull)
   cashRegister CashRegister         @relation(fields: [cashRegisterId], references: [id])
   category     TransactionCategory? @relation(fields: [categoryId], references: [id])
   order        Order?               @relation(fields: [orderId], references: [id])
@@ -1444,6 +1454,23 @@ model SalaryPayout {
   month       String
   comment     String?
   createdById String?
+  /// Деньги клиента сразу сотруднику (03.11.2026): «CLIENT»; пусто — выплата руками.
+  source      String?
+  orderId     String?
+  saleId      String?
+  payMethodId String?
+  /// Кто принял оплату у клиента (выдал заказ, продал).
+  takenById   String?
+  /// Приход от клиента и расход «выплата» в кассе — парой.
+  inTxId      String?
+  outTxId     String?
+  /// PENDING — ждёт подтверждения получателя; CONFIRMED; DISPUTED — «не получал».
+  status      String    @default("CONFIRMED")
+  confirmedAt DateTime?
+  disputedAt  DateTime?
+  remindedAt  DateTime?
+  resolvedAt  DateTime?
+  resolvedById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -1453,6 +1480,52 @@ model SalaryPayout {
   createdBy User?  @relation("SalaryPayoutAuthor", fields: [createdById], references: [id])
 
   @@index([tenantId, month])
+  @@index([tenantId, userId, status])
+}
+
+/// Свой способ оплаты мастерской (03.11.2026): «Банковский перевод», «Криптовалюта»…
+model PayMethod {
+  id             String   @id @default(uuid())
+  tenantId       String
+  name           String
+  /// Как в акте: CASH — «наличный расчёт», CARD — «безналичный расчёт».
+  actKind        String   @default("CARD")
+  /// Куда идут деньги; пусто — касса по умолчанию для вида расчёта.
+  cashRegisterId String?
+  /// Комиссия, % — расходом в кассу при каждой оплате (эквайринг, обменник).
+  commissionPct  Decimal? @db.Decimal(5, 2)
+  /// Кто может принимать этим способом на себя: деньги сразу уходят сотруднику выплатой.
+  recipientIds   String[] @default([])
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  cashRegister CashRegister? @relation(fields: [cashRegisterId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@index([tenantId])
+}
+
+/// Свой бланк из Excel (03.11.2026): шаблон .xlsx с метками {номер}, {клиент}…
+model PrintTemplate {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  /// order — для заказа; sale — для продажи со склада.
+  target      String   @default("order")
+  fileName    String
+  data        Bytes
+  /// Что нашли в шаблоне при загрузке: {known: [...], unknown: [...]}.
+  marks       Json     @default("{}")
+  sortOrder   Int      @default(0)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
 }
 
 /// Закрытый месяц: снимок ведомости. Поздние правки заказов его не трогают.

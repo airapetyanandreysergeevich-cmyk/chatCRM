@@ -5,7 +5,8 @@ import { clientIp, writeAudit } from "../../lib/audit";
 import { withTenant } from "../../lib/db";
 import { ah, badRequest, conflict, forbidden, notFound } from "../../lib/errors";
 import { debts } from "../../lib/debt";
-import { takePayment } from "../../lib/payment";
+import { PayError, takeOrderPayment, type PayoutNote } from "../../lib/payment";
+import { notifyPayouts } from "./money";
 import { PERMISSIONS } from "../../lib/permissions";
 import {
   actorUserId,
@@ -446,12 +447,15 @@ financeRouter.post(
         orderId: z.string().uuid(),
         /** Пусто — гасим долг целиком. */
         amount: z.number().positive().optional(),
-        method: z.enum(["CASH", "CARD"]),
+        /** CASH, CARD или id своего способа оплаты. */
+        method: z.string().trim().max(40),
+        recipientId: z.string().uuid().nullable().optional(),
       })
       .parse(req.body);
 
     const tenantId = tenantOf(req);
     const userId = actorUserId(req);
+    const payouts: PayoutNote[] = [];
 
     const result = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({
@@ -466,14 +470,25 @@ financeRouter.post(
       if (!mine) throw conflict("По этому заказу долга нет — возможно, его уже погасили");
 
       const amount = Math.min(body.amount ?? mine.due, mine.due);
-      const taken = await takePayment(tx, tenantId, {
-        orderId: order.id,
-        customerId: order.customerId ?? null,
-        amount,
-        how: body.method,
-        userId,
-        comment: `Погашение долга по заказу ${order.number}`,
-      });
+      if (body.method === "DEBT") throw badRequest("Выберите, чем клиент платит");
+      let taken = 0;
+      try {
+        const r = await takeOrderPayment(tx, tenantId, {
+          orderId: order.id,
+          orderNumber: order.number,
+          customerId: order.customerId ?? null,
+          amount,
+          how: body.method,
+          recipientId: body.recipientId ?? null,
+          userId,
+          comment: `Погашение долга по заказу ${order.number}`,
+        });
+        taken = r.amount;
+        payouts.push(...r.payouts);
+      } catch (err) {
+        if (err instanceof PayError) throw badRequest(err.message);
+        throw err;
+      }
 
       await writeAudit(tx, {
         tenantId,
@@ -488,6 +503,7 @@ financeRouter.post(
       return { paid: taken, left: Math.round((mine.due - taken) * 100) / 100 };
     });
 
+    void notifyPayouts(tenantId, payouts);
     res.json(result);
   })
 );

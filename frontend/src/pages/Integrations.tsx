@@ -17,7 +17,7 @@ import {
   type PairCode,
   type SmsPhone,
   type SmsSettings,
-  type TemplateKey,
+  type TemplateKey, type CustomTemplate,
 } from "../lib/sms";
 import { ordersApi, type OrderStatus } from "../lib/orders";
 import { CallsPanel } from "../components/CallsPanel";
@@ -99,6 +99,7 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
   const [expanded, setExpanded] = useState(saved.enabled);
   const [onReady, setOnReady] = useState<OnReady>(saved.onReady);
   const [templates, setTemplates] = useState<Record<TemplateKey, string>>(saved.templates);
+  const [custom, setCustom] = useState<CustomTemplate[]>(saved.custom ?? []);
   const [approval, setApproval] = useState<ApprovalConfig>(saved.approval);
   const [statuses, setStatuses] = useState<OrderStatus[]>([]);
   const [phones, setPhones] = useState<SmsPhone[] | null>(null);
@@ -142,6 +143,7 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
     enabled,
     onReady,
     templates,
+    custom: custom.map((t) => ({ ...t, name: t.name.trim() || "Шаблон", text: t.text.trim() })).filter((t) => t.text),
     approval,
     ...over,
   });
@@ -189,6 +191,7 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
     onReady !== saved.onReady ||
     enabled !== saved.enabled ||
     (Object.keys(templates) as TemplateKey[]).some((k) => templates[k] !== saved.templates[k]) ||
+    JSON.stringify(custom) !== JSON.stringify(saved.custom ?? []) ||
     JSON.stringify(approval) !== JSON.stringify(saved.approval);
 
   const online = phones?.filter((p) => p.online).length ?? 0;
@@ -253,6 +256,8 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
               {"{сумма}"} — сколько осталось заплатить, {"{мастерская}"} — название с бланков. Одна SMS на русском — 70
               знаков; длиннее склеивается из частей, каждая оплачивается отдельно.
             </p>
+
+            <CustomTemplates list={custom} onChange={setCustom} placeholders={saved.placeholders} />
 
             <div className="rounded-card border border-line bg-surface-raised p-3.5">
               <span className="mb-1.5 block text-[13px] font-semibold text-ink-soft">Проверка</span>
@@ -393,6 +398,70 @@ function SmsPanel({ saved, onSaved }: { saved: SmsSettings; onSaved: (s: SmsSett
         />
       )}
     </Panel>
+  );
+}
+
+/**
+ * Свои шаблоны (03.11.2026): «Нужна доплата», «Ждём запчасть»… В заказе —
+ * меню SMS: «Готов к выдаче · свои · Свой текст». Порядок — как здесь.
+ */
+function CustomTemplates({ list, onChange, placeholders }: { list: CustomTemplate[]; onChange: (l: CustomTemplate[]) => void; placeholders: string[] }) {
+  const set = (i: number, p: Partial<CustomTemplate>) => onChange(list.map((t, j) => (j === i ? { ...t, ...p } : t)));
+  const move = (i: number, d: -1 | 1) => {
+    const next = [...list];
+    const [x] = next.splice(i, 1);
+    next.splice(i + d, 0, x);
+    onChange(next);
+  };
+  return (
+    <div className="space-y-2.5" data-sms-custom>
+      <span className="block text-[13px] font-semibold text-ink-soft">Свои шаблоны</span>
+      {list.length === 0 && <p className="text-[12.5px] text-ink-dim">Появятся в заказе в меню SMS рядом с «Готов к выдаче».</p>}
+      {list.map((t, i) => (
+        <div key={t.id} className={"rounded-card border border-line p-3 " + (t.on ? "" : "opacity-60")} data-sms-template={t.id}>
+          <div className="mb-2 flex items-center gap-2">
+            <Input value={t.name} maxLength={40} placeholder="Название: Ждём запчасть" aria-label="Название шаблона" onChange={(e) => set(i, { name: e.target.value })} />
+            <button type="button" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Выше" className="h-9 w-9 shrink-0 rounded-field border border-line text-ink-muted disabled:opacity-30">
+              ↑
+            </button>
+            <button type="button" disabled={i === list.length - 1} onClick={() => move(i, 1)} aria-label="Ниже" className="h-9 w-9 shrink-0 rounded-field border border-line text-ink-muted disabled:opacity-30">
+              ↓
+            </button>
+            <Switch on={t.on} onChange={(on) => set(i, { on })} label="Показывать в заказе" />
+          </div>
+          <Field label="Текст" hint={smsCounter(t.text)}>
+            <Textarea value={t.text} maxLength={1000} onChange={(e) => set(i, { text: e.target.value })} />
+          </Field>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {placeholders.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => set(i, { text: (t.text.endsWith(" ") || !t.text ? t.text : t.text + " ") + p })}
+                className="rounded-pill border border-line bg-surface-raised px-2.5 py-1 font-mono text-[12px] text-ink-muted hover:text-ink"
+              >
+                {p}
+              </button>
+            ))}
+            <button type="button" onClick={() => onChange(list.filter((_, j) => j !== i))} className="ml-auto px-2 text-[12.5px] font-semibold text-state-off">
+              Удалить
+            </button>
+          </div>
+        </div>
+      ))}
+      {list.length < 20 && (
+        <button
+          type="button"
+          className="text-[13px] font-semibold text-brand-ink hover:underline"
+          data-sms-custom-add
+          onClick={() =>
+            onChange([...list, { id: "t" + Date.now().toString(36), name: "", text: "{клиент}, по заказу {номер} ", on: true }])
+          }
+        >
+          + Свой шаблон
+        </button>
+      )}
+    </div>
   );
 }
 

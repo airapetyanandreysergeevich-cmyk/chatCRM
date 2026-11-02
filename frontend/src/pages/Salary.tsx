@@ -5,6 +5,7 @@ import { Banner, Button, Card, Field, Input, PageHeader, SectionLabel, Spinner }
 import { ApiError } from "../lib/api";
 import { formatDate, formatDateTime } from "../lib/format";
 import { money } from "../lib/orders";
+import { incomingApi } from "../lib/payMethods";
 import {
   monthTitle,
   salaryApi,
@@ -150,9 +151,26 @@ function Detail({
       <div className="grid gap-2 sm:grid-cols-4">
         <Stat label="На начало месяца" value={<Signed v={row.start} />} hint={row.startSet ? "введено руками" : "перенос с прошлого месяца"} />
         <Stat label="Начислено" value={money(row.accrued + row.bonus)} hint={row.bonus ? `в том числе оклад/премия ${money(row.bonus)}` : undefined} />
-        <Stat label="Получено" value={money(row.paid)} />
-        <Stat label="Итого" value={<Signed v={row.end} strong />} hint={row.end < 0 ? "выдано вперёд" : row.end > 0 ? "к выплате" : "в расчёте"} />
+        <Stat
+          label="Получено"
+          value={money(row.paid)}
+          hint={
+            row.clientPaid
+              ? `от клиентов напрямую ${money(row.clientPaid)}${row.pending ? `, ждёт подтверждения ${money(row.pending)}` : ""}`
+              : undefined
+          }
+        />
+        <Stat
+          label={row.end < 0 ? "Переплата" : row.end > 0 ? "Доплатить" : "Итого"}
+          value={<Signed v={row.end} strong />}
+          hint={row.end < 0 ? "аванс — перейдёт в следующий месяц" : row.end > 0 ? "к выплате за месяц" : "в расчёте"}
+        />
       </div>
+      {!!row.disputed && (
+        <p className="rounded-field border border-state-off/40 bg-state-off/[0.07] px-3 py-2 text-[13px]" data-salary-disputed>
+          ⚠ «Не получал»: {money(row.disputed)} — не считается полученным, пока не разберутся (ниже, в выплатах).
+        </p>
+      )}
 
       {/* Заказы месяца */}
       <div>
@@ -257,13 +275,38 @@ function Detail({
           <ul className="mt-2 space-y-1">
             {records?.payouts.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-2 rounded-field bg-surface-raised px-3 py-1.5 text-[13px]">
-                <span>
+                <span className={p.status === "DISPUTED" ? "text-state-off" : undefined} data-salary-payout={p.status ?? "CONFIRMED"}>
+                  {p.source === "CLIENT" && (
+                    <span
+                      className="mr-1"
+                      title={p.status === "PENDING" ? "Ждёт подтверждения" : p.status === "DISPUTED" ? "«Не получал»" : "Получение подтверждено"}
+                    >
+                      {p.status === "PENDING" ? "⏳" : p.status === "DISPUTED" ? "⚠" : "✅"}
+                    </span>
+                  )}
                   <span className="font-semibold tabular-nums">{money(p.amount)}</span>{" "}
                   <span className="text-ink-soft">{formatDate(p.paidAt)}</span>
                   {p.comment && <span className="text-ink-soft"> · {p.comment}</span>}
-                  <span className="ml-1 text-ink-dim" title="Кто записал">· записал {p.by ?? "—"}</span>
+                  {p.order?.number && (
+                    <Link to={`/orders/${p.order.id}`} className="ml-1 font-mono text-brand-ink hover:underline">
+                      {p.order.number}
+                    </Link>
+                  )}
+                  <span className="ml-1 text-ink-dim" title={p.source === "CLIENT" ? "Кто принял оплату" : "Кто записал"}>
+                    · {p.source === "CLIENT" ? "принял(а)" : "записал"} {p.by ?? "—"}
+                  </span>
                 </span>
-                {manage && (
+                {manage && p.status === "DISPUTED" && (
+                  <span className="flex shrink-0 gap-1.5">
+                    <button type="button" disabled={busy} onClick={() => void run(() => incomingApi.resolve(p.id, "received"))} className="text-[12.5px] font-semibold text-brand-ink hover:underline" data-salary-resolve="received">
+                      Получено
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void run(() => incomingApi.resolve(p.id, "cancel"))} className="text-[12.5px] font-semibold text-state-off hover:underline" data-salary-resolve="cancel">
+                      Деньги в кассе
+                    </button>
+                  </span>
+                )}
+                {manage && p.status !== "DISPUTED" && (
                   <button
                     type="button"
                     title="Удалить выплату"
@@ -485,7 +528,11 @@ export default function Salary() {
                   </span>
                   <Cell label="На начало"><Signed v={r.start} /></Cell>
                   <Cell label="Начислено"><span className="tabular-nums">{money(r.accrued + r.bonus)}</span></Cell>
-                  <Cell label="Получено"><span className="tabular-nums">{money(r.paid)}</span></Cell>
+                  <Cell label="Получено">
+                    <span className="tabular-nums">{money(r.paid)}</span>
+                    {!!r.pending && <span title={`Ждёт подтверждения: ${money(r.pending)}`}> ⏳</span>}
+                    {!!r.disputed && <span title={`«Не получал»: ${money(r.disputed)}`}> ⚠</span>}
+                  </Cell>
                   <Cell label="Итого"><Signed v={r.end} strong /></Cell>
                 </button>
                 {opened && <Detail data={data} row={r} detail={data.details[r.userId]} onChanged={() => void load()} />}

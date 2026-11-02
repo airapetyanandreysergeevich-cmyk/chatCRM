@@ -374,7 +374,7 @@ statsRouter.get(
     const prev = shiftYear(r);
     const keys = bucketKeys(r, gran);
     const data = await run(req, async (c) => {
-      const [flow, flowAll, flowPrev, pay, cats, kinds, wp, iss, issPrev, first] = await Promise.all([
+      const [flow, flowAll, flowPrev, pay, cats, kinds, wp, iss, issPrev, first, methods, toStaff] = await Promise.all([
         S.cashFlow(c, r, gran, WITHDRAW),
         S.cashFlow(c, r, "all", WITHDRAW),
         S.cashFlow(c, prev, "all", WITHDRAW),
@@ -385,6 +385,8 @@ statsRouter.get(
         S.issued(c, r, "all"),
         S.issued(c, prev, "all"),
         S.firstDay(c),
+        S.payMethods(c, r, WITHDRAW),
+        S.moneyToStaff(c, r),
       ]);
       const hasPrev = !!first && first <= prev.from;
       const tot = flowAll.get("all") ?? { inc: 0, out: 0, withdrawn: 0 };
@@ -408,6 +410,9 @@ statsRouter.get(
         pay: {
           kinds: PAY_KINDS.map((k) => ({ kind: k, total: payTotal(k), values: payOf(k) })),
         },
+        // Способы оплаты своими названиями и деньги клиентов у сотрудников (03.11.2026).
+        methods: methods.map((m) => ({ label: m.label, act: m.act, v: round(m.v) })),
+        toStaff: toStaff.map((x) => ({ ...x, total: round(x.total), confirmed: round(x.confirmed), pending: round(x.pending), disputed: round(x.disputed) })),
         expenses: cats.map((x) => ({ label: x.label, v: round(x.v) })),
         checkByKind: kinds.map((x) => ({ label: x.label, n: x.n, avg: round(x.avg) })),
         worksParts: {

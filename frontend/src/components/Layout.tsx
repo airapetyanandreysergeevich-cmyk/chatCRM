@@ -5,6 +5,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { onUnreadChanged } from "../lib/unread";
+import { IncomingDialog, MoneyButton, useIncoming } from "./IncomingMoney";
 import { printBridge, startPrintStation } from "../lib/printing";
 import { labelsApi } from "../lib/labels";
 import { useBarcodeScanner } from "../lib/scanner";
@@ -155,6 +156,13 @@ export default function Layout() {
   }, [isPlatformPanel]);
 
   const inWorkshopNow = me?.kind === "tenant" || (me?.kind === "platform" && !!me.impersonating);
+  // 💵 Деньги клиентов на подтверждение (03.11.2026) — только у сотрудника мастерской.
+  const incoming = useIncoming(me?.kind === "tenant");
+  const [moneyOpen, setMoneyOpen] = useState(false);
+  // Из push «Зачислено на ваш счёт» — /salary?incoming=1: окно открывается само.
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("incoming") === "1") setMoneyOpen(true);
+  }, [location.search]);
   const loadUnread = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (!inWorkshopNow) return;
@@ -336,6 +344,7 @@ export default function Layout() {
                 в поля панели, чтобы обе кнопки остались удобного размера. */}
             {collapsed && (
               <div className="-mx-2 flex items-center gap-1" data-rail-top>
+                <MoneyButton count={incoming.items.length} onOpen={() => setMoneyOpen(true)} size="sm" />
                 <NavLink
                   to="/settings/notifications"
                   aria-label="Оповещения"
@@ -358,6 +367,7 @@ export default function Layout() {
             )}
             {!collapsed && (
               <div className="flex items-center gap-0.5">
+              <MoneyButton count={incoming.items.length} onOpen={() => setMoneyOpen(true)} />
               <NavLink
                 to="/settings/notifications"
                 aria-label="Оповещения"
@@ -458,6 +468,7 @@ export default function Layout() {
           <header className="sticky top-0 z-40 flex items-center justify-between border-b border-line bg-surface px-4 pb-2.5 pt-[max(10px,env(safe-area-inset-top))] lg:hidden">
             <BrandRow />
             <div className="flex items-center gap-1">
+              <MoneyButton count={incoming.items.length} onOpen={() => setMoneyOpen(true)} />
               <NavLink
                 to="/settings/notifications"
                 className={({ isActive }) =>
@@ -494,6 +505,16 @@ export default function Layout() {
               <Outlet />
             </div>
           </main>
+          {moneyOpen && (
+            <IncomingDialog
+              items={incoming.items}
+              onClose={() => {
+                setMoneyOpen(false);
+                if (new URLSearchParams(location.search).get("incoming") === "1") navigate(location.pathname, { replace: true });
+              }}
+              onChanged={incoming.reload}
+            />
+          )}
 
           {/*
             Нижнее меню — одна лента со всеми разделами.

@@ -12,6 +12,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 
 /**
@@ -240,13 +242,24 @@ final class Calls {
             }
             if (f.size > 50L * 1024 * 1024) continue; // больше, чем примет сервер
             InputStream in = null;
+            File converted = null;
             try {
-                in = c.getContentResolver().openInputStream(f.uri);
+                String mime = Recorder.serverMime(f);
+                long size = f.size;
+                // AMR/3GP браузер не играет — перегоняем в m4a (1.5). Не вышло — шлём как есть.
+                if (Transcode.needed(mime)) converted = Transcode.toM4a(c, f.uri);
+                if (converted != null) {
+                    in = new FileInputStream(converted);
+                    size = converted.length();
+                    mime = "audio/mp4";
+                } else {
+                    in = c.getContentResolver().openInputStream(f.uri);
+                }
                 if (in == null) {
                     keep.put(job);
                     continue;
                 }
-                Http.upload(base + "api/sms/phone/calls/" + job.optString("id") + "/audio", token, in, f.size, Recorder.serverMime(f), 120000);
+                Http.upload(base + "api/sms/phone/calls/" + job.optString("id") + "/audio", token, in, size, mime, 120000);
                 Recorder.learn(c, f.folder, System.currentTimeMillis());
             } catch (Http.Unauthorized e) {
                 throw e;
@@ -261,6 +274,7 @@ final class Calls {
                 } catch (Exception ignored) {
                     // закрыть не вышло — не страшно
                 }
+                if (converted != null) converted.delete();
             }
         }
         prefs(c).edit().putString("pending", keep.toString()).apply();

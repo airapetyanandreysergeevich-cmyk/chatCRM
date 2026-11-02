@@ -34,6 +34,8 @@ interface TenantNotice {
   targetUserId?: string | null;
   /** Несколько адресатов лично — участники переписки в истории ремонта. */
   targetUserIds?: string[];
+  /** «Почему вам» для личного адресата, если это не мастер заказа. */
+  targetWhy?: string;
   /** Кого оповещать не надо — обычно тот, кто сам это действие и сделал. */
   exceptUserId?: string | null;
   payload?: Record<string, unknown>;
@@ -163,10 +165,14 @@ async function resolveRecipients(
     out.set(u.id, why);
   }
   if (definition?.hasDirectTarget && notice.targetUserId) {
-    out.set(notice.targetUserId, notice.event === "order.assigned" ? "вы назначены мастером этого заказа" : "вы мастер этого заказа");
+    out.set(
+      notice.targetUserId,
+      notice.targetWhy ?? (notice.event === "order.assigned" ? "вы назначены мастером этого заказа" : "вы мастер этого заказа")
+    );
   }
   if (definition?.hasDirectTarget) {
-    for (const id of notice.targetUserIds ?? []) if (!out.has(id)) out.set(id, "вы мастер этого заказа или уже писали в его историю");
+    for (const id of notice.targetUserIds ?? [])
+      if (!out.has(id)) out.set(id, notice.targetWhy ?? "вы мастер этого заказа или уже писали в его историю");
   }
   if (notice.exceptUserId) out.delete(notice.exceptUserId);
   return out;

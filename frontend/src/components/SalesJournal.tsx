@@ -92,7 +92,7 @@ export function SalesJournal({
                       <span className="text-right">
                         <b className={"block tabular-nums " + (s.returnedAt ? "text-ink-dim line-through" : "")}>{money(s.total)}</b>
                         <span className={"text-[12px] " + (s.returnedAt ? "font-semibold text-state-off" : "text-ink-dim")}>
-                          {s.returnedAt ? "возврат" : PAYMENT_LABEL[s.payment]}
+                          {s.returnedAt ? "возврат" : (s.paymentLabel ?? PAYMENT_LABEL[s.payment])}
                         </span>
                       </span>
                     </button>
@@ -116,7 +116,7 @@ export function SalesJournal({
                         </table>
                         <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12.5px] text-ink-muted">
                           {s.discount > 0 && <span>Скидка {money(s.discount)}</span>}
-                          <span>Оплата: {PAYMENT_LABEL[s.payment]}</span>
+                          <span>Оплата: {(s.paymentLabel ?? PAYMENT_LABEL[s.payment])}</span>
                           <span>Гарантия: {warrantyLabel(s.warrantyDays ?? 0)}</span>
                           {s.soldBy && <span>Продал: {s.soldBy.fullName}</span>}
                         </div>

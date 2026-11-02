@@ -35,7 +35,7 @@ DECLARE
     'StockCategory',
     'Sale','SaleItem',
     'OrderLabel','OrderLabelMark','OrderEvent',
-    'ServiceCategory','CallRecord'
+    'ServiceCategory','CallRecord','PayMethod','PrintTemplate'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

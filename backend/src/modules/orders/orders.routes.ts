@@ -27,7 +27,8 @@ import {
   type Key,
 } from "../../lib/listOrder";
 import { nextCustomerNumber } from "../../lib/customerNumber";
-import { takePayment } from "../../lib/payment";
+import { normalizeParts, orderPayments, PayError, resolveWay, takeOrderPayment, type PayoutNote } from "../../lib/payment";
+import { notifyPayouts } from "../finance/money";
 import { PERMISSIONS } from "../../lib/permissions";
 import { isAllowedUpload, putOrderFile, removeFile, signedUrl } from "../../lib/storage";
 import { assertStorageRoom } from "../../lib/usage";
@@ -838,6 +839,9 @@ ordersRouter.get(
         ? await debtMap(tx, { orderIds: [order.id] })
         : { byOrder: new Map<string, number>() };
 
+      // Чем платили (03.11.2026) — для акта: «Оплата: наличный расчёт 3 000 ₽, безналичный 2 000 ₽».
+      const payments = seesMoney(req) ? await orderPayments(tx, order.id) : undefined;
+
       return {
         ...projectOrder(order, {
           contacts: seesCustomerContacts(req),
@@ -845,6 +849,7 @@ ordersRouter.get(
           previousRepair,
         }),
         ...debtFields(owed.get(order.id), seesMoney(req)),
+        ...(payments ? { payments } : {}),
       };
     });
     res.json(data);
@@ -1457,9 +1462,23 @@ ordersRouter.post(
          */
         payment: z
           .object({
-            method: z.enum(["CASH", "CARD", "DEBT"]),
-            /** Когда клиент обещал заплатить. Только для долга. */
+            /** CASH, CARD, DEBT или id своего способа оплаты (03.11.2026). */
+            method: z.string().trim().max(40),
+            /** Свой способ: сотрудник, который принял деньги на себя. */
+            recipientId: z.string().uuid().nullable().optional(),
+            /** Когда клиент обещал заплатить. Для долга и недоплаты частями. */
             promisedAt: z.string().datetime().optional().or(z.literal("")),
+            /** Оплата частями: 3 000 наличными + 2 000 переводом. Не хватило — остаток в долг. */
+            parts: z
+              .array(
+                z.object({
+                  method: z.string().trim().max(40),
+                  amount: z.number().positive().max(100_000_000),
+                  recipientId: z.string().uuid().nullable().optional(),
+                })
+              )
+              .max(6)
+              .optional(),
           })
           .optional(),
       })
@@ -1467,6 +1486,7 @@ ordersRouter.post(
     const reason = rawReason || undefined;
     const tenantId = tenantOf(req);
 
+    const payouts: PayoutNote[] = [];
     const extra = await withTenant(tenantId, async (tx) => {
       const order = await tx.order.findFirst({ where: { id: req.params.id, deletedAt: null } });
       if (!order) throw notFound("Заказ не найден");
@@ -1504,15 +1524,51 @@ ordersRouter.post(
         Number(already.find((a) => a.direction === "OUT")?._sum.amount ?? 0);
       const due = Math.round((Number(fresh?.total ?? 0) - paid) * 100) / 100;
 
-      if (payment && payment.method !== "DEBT" && due > 0) {
-        await takePayment(tx, tenantId, {
-          orderId: order.id,
-          customerId: order.customerId ?? null,
-          amount: due,
-          how: payment.method,
-          userId: actorUserId(req),
-          comment: `Оплата при выдаче заказа ${order.number}`,
-        });
+      // Чем расплатились: один способ на всю сумму или частями (остаток — в долг).
+      let left = due;
+      let kind: "CASH" | "CARD" | "DEBT" | null = payment ? (payment.method === "DEBT" ? "DEBT" : null) : null;
+      let ownMethod: string | null = null;
+      if (payment && due > 0 && payment.method !== "DEBT") {
+        const parts = payment.parts?.length
+          ? normalizeParts(payment.parts, due)
+          : [{ method: payment.method, amount: due, recipientId: payment.recipientId ?? null }];
+        let biggest = 0;
+        for (const part of parts) {
+          try {
+            const r = await takeOrderPayment(tx, tenantId, {
+              orderId: order.id,
+              orderNumber: order.number,
+              customerId: order.customerId ?? null,
+              amount: part.amount,
+              how: part.method,
+              recipientId: part.recipientId ?? null,
+              userId: actorUserId(req),
+              comment: `Оплата при выдаче заказа ${order.number}`,
+            });
+            payouts.push(...r.payouts);
+            left = Math.round((left - r.amount) * 100) / 100;
+            if (r.amount > biggest) {
+              biggest = r.amount;
+              const way = await resolveWay(tx, tenantId, part.method);
+              kind = way.kind;
+              ownMethod = way.payMethod?.id ?? null;
+            }
+          } catch (err) {
+            if (err instanceof PayError) throw badRequest(err.message);
+            throw err;
+          }
+        }
+        if (left > 0.004) kind = "DEBT";
+      } else if (payment && payment.method !== "DEBT") {
+        // Платить нечего — вид расчёта всё равно запоминаем, как раньше.
+        try {
+          const way = await resolveWay(tx, tenantId, payment.method);
+          kind = way.kind;
+          ownMethod = way.payMethod?.id ?? null;
+        } catch (err) {
+          if (err instanceof PayError) throw badRequest(err.message);
+          throw err;
+        }
       }
 
       await tx.order.update({
@@ -1520,11 +1576,11 @@ ordersRouter.post(
         data: {
           issuedAt: new Date(),
           issuedById: actorUserId(req),
-          paymentMethod: payment?.method ?? null,
+          paymentMethod: kind,
+          payMethodId: ownMethod,
           // Обещанную дату держим только у долга: у оплаченного заказа она
           // означала бы обещание неизвестно чего.
-          debtDueAt:
-            payment?.method === "DEBT" && payment.promisedAt ? new Date(payment.promisedAt) : null,
+          debtDueAt: kind === "DEBT" && payment?.promisedAt ? new Date(payment.promisedAt) : null,
           ...(closed ? { statusId: closed.id } : {}),
         },
       });
@@ -1549,7 +1605,7 @@ ordersRouter.post(
         diff: {
           issued: true,
           discount,
-          ...(payment ? { payment: payment.method, due } : {}),
+          ...(payment ? { payment: payment.method, due, ...(payment.parts?.length ? { parts: payment.parts } : {}), ...(left > 0.004 && kind === "DEBT" && payment.method !== "DEBT" ? { debtLeft: left } : {}) } : {}),
           ...(withoutRepair ? { withoutRepair: reason ?? true } : {}),
         },
         ip: clientIp(req),
@@ -1562,6 +1618,7 @@ ordersRouter.post(
       return x && (x.works.length || x.parts.length || (x.amount ?? 0) > 0) ? { amount: x.amount ?? 0 } : null;
     });
 
+    void notifyPayouts(tenantId, payouts);
     // Фронт предложит распечатать «Акт доплаты».
     res.json({ ok: true, ...(extra ? { extra } : {}) });
   })

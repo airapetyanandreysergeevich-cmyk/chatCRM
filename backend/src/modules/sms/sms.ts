@@ -27,7 +27,16 @@ export const DEFAULT_TEMPLATES = {
 export type TemplateKey = keyof typeof DEFAULT_TEMPLATES;
 
 /** Подстановки шаблона — те же подсказки показывает интерфейс. */
-export const PLACEHOLDERS = ["{клиент}", "{номер}", "{техника}", "{сумма}", "{стоимость}", "{работы}", "{мастерская}"] as const;
+export const PLACEHOLDERS = ["{клиент}", "{номер}", "{техника}", "{сумма}", "{стоимость}", "{работы}", "{срок}", "{мастерская}"] as const;
+
+/** Свои шаблоны мастерской (03.11.2026): «Нужна доплата», «Ждём запчасть»… — в меню SMS заказа. */
+export interface CustomTemplate {
+  id: string;
+  name: string;
+  text: string;
+  on: boolean;
+}
+export const CUSTOM_MAX = 20;
 
 export type ApprovalConfig = {
   enabled: boolean;
@@ -45,6 +54,7 @@ export type ApprovalConfig = {
 export interface SmsConfig {
   onReady: OnReady;
   templates: Record<TemplateKey, string | null>;
+  custom: CustomTemplate[];
   approval: ApprovalConfig;
 }
 
@@ -67,6 +77,16 @@ function readConfig(raw: unknown): SmsConfig {
       approvalYes: str(t.approvalYes),
       approvalNo: str(t.approvalNo),
     },
+    custom: (Array.isArray(c.custom) ? c.custom : [])
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map((x) => ({
+        id: typeof x.id === "string" ? x.id.slice(0, 40) : "",
+        name: typeof x.name === "string" ? x.name.trim().slice(0, 40) : "",
+        text: typeof x.text === "string" ? x.text.trim().slice(0, 1000) : "",
+        on: x.on !== false,
+      }))
+      .filter((x) => x.id && x.name && x.text)
+      .slice(0, CUSTOM_MAX),
     approval: {
       enabled: a.enabled === true,
       onWaiting: ON_READY.includes(a.onWaiting as OnReady) ? (a.onWaiting as OnReady) : "ask",
@@ -115,6 +135,7 @@ export async function orderFacts(tx: Prisma.TransactionClient, tenantId: string,
       total: true,
       assignedMasterId: true,
       estimatedCost: true,
+      dueAt: true,
       status: { select: { id: true, group: true } },
       customer: { select: { id: true, name: true, phone: true } },
       device: { select: { kind: true, brand: true, model: true } },
@@ -154,6 +175,7 @@ export async function orderFacts(tx: Prisma.TransactionClient, tenantId: string,
       "{сумма}": rub(due),
       "{стоимость}": cost > 0 ? rub(cost) : "по договорённости",
       "{работы}": works || "по результатам диагностики",
+      "{срок}": order.dueAt ? new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" }).format(order.dueAt) : "в ближайшее время",
       "{мастерская}": workshop,
     } as Record<string, string>,
     phone: normalizePhone(order.customer?.phone),

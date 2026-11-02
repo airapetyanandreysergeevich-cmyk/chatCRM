@@ -39,7 +39,8 @@ const ORDER: readonly string[] = [
   "smsMessage",
   "smsPhone",
   "integration",
-  // печать: задания ссылаются на компьютер
+  // печать: задания ссылаются на компьютер; свои бланки — ни на что
+  "printTemplate",
   "printJob",
   "printStation",
   // зарплата: ссылается на сотрудников
@@ -48,6 +49,8 @@ const ORDER: readonly string[] = [
   "salaryMonth",
   // деньги
   "transaction",
+  // свои способы оплаты ссылаются на кассу — после движений, до касс
+  "payMethod",
   "transactionCategory",
   "cashRegister",
   // склад
