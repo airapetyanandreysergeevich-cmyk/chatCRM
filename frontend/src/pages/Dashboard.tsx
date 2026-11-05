@@ -2,7 +2,7 @@ import { copyable, copyRow } from "../components/CopyMenu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { backState } from "../lib/listState";
-import { IconOrders } from "../components/icons";
+import { IconOrders, IconPlus } from "../components/icons";
 import { Badge, Banner, EmptyState, Spinner } from "../components/ui";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -599,7 +599,7 @@ const XL_COLS = [
 ];
 
 export default function Dashboard() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -708,9 +708,24 @@ export default function Dashboard() {
         </p>
         {/* Название не обрезаем: длинное имя мастерской лучше перенести
             на вторую строку, чем показать «Сервис на …». */}
-        <h1 className="mt-1.5 text-[24px] font-extrabold leading-tight tracking-tight [overflow-wrap:anywhere] sm:text-[32px] lg:text-[38px]">
-          {workshop}
-        </h1>
+        <div className="mt-1.5 flex items-center gap-3 sm:gap-4">
+          <h1 className="min-w-0 text-[24px] font-extrabold leading-tight tracking-tight [overflow-wrap:anywhere] sm:text-[32px] lg:text-[38px]">
+            {workshop}
+          </h1>
+          {/* Новый заказ — сразу с главной, рядом с названием (Андрей, 04.11.2026). */}
+          {can("orders.create") && (
+            <Link
+              to="/orders/new"
+              data-dash-new-order
+              aria-label="Новый заказ"
+              title="Новый заказ — принять технику"
+              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-field bg-brand px-3 text-[14px] font-semibold text-white transition-colors hover:bg-brand-press sm:h-11 sm:px-4 [&>svg]:h-[18px] [&>svg]:w-[18px]"
+            >
+              <IconPlus />
+              <span className="hidden sm:inline">Новый заказ</span>
+            </Link>
+          )}
+        </div>
       </div>
       {/* Обновление программы — значком слева от часов, а не окном посреди работы. */}
       <div className="flex shrink-0 items-start gap-3 sm:gap-4">

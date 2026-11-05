@@ -5,7 +5,7 @@
  *   npx tsx test/blanks.ts
  */
 import ExcelJS from "exceljs";
-import { example, fill, formatNumber, scan, toBuffer, toHtml } from "../src/modules/blanks/excel";
+import { example, fill, formatNumber, scan, shiftRows, toBuffer, toHtml } from "../src/modules/blanks/excel";
 import { norm, suggest } from "../src/modules/blanks/marks";
 import { numberWords, rublesWords } from "../src/modules/blanks/words";
 import { normalizeParts } from "../src/lib/payment";
@@ -94,6 +94,25 @@ async function main() {
   check(html.length === 1 && /Прошивка/.test(html[0].html) && /colspan="2"/.test(html[0].html) && /colspan="4"/.test(html[0].html), "лист для печати: строки и объединения", html[0]?.html.slice(0, 200));
   check(/4 700 ₽/.test(html[0].html) && /font-weight:700/.test(html[0].html), "лист: деньги по формату, жирный шрифт");
   check(html[0].width > 300 && html[0].width < 600, "лист: ширина из столбцов", html[0].width);
+
+  // ------------------------------------------------------------ область печати (04.11.2026)
+  check(shiftRows("A1:G30", 3, 2) === "A1:G32", "область печати растягивается", shiftRows("A1:G30", 3, 2));
+  check(shiftRows("$A$1:$G$30", 3, 2) === "$A$1:$G$32", "область печати с $", shiftRows("$A$1:$G$30", 3, 2));
+  check(shiftRows("A1:G2,A5:G9", 3, 2) === "A1:G2,A7:G11", "несколько областей: выше — на месте, ниже — вниз", shiftRows("A1:G2,A5:G9", 3, 2));
+  check(shiftRows("1:2", 3, 5) === "1:2", "сквозные строки выше списка — на месте");
+  {
+    const wb2 = new ExcelJS.Workbook();
+    const ws2 = wb2.addWorksheet("Бланк");
+    ws2.getCell("A1").value = "Заказ {номер}";
+    ws2.getCell("A3").value = "{работа}";
+    ws2.getCell("A6").value = "Подпись ________";
+    ws2.pageSetup.printArea = "A1:D6";
+    const f2 = await fill(await toBuffer(wb2), "order", { values: { номер: "Р-9" }, lists: { работа: [{ работа: "1" }, { работа: "2" }, { работа: "3" }, { работа: "4" }] }, money: new Set() });
+    const sh = f2.worksheets[0];
+    check(sh.pageSetup.printArea === "A1:D9", "после размножения строк область печати захватывает подпись", sh.pageSetup.printArea);
+    const h = toHtml(f2)[0].html;
+    check(/Подпись/.test(h), "подпись под таблицей — на листе для печати");
+  }
 
   // ------------------------------------------------------------ образец
   const ex = await example("order");

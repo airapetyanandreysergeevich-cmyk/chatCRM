@@ -20,6 +20,7 @@ const TENANT_DELEGATES = new Set([
   "callRecord",
   "payMethod",
   "printTemplate",
+  "docLayout",
 ]);
 
 const WHERE_OPS = new Set([

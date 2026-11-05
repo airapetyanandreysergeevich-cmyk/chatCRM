@@ -59,6 +59,8 @@ function Badge({ count }: { count: number }) {
 function pageWidth(path: string): "narrow" | "card" | "wide" {
   // Прайс услуг — список с категориями, как склад: во всю ширину (28.10.2026).
   if (path === "/settings/services") return "wide";
+  // Редактор бланков — лист и инструменты рядом: во всю ширину (05.11.2026).
+  if (path === "/settings/blank-editor") return "wide";
   if (path.startsWith("/settings") || path === "/orders/new") return "narrow";
   if (/^\/(orders|clients)\/[^/]+$/.test(path)) return "card";
   return "wide";

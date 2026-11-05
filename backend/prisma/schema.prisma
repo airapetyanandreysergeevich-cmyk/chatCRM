@@ -114,6 +114,7 @@ model Tenant {
   callRecords       CallRecord[]
   payMethods        PayMethod[]
   printTemplates    PrintTemplate[]
+  docLayouts        DocLayout[]
   deviceHints         DeviceHint[]
   quickPicks          QuickPick[]
   orders              Order[]
@@ -1518,6 +1519,27 @@ model PrintTemplate {
   data        Bytes
   /// Что нашли в шаблоне при загрузке: {known: [...], unknown: [...]}.
   marks       Json     @default("{}")
+  sortOrder   Int      @default(0)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+/// Бланк из «Редактора бланков» (05.11.2026): лист A4 с элементами в миллиметрах.
+/// use — какой стандартный документ он заменяет при печати (intake | act | extra | sale);
+/// null — отдельная вкладка на странице печати. Один бланк на документ.
+model DocLayout {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  /// order — для заказа; sale — для продажи со склада.
+  target      String   @default("order")
+  use         String?
+  data        Json
   sortOrder   Int      @default(0)
   createdById String?
   createdAt   DateTime @default(now())

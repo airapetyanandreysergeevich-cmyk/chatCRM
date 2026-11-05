@@ -231,6 +231,11 @@ function insertCopies(ws: ExcelJS.Worksheet, r: number, count: number) {
     else if (m.bottom >= r) again({ ...m, bottom: m.bottom + count });
     else again(m);
   }
+  // Область печати (и сквозные строки) — растягивается вместе со списком,
+  // иначе подписи и дата под таблицей обрезались (найдено 04.11.2026).
+  const ps = ws.pageSetup as { printArea?: string; printTitlesRow?: string };
+  if (ps.printArea) ps.printArea = shiftRows(ps.printArea, r, count);
+  if (ps.printTitlesRow) ps.printTitlesRow = shiftRows(ps.printTitlesRow, r, count);
   // Картинки ниже строки — тоже вниз.
   for (const img of ws.getImages()) {
     const a = img.range as unknown as { tl: { nativeRow: number }; br?: { nativeRow: number } };
@@ -243,6 +248,31 @@ function insertCopies(ws: ExcelJS.Worksheet, r: number, count: number) {
       /* картинка без привязки к ячейкам */
     }
   }
+}
+
+/**
+ * Диапазоны вида «A1:G30», «$A$1:$G$30», «1:3», несколько через запятую или
+ * «&&»: после вставки count строк под строкой r всё, что ниже r, едет вниз,
+ * а диапазон, захватывающий строку r, — растягивается.
+ */
+export function shiftRows(ranges: string, r: number, count: number): string {
+  return ranges
+    .split(/(,|&&)/)
+    .map((part) => {
+      if (part === "," || part === "&&") return part;
+      const refs = part.split(":");
+      const rows = refs.map((ref) => Number(/\$?(\d+)$/.exec(ref.trim())?.[1] ?? NaN));
+      return refs
+        .map((ref, i) => {
+          const row = rows[i];
+          if (!Number.isFinite(row)) return ref;
+          const isBottom = i === refs.length - 1 && refs.length > 1;
+          const moves = row > r || (isBottom && row >= r && (rows[0] ?? row) <= r);
+          return moves ? ref.replace(/(\$?)(\d+)$/, (_, d) => `${d}${row + count}`) : ref;
+        })
+        .join(":");
+    })
+    .join("");
 }
 
 export async function toBuffer(wb: ExcelJS.Workbook): Promise<Buffer> {

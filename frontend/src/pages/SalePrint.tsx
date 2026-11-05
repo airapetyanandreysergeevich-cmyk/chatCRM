@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { blanksApi, type Blank, type RenderedSheet } from "../lib/blanks";
 import { ExcelPages } from "../components/ExcelSheet";
+import { BlankPages } from "../components/blank/BlankRender";
+import { layoutsApi, type Layout, type LayoutMeta } from "../lib/docLayouts";
+import { saleData } from "../lib/blankData";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -34,6 +37,24 @@ export default function SalePrint() {
   // Свои бланки из Excel для продажи (03.11.2026): ?doc=x:<id>.
   const asked = params.get("doc");
   const custom = asked?.startsWith("x:") ? asked.slice(2) : null;
+  // Бланк редактора (05.11.2026): «вместо товарного чека» — сам; ?doc=d:<id> — вкладкой.
+  const designId = asked?.startsWith("d:") ? asked.slice(2) : null;
+  const [layouts, setLayouts] = useState<{ active: Partial<Record<string, Layout>>; tabs: LayoutMeta[] } | null>(null);
+  const [tabLayout, setTabLayout] = useState<Layout | null>(null);
+  useEffect(() => {
+    layoutsApi
+      .forPrint("sale")
+      .then(setLayouts)
+      .catch(() => setLayouts({ active: {}, tabs: [] }));
+  }, []);
+  useEffect(() => {
+    setTabLayout(null);
+    if (!designId) return;
+    layoutsApi
+      .get(designId)
+      .then(setTabLayout)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Бланк не найден"));
+  }, [designId]);
   const [blanks, setBlanks] = useState<Blank[]>([]);
   const [sheets, setSheets] = useState<RenderedSheet[] | null>(null);
   useEffect(() => {
@@ -63,17 +84,21 @@ export default function SalePrint() {
   }, [id]);
 
   const auto = params.get("print") === "1";
+  const design = custom ? null : designId ? (tabLayout?.design ?? null) : (layouts?.active.sale?.design ?? null);
+  const [blankReady, setBlankReady] = useState(false);
   useEffect(() => {
-    if (!auto || !sale || !forms) return;
+    if (!auto || !sale || !forms || !layouts || (design && !blankReady)) return;
     const t = setTimeout(() => window.print(), 300);
     return () => clearTimeout(t);
-  }, [auto, sale, forms]);
+  }, [auto, sale, forms, layouts, design, blankReady]);
 
   const workshop =
     me?.kind === "tenant" ? (me.tenant?.name ?? "Мастерская") : me?.kind === "platform" ? (me.impersonating?.name ?? "Мастерская") : "Мастерская";
 
+  const blankData = useMemo(() => (sale && forms && design ? saleData(sale, forms, workshop) : null), [sale, forms, design, workshop]);
+
   if (error) return <div className="p-8 text-[14px]">{error}</div>;
-  if (!sale || !forms) return <div className="p-8 text-[14px]">Готовим чек…</div>;
+  if (!sale || !forms || !layouts) return <div className="p-8 text-[14px]">Готовим чек…</div>;
 
   const units = sale.items.reduce((n, i) => n + i.qty, 0);
 
@@ -87,8 +112,19 @@ export default function SalePrint() {
         >
           ‹ Назад
         </button>
-        {blanks.length > 0 && (
+        {blanks.length + layouts.tabs.length > 0 && (
           <div className="flex flex-wrap gap-2">
+            {layouts.tabs.map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => navigate(`/sales/${id}/print?doc=d:${l.id}`)}
+                data-print-layout={l.name}
+                className={"rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " + (designId === l.id ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")}
+              >
+                {l.name}
+              </button>
+            ))}
             {[{ id: null as string | null, name: "Чек" }, ...blanks].map((b) => (
               <button
                 key={b.id ?? "receipt"}
@@ -97,7 +133,7 @@ export default function SalePrint() {
                 data-print-blank={b.name}
                 className={
                   "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-                  (custom === b.id ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+                  ((b.id === null ? !custom && !designId : custom === b.id) ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
                 }
               >
                 {b.name}
@@ -123,6 +159,10 @@ export default function SalePrint() {
 
       {custom ? (
         sheets ? <ExcelPages sheets={sheets} /> : <div className="p-8 text-[14px] text-white">Заполняем бланк…</div>
+      ) : designId && !tabLayout ? (
+        <div className="p-8 text-[14px] text-white">Готовим бланк…</div>
+      ) : design && blankData ? (
+        <BlankPages design={design} data={blankData} target="sale" onReady={() => setBlankReady(true)} />
       ) : (
 
       <div

@@ -693,6 +693,9 @@ export default function PrintFormsPage() {
         }
       />
 
+      <Banner>
+        Новое: <Link to="/settings/blank-editor" className="font-semibold text-brand hover:underline">Редактор бланков</Link> — свой вид квитанции, акта и чека прямо на листе. Документ, переведённый туда («Печатать вместо»), печатается новым бланком; остальные — как настроены здесь.
+      </Banner>
       {!mayEdit && <Banner>Бланки настраивает владелец мастерской. Здесь можно посмотреть, как они выглядят.</Banner>}
       {error && <Banner tone="error">{error}</Banner>}
       {notice && <Banner>{notice}</Banner>}

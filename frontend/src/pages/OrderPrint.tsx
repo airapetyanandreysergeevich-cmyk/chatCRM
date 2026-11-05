@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -8,6 +8,9 @@ import { PrintSheet, type Doc } from "../components/PrintSheet";
 import { isStationPage, STATION_FAILED, STATION_READY } from "../lib/printing";
 import { blanksApi, type Blank, type RenderedSheet } from "../lib/blanks";
 import { ExcelPages } from "../components/ExcelSheet";
+import { BlankPages } from "../components/blank/BlankRender";
+import { layoutsApi, type Layout, type LayoutMeta } from "../lib/docLayouts";
+import { orderData } from "../lib/blankData";
 
 /**
  * Печатные бланки: квитанция о приёме и акт выполненных работ.
@@ -39,6 +42,12 @@ export default function OrderPrint() {
   const doc: Doc = asked === "act" || asked === "extra" ? asked : "intake";
   // Свой бланк из Excel (03.11.2026): ?doc=x:<id>.
   const custom = asked?.startsWith("x:") ? asked.slice(2) : null;
+  // Бланк из «Редактора бланков» (05.11.2026): ?doc=d:<id> — отдельной вкладкой;
+  // заменяющий документ (квитанцию, акт…) печатается вместо стандартного сам.
+  const designId = asked?.startsWith("d:") ? asked.slice(2) : null;
+  const [layouts, setLayouts] = useState<{ active: Partial<Record<string, Layout>>; tabs: LayoutMeta[] } | null>(null);
+  const [tabLayout, setTabLayout] = useState<Layout | null>(null);
+  const [blankReady, setBlankReady] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [forms, setForms] = useState<PrintForms | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +61,23 @@ export default function OrderPrint() {
       .then((r) => setBlanks(r.items))
       .catch(() => setBlanks([]));
   }, []);
+  useEffect(() => {
+    layoutsApi
+      .forPrint("order")
+      .then(setLayouts)
+      .catch(() => setLayouts({ active: {}, tabs: [] }));
+  }, []);
+  useEffect(() => {
+    setTabLayout(null);
+    setBlankReady(false);
+    if (!designId) return;
+    layoutsApi
+      .get(designId)
+      .then(setTabLayout)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Бланк не найден"));
+  }, [designId]);
+  useEffect(() => setBlankReady(false), [asked]);
+
   useEffect(() => {
     setSheets(null);
     if (!custom) return;
@@ -83,7 +109,10 @@ export default function OrderPrint() {
   // Бланк открыт программой FineCRM для печати без окна: когда он
   // дорисован, говорим ей об этом заголовком страницы (desktop/src/printing.js).
   const station = isStationPage();
-  const ready = !!order && !!forms && (!custom || !!sheets);
+  const design = custom ? null : designId ? (tabLayout?.design ?? null) : (layouts?.active[doc]?.design ?? null);
+  const blankData = useMemo(() => (order && forms && design ? orderData(order, forms, workshop, designId ? null : doc) : null), [order, forms, design, workshop, designId, doc]);
+  const onBlankReady = useCallback(() => setBlankReady(true), []);
+  const ready = !!order && !!forms && !!layouts && (!custom || !!sheets) && (!designId || !!tabLayout) && (!design || blankReady);
   useEffect(() => {
     if (!station) return;
     if (error) {
@@ -103,7 +132,7 @@ export default function OrderPrint() {
   }, [station, ready, error]);
 
   if (error) return <div className="p-8 text-[14px]">{error}</div>;
-  if (!order || !forms) return <div className="p-8 text-[14px]">Готовим бланк…</div>;
+  if (!order || !forms || !layouts) return <div className="p-8 text-[14px]">Готовим бланк…</div>;
 
   return (
     <div className="min-h-screen bg-[#6B7280] print:bg-white">
@@ -122,7 +151,7 @@ export default function OrderPrint() {
             onClick={() => navigate(`/orders/${id}/print?doc=intake`)}
             className={
               "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-              (doc === "intake" && !custom ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              (doc === "intake" && !custom && !designId ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
             }
           >
             Квитанция
@@ -132,11 +161,25 @@ export default function OrderPrint() {
             onClick={() => navigate(`/orders/${id}/print?doc=act`)}
             className={
               "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-              (doc === "act" && !custom ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              (doc === "act" && !custom && !designId ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
             }
           >
             Акт работ
           </button>
+          {layouts.tabs.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => navigate(`/orders/${id}/print?doc=d:${l.id}`)}
+              data-print-layout={l.name}
+              className={
+                "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
+                (designId === l.id ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+              }
+            >
+              {l.name}
+            </button>
+          ))}
           {blanks.map((b) => (
             <button
               key={b.id}
@@ -157,7 +200,7 @@ export default function OrderPrint() {
               onClick={() => navigate(`/orders/${id}/print?doc=extra`)}
               className={
                 "rounded-[10px] px-4 py-2 text-[13.5px] font-semibold " +
-                (doc === "extra" && !custom ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
+                (doc === "extra" && !custom && !designId ? "bg-white text-black" : "border border-white/25 hover:bg-white/10")
               }
             >
               Акт доплаты
@@ -198,6 +241,14 @@ export default function OrderPrint() {
         ) : (
           <div className="p-8 text-[14px] text-white">Заполняем бланк…</div>
         )
+      ) : designId ? (
+        tabLayout && blankData ? (
+          <BlankPages design={tabLayout.design} data={blankData} target="order" onReady={onBlankReady} />
+        ) : (
+          <div className="p-8 text-[14px] text-white">Готовим бланк…</div>
+        )
+      ) : design && blankData ? (
+        <BlankPages design={design} data={blankData} target="order" onReady={onBlankReady} />
       ) : (
         <PrintSheet order={order} doc={doc} forms={forms} workshop={workshop} />
       )}

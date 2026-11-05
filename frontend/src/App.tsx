@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import PrintFormsPage from "./pages/PrintForms";
+import BlankEditorPage from "./pages/BlankEditor";
 import PayMethodsPage from "./pages/PayMethods";
 import Layout from "./components/Layout";
 import { CopyMenu } from "./components/CopyMenu";
@@ -103,6 +104,7 @@ export default function App() {
           <Route path="/settings/intake" element={<IntakeSettingsPage />} />
           <Route path="/settings/interface" element={<InterfacePage />} />
           <Route path="/settings/print" element={<PrintFormsPage />} />
+          <Route path="/settings/blank-editor" element={<BlankEditorPage />} />
           <Route path="/settings/payments" element={<PayMethodsPage />} />
           <Route path="/settings/peripherals" element={<PeripheralsPage />} />
           <Route path="/settings/integrations" element={<IntegrationsPage />} />

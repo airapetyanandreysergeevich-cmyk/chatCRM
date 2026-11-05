@@ -41,6 +41,7 @@ const ORDER: readonly string[] = [
   "integration",
   // печать: задания ссылаются на компьютер; свои бланки — ни на что
   "printTemplate",
+  "docLayout",
   "printJob",
   "printStation",
   // зарплата: ссылается на сотрудников

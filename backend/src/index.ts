@@ -47,6 +47,7 @@ import { callsRouter } from "./modules/calls/calls.routes";
 import { startCallsCleanup } from "./modules/calls/calls";
 import { payMethodsRouter } from "./modules/finance/payMethods.routes";
 import { blanksRouter } from "./modules/blanks/blanks.routes";
+import { layoutsJson, layoutsRouter } from "./modules/blanks/layouts.routes";
 import { startPayoutReminders } from "./modules/finance/money";
 import { ensureBucket } from "./lib/storage";
 import { ensurePlatformOwner } from "./services/bootstrap";
@@ -81,6 +82,8 @@ app.use(
     credentials: true,
   })
 );
+// Бланки редактора с картинками — до 6 МБ; разбираются раньше общего предела в 1 МБ.
+app.use("/api/doc-layouts", layoutsJson);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(
@@ -141,6 +144,7 @@ app.use("/api/purchases", purchasesRouter);
 app.use("/api/finance", financeRouter);
 app.use("/api/pay-methods", payMethodsRouter);
 app.use("/api/blanks", blanksRouter);
+app.use("/api/doc-layouts", layoutsRouter);
 app.use("/api/reference", referenceRouter);
 // Только в локальной версии: в облаке файлы отдаёт S3, и открытого
 // маршрута к ним быть не должно.

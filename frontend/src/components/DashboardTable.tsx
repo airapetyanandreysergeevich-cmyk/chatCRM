@@ -10,7 +10,7 @@ import { OrderLabels, canLabel } from "./OrderLabels";
 import { TableConfigurator } from "./TableConfigurator";
 import { OutsourceFilter, type OutsourceOption } from "./OutsourceFilter";
 import { KindBadge } from "./KindBadge";
-import { IconDownload, IconOrders, IconPlus, IconUrgent } from "./icons";
+import { IconDownload, IconOrders, IconUrgent } from "./icons";
 import { Button, EmptyState, SearchInput } from "./ui";
 import { useAuth } from "../lib/auth";
 import { nameStyle } from "../lib/customerColor";
@@ -646,11 +646,7 @@ export function DashboardTable({
           <ColumnsIcon />
           Настроить
         </Button>
-        {can("orders.create") && (
-          <Button icon={<IconPlus />} onClick={() => navigate("/orders/new")} className="hidden whitespace-nowrap sm:inline-flex">
-            Принять технику
-          </Button>
-        )}
+        {/* «Новый заказ» — в шапке главной рядом с названием мастерской (05.11.2026), здесь не дублируем. */}
       </div>
 
       {/* Виды — вкладками: у каждого свои столбцы, порядок и «Итого». */}
